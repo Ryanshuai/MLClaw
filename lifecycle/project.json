@@ -1,0 +1,23 @@
+{
+  "name": "",
+  "root": "",
+  "workspace": "",
+  "created": "",
+  "stages": {
+    "data":       { "enabled": false, "repo": null, "branch": null, "commit": null, "code_path": "stages/data/code" },
+    "training":   { "enabled": false, "repo": null, "branch": null, "commit": null, "code_path": "stages/training/code" },
+    "tracking":   { "enabled": false, "repo": null, "branch": null, "commit": null, "code_path": "stages/tracking/code" },
+    "evaluation": { "enabled": false, "repo": null, "branch": null, "commit": null, "code_path": "stages/evaluation/code" },
+    "inference":  { "enabled": false, "repo": null, "branch": null, "commit": null, "code_path": "stages/inference/code" },
+    "registry":   { "enabled": false, "repo": null, "branch": null, "commit": null, "code_path": "stages/registry/code" },
+    "deployment": { "enabled": false, "repo": null, "branch": null, "commit": null, "code_path": "stages/deployment/code" },
+    "monitoring": { "enabled": false, "repo": null, "branch": null, "commit": null, "code_path": "stages/monitoring/code" }
+  },
+  "paths": {
+    "stages": "stages",
+    "runs_pattern": "stages/{stage}/runs",
+    "artifacts_pattern": "stages/{stage}/artifacts",
+    "data_pattern": "stages/{stage}/data",
+    "secrets": "secrets.json"
+  }
+}

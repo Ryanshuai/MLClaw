@@ -1,0 +1,106 @@
+{
+  "run_id": "run_{YYYYMMDD}_{HHmmss}",
+  "stage": "",
+  "project": "",
+  "alias": "",
+  "description": "",
+  "status": "pending",
+
+  "code": {
+    "repo": null,
+    "branch": null,
+    "origin_commit": null,
+    "project_commit": null
+  },
+
+  "env": {
+    "python": "",
+    "nvidia_driver": "",
+    "cuda": "",
+    "cudnn": "",
+    "gpu": "",
+    "gpu_count": 0,
+    "os": "",
+    "packages": {
+      "numpy": null,
+      "pandas": null,
+      "scipy": null,
+      "scikit-learn": null,
+      "pillow": null,
+      "matplotlib": null,
+
+      "torch": null,
+      "torchvision": null,
+      "torchaudio": null,
+      "tensorflow": null,
+      "keras": null,
+      "jax": null,
+      "jaxlib": null,
+
+      "opencv-python": null,
+      "albumentations": null,
+      "ultralytics": null,
+      "detectron2": null,
+      "mmcv": null,
+      "mmdet": null,
+      "timm": null,
+      "kornia": null,
+
+      "transformers": null,
+      "tokenizers": null,
+      "datasets": null,
+      "accelerate": null,
+      "peft": null,
+      "bitsandbytes": null,
+      "vllm": null,
+      "langchain": null,
+      "openai": null,
+      "anthropic": null,
+      "sentencepiece": null,
+
+      "librosa": null,
+      "soundfile": null,
+      "whisper": null,
+
+      "onnx": null,
+      "onnxruntime": null,
+      "tensorrt": null,
+      "openvino": null,
+      "triton": null,
+
+      "xgboost": null,
+      "lightgbm": null,
+      "catboost": null,
+
+      "ray": null,
+      "deepspeed": null,
+      "horovod": null,
+      "wandb": null,
+      "mlflow": null,
+      "tensorboard": null,
+      "optuna": null,
+
+      "huggingface-hub": null,
+      "safetensors": null,
+      "einops": null,
+      "flash-attn": null
+    }
+  },
+
+  "lineage": {
+    "parents": [],
+    "local_tags": [],
+    "pipeline_tags": []
+  },
+
+  "execution": "local",
+  "server": null,
+  "pid": null,
+
+  "created_at": "",
+  "started_at": null,
+  "finished_at": null,
+  "duration_s": null,
+  "error": null,
+  "metrics": {}
+}
