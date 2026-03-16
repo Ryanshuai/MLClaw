@@ -1,0 +1,9 @@
+{
+  "_comment": "What the code produces.",
+  "items": {},
+  "metrics": {
+    "_comment": "Metrics to track. Discovered from code by /infer-init, confirmed by user.",
+    "definitions": {},
+    "watch": []
+  }
+}

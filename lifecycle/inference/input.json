@@ -1,0 +1,5 @@
+{
+  "_comment": "Dynamic inputs — videos, images, text. Changes each run. Actual files stored in stages/{stage}/data/.",
+  "items": {},
+  "sources": {}
+}
