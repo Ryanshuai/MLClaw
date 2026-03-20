@@ -22,19 +22,13 @@ MLClaw replaces MLflow/W&B/TensorBoard with conversation-driven ML lifecycle man
 - **JSON configs are the source of truth**: fixed keys, you fill values. Templates in `lifecycle/`, filled instances in user projects.
 - **Confirm before saving**: always show what you're about to write, wait for user confirmation. Never auto-overwrite existing values.
 
-## Current stage coverage
+## Status
 
-**Inference** and **evaluation** are fully implemented (init + run + report). Training, data, deployment stages follow the same pattern — when needed, create `{stage}-init` and `{stage}-run` skills modeled on inference/evaluation.
+**Implemented**: inference (init + run), evaluation (init + run + report), project init, resources.
 
-## Future direction
+**Next**: training stage, run comparison, exploration stage, data stage, deployment stage. Each follows the same `{stage}-init` + `{stage}-run` pattern.
 
-- **SQLite database** for real-time metrics streaming and fast queries (when JSON files become a bottleneck)
-- **Training stage** with step-level metric monitoring via log tailing
-- **Run comparison** skill for side-by-side metrics/params/env diff
-
----
-
-## Skills
+## Skills & Dependencies
 
 | Skill | What it does |
 |-------|-------------|
@@ -46,7 +40,7 @@ MLClaw replaces MLflow/W&B/TensorBoard with conversation-driven ML lifecycle man
 | `/eval-report` | Generate self-contained HTML report from a completed eval run (metrics, baseline diff, per-class, bad cases) |
 | `/resources` | Discover local credentials, models, data. Auto-populate resources.json |
 
-## Skill Dependency Graph
+### Skill Dependency Graph
 
 Every skill knows its position in this graph. Two types of edges:
 
@@ -67,7 +61,7 @@ Skill              Requires (check on entry)              Suggests (offer on exi
 /eval-report       eval-run completed (run.json exists)   (done)
 ```
 
-### How skills use this graph
+#### How skills use this graph
 
 **On entry** — each skill checks its `requires` column:
 1. Check each requirement in order
@@ -83,7 +77,7 @@ Skill              Requires (check on entry)              Suggests (offer on exi
 
 **`/resources` is a utility skill** — it doesn't have a fixed position in the pipeline. It gets called on-demand by any run skill when credentials are missing. It can also be invoked standalone.
 
-### Requirement checks
+#### Requirement checks
 
 | Requirement | How to check |
 |-------------|-------------|
@@ -232,9 +226,9 @@ remote: {server mlclaw_root}/projects/detection/stages/evaluation/...
 
 The project-relative path stays the same; only the root prefix changes. Run skills sync only necessary files to the remote `mlclaw_root` before execution.
 
-## File Layout
+### File Layout
 
-### MLClaw repo (d:\10_projects\MLClaw) — the tool
+#### MLClaw repo (d:\10_projects\MLClaw) — the tool
 
 ```
 CLAUDE.md                           ← this file
@@ -289,7 +283,7 @@ lifecycle/
     output.json                     ← includes per_class, baseline
 ```
 
-### User project (e.g., D:\agent_space\mlclaw\projects\detection)
+#### User project (e.g., D:\agent_space\mlclaw\projects\detection)
 
 ```
 project.json                        ← project config (git tracked)
@@ -330,7 +324,7 @@ stages/
         logs/                       ← stdout/stderr logs
 ```
 
-## Variable Reference Syntax `${}`
+### Variable Reference Syntax `${}`
 
 Used across all config files. Resolved at runtime by `/{stage}-run`.
 
