@@ -20,8 +20,8 @@ On completion: pop from stack, append `completed` to history.
 
 ## Prerequisites
 
-Ensure `{PROJECT}/secrets.json` exists. If not, copy from `lifecycle/secrets.json` and create it.
-All discovery results are written to `{PROJECT}/secrets.json` so they persist across sessions.
+Ensure `{PROJECT}/resources.json` exists. If not, copy from `lifecycle/resources.json` and create it.
+All discovery results are written to `{PROJECT}/resources.json` so they persist across sessions.
 
 ## What to search
 
@@ -51,9 +51,11 @@ Run `python lifecycle/scripts/resources/parse_ssh_config.py` to extract server e
 **Fallback**: if script fails, manually read `~/.ssh/config` and extract Host/HostName/User/IdentityFile entries.
 
 For each server found:
-1. Create an entry in `secrets.json → servers` with host, username, ssh_key_path
+1. Create an entry in `resources.json → servers` with host, username, ssh_key_path
 2. `alias`: use the SSH config `Host` name
 3. `gpu`, `gpu_count`, `description`: leave empty (user fills later, or try SSH probe below)
+4. `mlclaw_root`: ask user "MLClaw workspace root on this server?" (e.g., `/home/ubuntu/agent_space/mlclaw`). Required for any server that will execute code — remote paths are mapped from local `mlclaw_root` to the server's `mlclaw_root`
+5. `python_path`: ask user "Python executable path on this server?" (e.g., `/home/ubuntu/miniconda3/envs/ml/bin/python`). If unsure, try `ssh <host> "which python3"` to auto-detect
 
 **Optional GPU probe**: If user agrees, try `ssh <host> "nvidia-smi --query-gpu=name,count --format=csv,noheader"` to auto-fill gpu info. Only attempt with user permission.
 
@@ -75,20 +77,20 @@ For each server found:
 
 ## Flow
 
-### Step 1: Check secrets.json first
+### Step 1: Check resources.json first
 
 Update workflow step to `check_cache`.
 
-Before searching, read `{PROJECT}/secrets.json`. If it already has non-empty values for the requested resource type, show what's cached:
+Before searching, read `{PROJECT}/resources.json`. If it already has non-empty values for the requested resource type, show what's cached:
 ```
-Already configured in secrets.json:
+Already configured in resources.json:
   SSH: ~/.ssh/id_rsa
   AWS: profile "default", region us-east-1
 
 Search again to update? (y/n)
 ```
 If user says no → use cached values, done.
-If user says yes or if secrets.json has no values → proceed to search.
+If user says yes or if resources.json has no values → proceed to search.
 
 ### Step 2: Search
 
@@ -106,13 +108,13 @@ Found models:
   D:\models\yolov8.onnx (45MB)
 ```
 
-### Step 3: Auto-save to secrets.json
+### Step 3: Auto-save to resources.json
 
 Update workflow step to `save`.
 
-After showing results, propose what will be written to `{PROJECT}/secrets.json`:
+After showing results, propose what will be written to `{PROJECT}/resources.json`:
 ```
-Will save to secrets.json:
+Will save to resources.json:
   aws.region: us-east-1
   aws.profile: default (from ~/.aws/credentials)
   ssh: ~/.ssh/id_rsa (RSA 4096)
@@ -120,7 +122,7 @@ Will save to secrets.json:
 Save these? (y/n/edit)
 ```
 
-- **y** → write to secrets.json
+- **y** → write to resources.json
 - **n** → skip, don't write
 - **edit** → let user modify before saving
 
@@ -132,8 +134,8 @@ Update workflow step to `manual_input`.
 
 If search finds nothing for the requested type:
 1. Tell user: "No {type} credentials found in default locations."
-2. Ask: "Do you have credentials? I'll save them to secrets.json."
-3. If yes → ask for each field ONE at a time, write to `{PROJECT}/secrets.json`
+2. Ask: "Do you have credentials? I'll save them to resources.json."
+3. If yes → ask for each field ONE at a time, write to `{PROJECT}/resources.json`
 4. If no → return to calling skill
 
 ## Usage modes
@@ -151,11 +153,30 @@ If search finds nothing for the requested type:
 
 When another skill (e.g., infer-run) needs a non-local resource:
 
-1. Check `{PROJECT}/secrets.json` for cached values first
+1. Check `{PROJECT}/resources.json` for cached values first
 2. If cached and valid → return immediately, no search needed
 3. If not cached → search only the relevant category, auto-save results
-4. If nothing found → ask user for credentials, save to secrets.json
+4. If nothing found → ask user for credentials, save to resources.json
 5. Return to calling skill
+
+## AWS Credential Troubleshooting
+
+When AWS SSO (`aws sso login`) fails, common causes:
+
+| Problem | Symptom | Fix |
+|---------|---------|-----|
+| SSO config expired | `InvalidRequestException` on `RegisterClient` | Confirm `sso_start_url` with admin — Identity Center may have migrated |
+| Region mismatch | `InvalidRequestException` | Check `sso_region` matches actual Identity Center region |
+| Network/proxy blocking | SSO hangs or returns unexpected responses | Check corporate firewall/proxy |
+| SSO cache corrupted | Various errors | Clear `~/.aws/sso/cache/` and retry |
+
+**Fallback rule**: If SSO profile fails, always try `default` profile or static credentials in `~/.aws/credentials` before giving up. Many setups have working static credentials alongside a broken SSO config.
+
+```
+SSO login failed → try default profile → try static credentials → ask user
+```
+
+Report the SSO error to the user as a warning (so they can fix it later), but continue with whatever credential method works.
 
 ## Safety
 

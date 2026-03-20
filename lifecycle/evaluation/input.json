@@ -1,0 +1,11 @@
+{
+  "_comment": "Evaluation inputs — test/val data AND ground truth annotations.",
+  "items": {},
+  "sources": {},
+  "ground_truth": {
+    "_comment": "Annotations/labels to compare predictions against.",
+    "items": {},
+    "sources": {}
+  },
+  "pairing": ""
+}

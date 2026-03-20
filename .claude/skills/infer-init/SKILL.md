@@ -16,6 +16,12 @@ Analyze inference code and fill the 4 JSON config files in the project's `stages
 On entry: push `{ "skill": "infer-init", "step": "locate_project" }` to `history.json` stack.
 Update step as you progress through each step below. On completion: pop from stack, append `completed` to history.
 
+## Dependency Check
+
+On entry, check upstream requirements per the Skill Dependency Graph in CLAUDE.md:
+- **project.json exists**: if no project is found and user cannot provide one, offer to run `/project-init` first (invoke as sub-skill following the Workflow State Protocol).
+- **code available**: after locating the project, verify the stage's code directory has files. If empty and `code_source` is not configured, tell the user to add code first.
+
 ## Locate Project
 
 Show recent projects and let user pick. Ask the user which one:
@@ -32,8 +38,11 @@ Show recent projects and let user pick. Ask the user which one:
 
 Once `project.json` is found:
 - Verify `stages.inference.enabled` is true
-- Get `stages.inference.code_path` → this is relative to project root
-- Check that the code directory has code files. If empty, tell the user to add code first.
+- Resolve the effective code directory (see CLAUDE.md "Code Source Resolution"):
+  - If `code_source.source == "local"` and `code_source.path` is set → use that path directly
+  - If `code_source.source == "github"` → ensure cloned to `code_path`, use `code_path`
+  - If `code_source.source` is null → use `code_path` (relative to project root)
+- Check that the resolved code directory has code files. If empty, tell the user to add code first.
 
 ## Output: 4 JSON files in `{project.root}/stages/inference/`
 
@@ -76,7 +85,7 @@ Each entry in `artifacts.json → sources`, `input.json → sources`:
 
 - `source`: one of `local|s3|server|stage_output|registry`
 - `path`: actual file/directory path (empty = not yet filled)
-- `credentials`: key in `secrets.json → servers` or `aws`, etc. Only needed when source is not `local`.
+- `credentials`: key in `resources.json → servers` or `aws`, etc. Only needed when source is not `local`.
 
 ### Variable reference syntax `${}`
 
@@ -85,7 +94,7 @@ Use `${}` to reference values across config files. Resolved at runtime by `/infe
 | Prefix | Resolves to |
 |--------|------------|
 | `${project.xxx}` | project.json field (e.g., `${project.root}`, `${project.name}`) |
-| `${secrets.xxx.yyy}` | secrets.json field (e.g., `${secrets.aws.region}`) |
+| `${resources.xxx.yyy}` | resources.json field (e.g., `${resources.aws.region}`) |
 | `${artifact.xxx}` | artifacts.json → sources → xxx → path |
 | `${input.xxx}` | input.json → sources → xxx → path |
 | `${output.xxx}` | stages/inference/runs/run_NNN/outputs/ (resolved at runtime by /infer-run) |
@@ -154,9 +163,52 @@ Look for the actual config file in the code directory:
 3. Prefer files named "default", "baseline", "base", "main"
 4. Pick the largest YAML file as fallback
 
-If found, load it into `config.json → runtime_params` and replace file paths with `${artifact.xxx}` / `${input.xxx}` references.
+If found, load all discovered parameters.
 
-## Step 3: Present Each File — MUST WAIT FOR EXPLICIT CONFIRMATION
+## Step 3: Select Managed Parameters
+
+Update workflow step to `select_params`.
+
+Config files can have dozens of parameters. Instead of dumping them all, use a progressive disclosure flow:
+
+**3a. Show category summary first:**
+```
+Config: configs/default.yaml (47 parameters)
+
+Categories:
+  Data paths:   5 params (input dirs, output dirs)
+  Model:        3 params (weights path, architecture, num_classes)
+  Runtime:      8 params (batch_size, num_workers, device, ...)
+  Preprocessing: 12 params (resize, normalize, augmentation, ...)
+  Postprocessing: 6 params (NMS threshold, confidence, ...)
+  Other:        13 params
+
+Which categories do you want to see? (or "all")
+```
+
+**3b. Expand requested categories:**
+Show only the categories the user asked for, with current values:
+```
+Model:
+  □ model.weights = /path/to/model.pt
+  □ model.architecture = rtdetr_r50
+  □ model.num_classes = 80
+
+Runtime:
+  □ batch_size = 32
+  □ num_workers = 4
+  □ device = cuda:0
+  ...
+
+Which parameters should MLClaw manage per run?
+```
+
+**3c. Record selection:**
+- Selected params go into `config.json → runtime_params` with `${artifact.xxx}` / `${input.xxx}` references where applicable
+- Unselected params stay in original config files — not touched by MLClaw
+- If user says "all" at any point → select all params in that category
+
+## Step 4: Present Each File — MUST WAIT FOR EXPLICIT CONFIRMATION
 
 Update workflow step to `review_{filename}` (e.g., `review_config`).
 
@@ -173,7 +225,7 @@ For each file:
 
 **CRITICAL: Never auto-advance. Every file requires an explicit user confirmation before moving on.**
 
-## Step 4: Validate
+## Step 5: Validate
 
 Update workflow step to `validate`.
 
@@ -197,10 +249,10 @@ Additional checks (always done by Claude, not scripted):
 
 Report errors/warnings to user. Let them fix or accept warnings.
 
-## Step 5: Save
+## Step 6: Save
 
 Update workflow step to `save`.
 
 1. Write all 4 JSON files to `{project.root}/stages/inference/`
 2. Pop self from `history.json` stack, append `completed` to history
-3. Tell user: next step is fill `sources` in artifacts.json and input.json, then `/infer-run`
+3. **Downstream suggestion** (per Skill Dependency Graph in CLAUDE.md): offer `/infer-run`.

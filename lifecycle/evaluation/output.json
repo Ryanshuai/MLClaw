@@ -1,0 +1,11 @@
+{
+  "_comment": "Evaluation outputs — primarily metrics.",
+  "items": {},
+  "metrics": {
+    "_comment": "Metrics to track. Discovered from code by /eval-init, confirmed by user.",
+    "definitions": {},
+    "watch": [],
+    "per_class": false,
+    "baseline": null
+  }
+}
