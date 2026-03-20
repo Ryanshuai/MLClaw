@@ -1,11 +1,11 @@
 ---
-name: infer-run
-description: Run inference using the configured pipeline — resolve sources, execute, collect results
+name: eval-run
+description: Run evaluation using the configured pipeline — resolve sources, execute, compare results
 ---
 
-# /infer-run — Run Inference
+# /eval-run — Run Evaluation
 
-Execute an inference run using the configured pipeline.
+Execute an evaluation run using the configured pipeline.
 
 ## Interaction Rules — MUST FOLLOW
 
@@ -14,14 +14,14 @@ When filling sources, ask for each item's path one at a time — do not list all
 
 ## Workflow State
 
-On entry: push `{ "skill": "infer-run", "step": "locate_project" }` to `history.json` stack.
+On entry: push `{ "skill": "eval-run", "step": "locate_project" }` to `history.json` stack.
 Update step as you progress. On completion: pop from stack, append `completed` to history.
 When calling `/resources`: update own status to `paused` in history, push `/resources` to stack with current PROJECT path as context. On return: pop `/resources`, append `resumed` to history, continue.
 
 ## Dependency Check
 
 On entry, check upstream requirements per the Skill Dependency Graph in CLAUDE.md:
-- **infer-init done**: `config.json → entry_command` must be non-empty. If not, offer to run `/infer-init` first.
+- **eval-init done**: `config.json → entry_command` must be non-empty. If not, offer to run `/eval-init` first.
 - **resources.json for credentials**: checked lazily in Step 1 when a source needs non-local access.
 
 ## Locate Project
@@ -33,10 +33,10 @@ Show recent projects and let user pick. Ask the user which one:
 3. **Other** — user has another way to locate it.
 
 Once `project.json` is found, set `PROJECT = {project.root}`:
-- Read `{PROJECT}/stages/inference/config.json` — check dependency: `entry_command` must be non-empty. If not, offer `/infer-init` as upstream dependency.
-- Read `{PROJECT}/stages/inference/artifacts.json`
-- Read `{PROJECT}/stages/inference/input.json`
-- Read `{PROJECT}/stages/inference/output.json`
+- Read `{PROJECT}/stages/evaluation/config.json` — check dependency: `entry_command` must be non-empty. If not, offer `/eval-init` as upstream dependency.
+- Read `{PROJECT}/stages/evaluation/artifacts.json`
+- Read `{PROJECT}/stages/evaluation/input.json`
+- Read `{PROJECT}/stages/evaluation/output.json`
 
 ## Variable reference syntax `${}`
 
@@ -46,18 +46,19 @@ All `${}` references are resolved before execution:
 |--------|------------|
 | `${project.xxx}` | `{PROJECT}/project.json` → field |
 | `${resources.xxx.yyy}` | `{PROJECT}/resources.json` → field |
-| `${artifact.xxx}` | `{PROJECT}/stages/inference/artifacts.json` → sources → xxx → path |
-| `${input.xxx}` | `{PROJECT}/stages/inference/input.json` → sources → xxx → path |
-| `${output.xxx}` | `{PROJECT}/stages/inference/{RUN_DIR}/outputs/` |
+| `${artifact.xxx}` | `{PROJECT}/stages/evaluation/artifacts.json` → sources → xxx → path |
+| `${input.xxx}` | `{PROJECT}/stages/evaluation/input.json` → sources → xxx → path |
+| `${output.xxx}` | `{PROJECT}/stages/evaluation/{RUN_DIR}/outputs/` |
 
 ## Step 1: Check Sources
 
 Update workflow step to `check_sources`.
 
-Read `artifacts.json` and `input.json` → `sources` sections.
+Read `artifacts.json`, `input.json → sources`, AND `input.json → ground_truth → sources` sections.
 
 **If sources not filled** (paths are empty):
 - Ask user for each item's path, one at a time
+- Include ground truth sources — ask for those after regular input sources
 - Write paths into the corresponding JSON file's `sources` section
 - If source is not `local`, also ask which credentials key to use
 
@@ -112,19 +113,19 @@ For `server` type: resolve `<user>` and `<host>` from `{PROJECT}/resources.json 
 
 Update workflow step to `create_run`.
 
-Run `python lifecycle/scripts/infer-run/create_run.py {PROJECT}/stages/inference lifecycle/run.json` to create the run directory and initialize run.json.
+Run `python lifecycle/scripts/infer-run/create_run.py {PROJECT}/stages/evaluation lifecycle/run.json` to create the run directory and initialize run.json.
 
 **Fallback**: if script fails, manually create `runs/run_{YYYYMMDD}_{HHmmss}/` with subdirs outputs/ and logs/, copy run.json template and fill run_id/stage/created_at.
 
-Run ID format: `run_{YYYYMMDD}_{HHmmss}` (e.g., `run_20260316_153024`). Timestamp-based, no counter needed.
-For cross-stage lineage references, use full path: `{stage}/run_{YYYYMMDD}_{HHmmss}` (e.g., `inference/run_20260316_153024`).
+Run ID format: `run_{YYYYMMDD}_{HHmmss}` (e.g., `run_20260317_091500`). Timestamp-based, no counter needed.
+For cross-stage lineage references, use full path: `{stage}/run_{YYYYMMDD}_{HHmmss}` (e.g., `evaluation/run_20260317_091500`).
 
-Set `RUN_DIR = {PROJECT}/stages/inference/runs/run_{YYYYMMDD}_{HHmmss}` — all subsequent steps use `{RUN_DIR}` for absolute paths.
+Set `RUN_DIR = {PROJECT}/stages/evaluation/runs/run_{YYYYMMDD}_{HHmmss}` — all subsequent steps use `{RUN_DIR}` for absolute paths.
 
 ```
-runs/run_20260316_153024/
+runs/run_20260317_091500/
   run.json              # run metadata + env snapshot (fixed keys)
-  sources.json          # snapshot of sources used
+  sources.json          # snapshot of sources used (including GT sources)
   config_snapshot.json  # frozen config
   outputs/              # output files
   logs/                 # run logs
@@ -139,8 +140,6 @@ Fill `run.json → code` from two sources:
 
 Also copy `repo` and `branch` from `project.json → stages.{stage}`.
 
-This way you can always trace: original code (origin_commit) → what was actually run (project_commit) → diff between them shows all local changes.
-
 ### Environment snapshot
 
 Run `python lifecycle/scripts/infer-run/capture_env.py` and write the output into `run.json → env` (not a separate file).
@@ -154,7 +153,7 @@ This runs automatically — no user interaction needed.
 
 ### Dependency check
 
-Run `python lifecycle/scripts/infer-run/check_deps.py {PROJECT}/stages/inference/config.json {RUN_DIR}/env.json`
+Run `python lifecycle/scripts/infer-run/check_deps.py {PROJECT}/stages/evaluation/config.json {RUN_DIR}/env.json`
 
 **Fallback**: if script fails, manually compare required_packages against env.packages:
 - Package required but not installed → **error**, tell user
@@ -164,8 +163,8 @@ Run `python lifecycle/scripts/infer-run/check_deps.py {PROJECT}/stages/inference
 **run.json** — copy from `lifecycle/run.json`, fill values:
 ```json
 {
-  "run_id": "run_20260316_153024",
-  "stage": "inference",
+  "run_id": "run_20260317_091500",
+  "stage": "evaluation",
   "project": "${project.name}",
   "status": "pending",
   "execution": "local",
@@ -184,7 +183,7 @@ Run `python lifecycle/scripts/infer-run/check_deps.py {PROJECT}/stages/inference
 
 If config and code don't match (e.g., hardcoded paths, missing args):
 1. **Prefer fixing config** — adjust config.json / runtime_params to match code behavior
-2. **If code must change** — edit the code in `stages/inference/code/`, then commit to the **project git** (not the original repo). Record what was changed in `history.json` history.
+2. **If code must change** — edit the code in `stages/evaluation/code/`, then commit to the **project git** (not the original repo). Record what was changed in `history.json` history.
 
 ## Step 3: Build & Execute Command
 
@@ -197,9 +196,9 @@ Update workflow step to `execute`.
    - `yaml`/`omegaconf`: write resolved config file, pass via original config argument
    - `hydra`: `key=value` override syntax
    - `json`: write resolved JSON config
-   - **Hybrid** (e.g., `argparse+omegaconf`): write resolved config file AND pass it via CLI arg (e.g., `python main.py --config resolved_config.yaml`). The config file contains omegaconf params, the CLI passes the file path.
+   - **Hybrid** (e.g., `argparse+omegaconf`): write resolved config file AND pass it via CLI arg (e.g., `python eval.py --config resolved_config.yaml`). The config file contains omegaconf params, the CLI passes the file path.
 4. Save resolved config as `{RUN_DIR}/config_snapshot.json`
-5. Save resolved sources as `{RUN_DIR}/sources.json`
+5. Save resolved sources (including ground truth sources) as `{RUN_DIR}/sources.json`
 6. Show the resolved command to user for confirmation
 
 ### Execution modes
@@ -209,11 +208,12 @@ Ask user: debug mode or production mode?
 **Debug mode (default for first run):**
 
 1. **Limit data scope**: Before running, analyze the input data and propose a minimal subset:
-   - Video: first N seconds or 1 clip (ask user how many, default: 10s)
-   - Images: first N images (default: 5)
-   - Text/tabular: first N rows (default: 10)
-   - If code supports a `--num_samples`, `--max_frames`, `--limit` or similar arg, use it
-   - If not, truncate/copy a small slice of the input data to a temp location and point to that
+   - Images: first N images (default: 20 — evaluation metrics need more samples than inference to be meaningful)
+   - Video: first N seconds or 1 clip (default: 30s)
+   - Text/tabular: first N rows (default: 50)
+   - If code supports a `--num_samples`, `--max_det`, `--limit`, `--subset` or similar arg, use it
+   - If not, and pairing is `single_file` (COCO-style), warn that truncating annotation files is complex; prefer using the code's own limiting args
+   - If no limiting arg exists, suggest modifying code to accept one, or truncate/copy a small slice
 
 2. **Run synchronously**, stream stdout/stderr in real time
 
@@ -227,11 +227,11 @@ Ask user: debug mode or production mode?
 4. **If command succeeds:**
    - Show where output files are stored (clickable paths):
      ```
-     Run completed (debug mode, 5 images).
-     Results at: D:\agent_space\mlclaw\projects\detection\stages\inference\runs\run_20260316_153024\outputs\
-     Files:
-       - results.json (12KB)
-       - viz/frame_001.jpg (45KB)
+     Run completed (debug mode, 20 images).
+     Results at: D:\agent_space\mlclaw\projects\detection\stages\evaluation\runs\run_20260317_091500\outputs\
+     Metrics (debug):
+       mAP: 0.42  (on 20 samples — expect different on full dataset)
+       AP50: 0.61
      ```
    - Ask: "Results look right? Options:"
      - **production** → switch to production mode with full dataset
@@ -245,7 +245,7 @@ Ask user: run locally or on a server?
 1. Run command in background (`run_in_background`)
 2. Redirect stdout/stderr to `{RUN_DIR}/logs/stdout.log` and `stderr.log`
 3. Update `run.json → pid` with the process ID, `status` to `running`
-5. Tell user: "Running in background. Use `/infer-run` again to check status, or `/loop 5m /infer-run` for auto-polling."
+5. Tell user: "Running in background. Use `/eval-run` again to check status, or `/loop 5m /eval-run` for auto-polling."
 
 **Remote execution (server):**
 1. Resolve server from `resources.json → servers`. Use `python_path` from the server entry as the Python executable (e.g., `/home/ubuntu/miniforge3/bin/python`). If `python_path` is empty, fall back to `python3`.
@@ -254,9 +254,9 @@ Ask user: run locally or on a server?
    - `run.sh` contains: `cd <code_path> && <command> > stdout.log 2> stderr.log; echo $? > exit_code.txt`
    - Then: `ssh <user>@<host> "tmux new-session -d -s run_NNN 'bash <remote_path>/run.sh'"`
 3. Update `run.json → status` to `running`, add `server` field with server key
-4. Tell user: "Running on <server_alias>. Use `/infer-run` again to check status."
+4. Tell user: "Running on <server_alias>. Use `/eval-run` again to check status."
 
-### Status check (when /infer-run is invoked and a run is already running)
+### Status check (when /eval-run is invoked and a run is already running)
 
 If `run.json → status` is `running`:
 
@@ -290,28 +290,58 @@ After command finishes (detected via status check):
    - Search code directory for outputs that weren't redirected
    - Report found vs declared
 
-3. **Collect metrics**: `python lifecycle/scripts/infer-run/extract_metrics.py {PROJECT}/stages/inference/output.json {RUN_DIR}/`
+3. **Collect metrics**: `python lifecycle/scripts/infer-run/extract_metrics.py {PROJECT}/stages/evaluation/output.json {RUN_DIR}/`
    Store the output in `run.json → metrics`.
    **Fallback**: manually read stdout.log and result files to extract watched metrics.
 
-4. Ask user for an optional `alias` and `description` for this run (or skip). Write to `run.json`.
+4. **Per-class metrics**: if `output.json → metrics.per_class` is `true`:
+   - Look for per-class metrics in result files (JSON with per-class keys, CSV with class column, stdout tables)
+   - Store in `run.json → metrics.per_class` as `{ "class_name": { "metric": value, ... }, ... }`
+   - In the summary, show top-3 best and worst performing classes
+
+5. **Baseline comparison**: if `output.json → metrics.baseline` is set:
+   - Run `python lifecycle/scripts/eval-run/compare_baseline.py {RUN_DIR}/run.json <baseline>`
+     - If baseline is a run ID string: resolve to `{PROJECT}/stages/evaluation/runs/{run_id}/run.json`
+     - If baseline is inline JSON: pass as JSON string argument
+   - **Fallback**: manually load both metric sets and compute deltas
+   - Show delta table:
+     ```
+     Run: run_20260317_091500 | Status: completed | Duration: 12m 34s
+     Dataset: COCO val2017 (5000 images)
+
+     Metrics (vs baseline evaluation/run_20260316_153024):
+       mAP:       0.485  (+0.012, +2.5%)
+       AP50:      0.673  (+0.008, +1.2%)
+       AP75:      0.521  (+0.015, +3.0%)
+       mAP_small: 0.289  (-0.003, -1.0%)  ← regression
+     ```
+   - Highlight improvements, flag regressions
+
+6. Ask user for an optional `alias` and `description` for this run (or skip). Write to `run.json`.
    Then: `python lifecycle/scripts/infer-run/update_index.py {PROJECT}/runs_index.json {RUN_DIR}/run.json`
    **Fallback**: manually read run.json and append summary to runs_index.json.
 
-5. Show summary:
+7. **Offer baseline update**: "Set this run as the new baseline? (y/n)"
+   - If yes → update `{PROJECT}/stages/evaluation/output.json → metrics.baseline` to this run's ID
+
+8. Show summary:
    ```
-   Run: run_20260316_153024 | Status: completed | Duration: 3m 24s
+   Run: run_20260317_091500 | Status: completed | Duration: 12m 34s
+   Dataset: COCO val2017 (5000 images)
    Metrics:
-     fps: 42.5
-     mAP: 0.78
-   Outputs: results.json (12KB), viz/ (5 files)
+     mAP: 0.485
+     AP50: 0.673
+     AP75: 0.521
+   Outputs: results.json (45KB), confusion_matrix.png (120KB)
    ```
 
-6. Pop self from `history.json` stack, append `completed` to history
+9. **Downstream suggestion** (per Skill Dependency Graph in CLAUDE.md): offer `/eval-report`. If user accepts, invoke it as a sub-skill following the Workflow State Protocol.
+
+10. Pop self from `history.json` stack, append `completed` to history
 
 ## Quick mode
 
-If user provides paths inline (e.g., "run inference on /path/to/video with model /path/to/model.onnx"):
+If user provides paths inline (e.g., "evaluate model.pt on COCO val with annotations instances_val2017.json"):
 1. Match paths to declared items by type/extension
-2. Fill sources in artifacts.json / input.json
+2. Fill sources in artifacts.json / input.json / ground_truth
 3. Proceed directly to run

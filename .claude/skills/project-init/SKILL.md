@@ -24,7 +24,7 @@ Update step as you progress. On completion: pop from stack, append `completed` t
 2. Ask: Where to create the project? (default: `D:\agent_space\mlclaw\projects`)
    → User answers → record
 
-3. Ask: Which stages to enable? Options: data, training, tracking, evaluation, inference, registry, deployment, monitoring
+3. Ask: Which stages to enable? Options: data, exploration, training, evaluation, inference, deployment
    → User answers → record
 
 4. For each enabled stage, ask one at a time: Code source for {stage}? (git URL / local path / skip for now)
@@ -38,21 +38,19 @@ Update step as you progress. On completion: pop from stack, append `completed` t
    Created: 2026-03-16
 
    Stages:
-     data:       disabled
-     training:   enabled  repo: https://github.com/...
-     tracking:   disabled
-     evaluation: disabled
-     inference:  enabled  repo: skipped
-     registry:   disabled
-     deployment: disabled
-     monitoring: disabled
+     data:        disabled
+     exploration: disabled
+     training:    enabled  repo: https://github.com/...
+     evaluation:  disabled
+     inference:   enabled  repo: skipped
+     deployment:  disabled
 
    Paths:
      stages: stages
      runs_pattern: stages/{stage}/runs
      artifacts_pattern: stages/{stage}/artifacts
      data_pattern: stages/{stage}/data
-     secrets: secrets.json
+     resources: resources.json
 
    Create? Anything to change?
    ```
@@ -71,21 +69,19 @@ Fixed keys, agent only modifies values.
   "workspace": "",
   "created": "",
   "stages": {
-    "data":       { "enabled": false, "repo": null, "branch": null, "commit": null, "code_path": "stages/data/code" },
-    "training":   { "enabled": false, "repo": null, "branch": null, "commit": null, "code_path": "stages/training/code" },
-    "tracking":   { "enabled": false, "repo": null, "branch": null, "commit": null, "code_path": "stages/tracking/code" },
-    "evaluation": { "enabled": false, "repo": null, "branch": null, "commit": null, "code_path": "stages/evaluation/code" },
-    "inference":  { "enabled": false, "repo": null, "branch": null, "commit": null, "code_path": "stages/inference/code" },
-    "registry":   { "enabled": false, "repo": null, "branch": null, "commit": null, "code_path": "stages/registry/code" },
-    "deployment": { "enabled": false, "repo": null, "branch": null, "commit": null, "code_path": "stages/deployment/code" },
-    "monitoring": { "enabled": false, "repo": null, "branch": null, "commit": null, "code_path": "stages/monitoring/code" }
+    "data":        { "enabled": false, "code_path": "stages/data/code",        "code_source": { "source": null, "path": null, "branch": null, "commit": null, "credentials": "" } },
+    "exploration": { "enabled": false, "code_path": "stages/exploration/code","code_source": { "source": null, "path": null, "branch": null, "commit": null, "credentials": "" } },
+    "training":    { "enabled": false, "code_path": "stages/training/code",   "code_source": { "source": null, "path": null, "branch": null, "commit": null, "credentials": "" } },
+    "evaluation":  { "enabled": false, "code_path": "stages/evaluation/code", "code_source": { "source": null, "path": null, "branch": null, "commit": null, "credentials": "" } },
+    "inference":   { "enabled": false, "code_path": "stages/inference/code",  "code_source": { "source": null, "path": null, "branch": null, "commit": null, "credentials": "" } },
+    "deployment":  { "enabled": false, "code_path": "stages/deployment/code", "code_source": { "source": null, "path": null, "branch": null, "commit": null, "credentials": "" } }
   },
   "paths": {
     "stages": "stages",
     "runs_pattern": "stages/{stage}/runs",
     "artifacts_pattern": "stages/{stage}/artifacts",
     "data_pattern": "stages/{stage}/data",
-    "secrets": "secrets.json"
+    "resources": "resources.json"
   }
 }
 ```
@@ -95,7 +91,7 @@ Fixed keys, agent only modifies values.
 ```
 {root}/
 ├── project.json
-├── secrets.json              ← from lifecycle/secrets.json
+├── resources.json              ← from lifecycle/resources.json
 ├── history.json             ← from lifecycle/history.json
 ├── runs_index.json          ← from lifecycle/runs_index.json
 ├── .gitignore
@@ -153,7 +149,4 @@ This way, any code modifications during runs (e.g., fixing hardcoded paths) are 
 
 2. Tell the user: Project created at `{root}`.
 
-3. Ask ONE question: "Want to init any of the enabled stages now? (or skip for now)"
-   - Only offer stages that have a corresponding `/{stage}-init` skill (currently: inference)
-   - For stages without an init skill yet, tell user: "{stage} init not available yet"
-   - User declines → done
+3. **Downstream suggestion** (per Skill Dependency Graph in CLAUDE.md): offer `/resources` and available `/{stage}-init` skills for the enabled stages. Only offer stages that have a corresponding init skill (currently: inference, evaluation). For stages without an init skill yet, tell user: "{stage} init not available yet". If user declines all → done.

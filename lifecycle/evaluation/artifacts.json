@@ -1,0 +1,5 @@
+{
+  "_comment": "Static inputs — model weights, evaluator configs. Set once per model version.",
+  "items": {},
+  "sources": {}
+}

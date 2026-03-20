@@ -4,20 +4,18 @@
   "workspace": "",
   "created": "",
   "stages": {
-    "data":       { "enabled": false, "repo": null, "branch": null, "commit": null, "code_path": "stages/data/code" },
-    "training":   { "enabled": false, "repo": null, "branch": null, "commit": null, "code_path": "stages/training/code" },
-    "tracking":   { "enabled": false, "repo": null, "branch": null, "commit": null, "code_path": "stages/tracking/code" },
-    "evaluation": { "enabled": false, "repo": null, "branch": null, "commit": null, "code_path": "stages/evaluation/code" },
-    "inference":  { "enabled": false, "repo": null, "branch": null, "commit": null, "code_path": "stages/inference/code" },
-    "registry":   { "enabled": false, "repo": null, "branch": null, "commit": null, "code_path": "stages/registry/code" },
-    "deployment": { "enabled": false, "repo": null, "branch": null, "commit": null, "code_path": "stages/deployment/code" },
-    "monitoring": { "enabled": false, "repo": null, "branch": null, "commit": null, "code_path": "stages/monitoring/code" }
+    "data":        { "enabled": false, "code_path": "stages/data/code",        "code_source": { "source": null, "path": null, "branch": null, "commit": null, "credentials": "" } },
+    "exploration": { "enabled": false, "code_path": "stages/exploration/code","code_source": { "source": null, "path": null, "branch": null, "commit": null, "credentials": "" } },
+    "training":    { "enabled": false, "code_path": "stages/training/code",   "code_source": { "source": null, "path": null, "branch": null, "commit": null, "credentials": "" } },
+    "evaluation":  { "enabled": false, "code_path": "stages/evaluation/code", "code_source": { "source": null, "path": null, "branch": null, "commit": null, "credentials": "" } },
+    "inference":   { "enabled": false, "code_path": "stages/inference/code",  "code_source": { "source": null, "path": null, "branch": null, "commit": null, "credentials": "" } },
+    "deployment":  { "enabled": false, "code_path": "stages/deployment/code", "code_source": { "source": null, "path": null, "branch": null, "commit": null, "credentials": "" } }
   },
   "paths": {
     "stages": "stages",
     "runs_pattern": "stages/{stage}/runs",
     "artifacts_pattern": "stages/{stage}/artifacts",
     "data_pattern": "stages/{stage}/data",
-    "secrets": "secrets.json"
+    "resources": "resources.json"
   }
 }
