@@ -97,9 +97,14 @@ claude
 
 ## Status
 
-- [x] Inference (init + run)
 - [x] Project Init + Resource Discovery
-- [ ] Training / Evaluation / Exploration
+- [x] Inference (init + run)
+- [x] Evaluation (init + run + report)
+- [x] Skill dependency system (inter-skill graph + internal dependency chain + cross-session resume)
+- [x] Remote execution + path mapping
+- [ ] Training (init + run with step-level monitoring)
+- [ ] Run comparison (side-by-side metrics/params/env diff)
+- [ ] Exploration (automated experiment loops)
 - [ ] Data (auto-format conversion)
 - [ ] Deployment (edge + cloud)
 
