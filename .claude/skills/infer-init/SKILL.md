@@ -89,15 +89,7 @@ Each entry in `artifacts.json → sources`, `input.json → sources`:
 
 ### Variable reference syntax `${}`
 
-Use `${}` to reference values across config files. Resolved at runtime by `/infer-run`.
-
-| Prefix | Resolves to |
-|--------|------------|
-| `${project.xxx}` | project.json field (e.g., `${project.root}`, `${project.name}`) |
-| `${resources.xxx.yyy}` | resources.json field (e.g., `${resources.aws.region}`) |
-| `${artifact.xxx}` | artifacts.json → sources → xxx → path |
-| `${input.xxx}` | input.json → sources → xxx → path |
-| `${output.xxx}` | stages/inference/runs/run_NNN/outputs/ (resolved at runtime by /infer-run) |
+See CLAUDE.md → Conventions → Variable Reference Syntax for the full reference table. Use `${}` to reference values across config files. Resolved at runtime by `/infer-run`.
 
 ## Step 1: Analyze Code
 

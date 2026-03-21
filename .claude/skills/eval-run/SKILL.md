@@ -40,15 +40,24 @@ Once `project.json` is found, set `PROJECT = {project.root}`:
 
 ## Variable reference syntax `${}`
 
-All `${}` references are resolved before execution:
+See CLAUDE.md → Conventions → Variable Reference Syntax. All `${}` references are resolved before execution. Stage-specific paths use `{PROJECT}/stages/evaluation/`.
 
-| Prefix | Resolves to |
-|--------|------------|
-| `${project.xxx}` | `{PROJECT}/project.json` → field |
-| `${resources.xxx.yyy}` | `{PROJECT}/resources.json` → field |
-| `${artifact.xxx}` | `{PROJECT}/stages/evaluation/artifacts.json` → sources → xxx → path |
-| `${input.xxx}` | `{PROJECT}/stages/evaluation/input.json` → sources → xxx → path |
-| `${output.xxx}` | `{PROJECT}/stages/evaluation/{RUN_DIR}/outputs/` |
+## Fork Check
+
+Update workflow step to `fork_check`.
+
+Ask: "Base on a previous run? (run ID, or skip for fresh run)"
+
+If user provides a run ID:
+1. Read `{PROJECT}/stages/evaluation/runs/{base_run_id}/config_snapshot.json`, `sources.json`, and `run.json → lineage.parents`
+2. Load those as the starting config, sources, and parents for this run
+3. Set `FORK_OF = {base_run_id}` (will be written to `run.json → lineage.fork_of`)
+4. Inherit `lineage.parents` from the base run. If user changes the model artifact, update parents accordingly.
+5. Show what was loaded: "Starting from {base_run_id}'s config. What do you want to change?"
+6. User specifies changes (one at a time) → apply to the loaded config
+7. Sources from the base run are reused — skip Step 1 unless user wants to change them
+
+If user skips → proceed normally with `FORK_OF = null`.
 
 ## Step 1: Check Sources
 
@@ -178,6 +187,8 @@ Run `python lifecycle/scripts/infer-run/check_deps.py {PROJECT}/stages/evaluatio
   "metrics": {}
 }
 ```
+
+If `FORK_OF` was set in Fork Check, write it to `run.json → lineage.fork_of`.
 
 ## Code modifications
 

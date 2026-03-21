@@ -94,15 +94,7 @@ Each item in `artifacts.json → items`, `input.json → items`, `input.json →
 
 ### Variable reference syntax `${}`
 
-Use `${}` to reference items across config files. Resolved at runtime by `/eval-run` using assets.
-
-| Prefix | Resolves to |
-|--------|------------|
-| `${project.xxx}` | project.json field (e.g., `${project.root}`, `${project.name}`) |
-| `${resources.xxx.yyy}` | resources.json field (e.g., `${resources.aws.region}`) |
-| `${artifact.xxx}` | resolved from artifact asset at runtime |
-| `${input.xxx}` | resolved from input asset at runtime |
-| `${output.xxx}` | stages/evaluation/runs/run_NNN/outputs/ (resolved at runtime) |
+See CLAUDE.md → Conventions → Variable Reference Syntax for the full reference table. Use `${}` to reference values across config files. Resolved at runtime by `/eval-run`.
 
 ## Step 1: Analyze Code
 

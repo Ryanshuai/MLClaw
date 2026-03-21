@@ -40,6 +40,23 @@ MLClaw replaces MLflow/W&B/TensorBoard with conversation-driven ML lifecycle man
 | `/eval-report` | Generate self-contained HTML report from a completed eval run (metrics, baseline diff, per-class, bad cases) |
 | `/resources` | Discover local credentials, models, data. Auto-populate resources.json |
 
+### Node hierarchy
+
+```
+project
+  └── stage (evaluation, inference, training, ...)
+       └── skill (init, run, report — operations on a stage)
+            └── execution (run_20260317_... — one instantiation of a skill execution)
+                 └── steps (resolve_assets, create_run, execute, collect_results)
+```
+
+- **Stage** is a lifecycle phase. **Skill** is an operation on that stage. **Execution** is one instantiation of running a skill.
+- `/project-init` and `/resources` are project-level, not tied to a stage.
+- **Run skill** executions are fully tracked: `runs/run_20260317_.../` with run.json, steps, outputs, logs.
+- **Init skill** executions are currently not tracked separately — completion is defined by output files (4 JSON configs). Can be added later.
+- **Report skill** executions are stored as output files within a run's `outputs/` directory.
+- On disk, `runs/` directory = executions of the run skill. The naming is kept for simplicity.
+
 ### Skill Dependency Graph
 
 Every skill knows its position in this graph. Two types of edges:
@@ -63,19 +80,11 @@ Skill              Requires (check on entry)              Suggests (offer on exi
 
 #### How skills use this graph
 
-**On entry** — each skill checks its `requires` column:
-1. Check each requirement in order
-2. If a requirement is not met (file missing, config empty, etc.), tell the user what's missing and offer to run the upstream skill
-3. If user agrees → pause self (push to stack with status `paused`), invoke the upstream skill
-4. When upstream skill completes → pop it, resume self
-5. If user declines → stop, don't proceed with broken dependencies
+**On entry** — check `requires` column. If a requirement is not met, offer to run the upstream skill. If user agrees, invoke it as a sub-skill (see Workflow State Protocol below). If user declines, stop.
 
-**On exit** — each skill checks its `suggests` column:
-1. After successful completion, offer the next logical skill: "Next step: /xxx — want to proceed?"
-2. If user says yes → invoke it (same pause/push/pop protocol)
-3. If user says no → done
+**On exit** — check `suggests` column. Offer the next skill. If user accepts, invoke it as a sub-skill.
 
-**`/resources` is a utility skill** — it doesn't have a fixed position in the pipeline. It gets called on-demand by any run skill when credentials are missing. It can also be invoked standalone.
+**`/resources`** is a utility skill — called on-demand by any run skill when credentials are missing. Can also be invoked standalone.
 
 #### Requirement checks
 
@@ -96,6 +105,13 @@ Run skills (infer-run, eval-run) share the same internal dependency chain. Each 
 Locate Project
      │
      │  [external: init done? ── no ──→ offer /{stage}-init]
+     ↓
+Fork check: "Base on a previous run?"
+     │  - no  → proceed normally (fresh run)
+     │  - yes → load base run's config_snapshot.json + sources.json + lineage.parents
+     │          set fork_of = base run ID
+     │          user modifies only what they want to change
+     │          skip Step 1 if sources unchanged
      ↓
 Step 1: Resolve Assets                        depends on: init (items defined),
      │  - fill concrete paths in                         resources (credentials)
@@ -128,22 +144,64 @@ Step 4: Collect Results                       depends on: execution finished
   Done (pop from stack)
 ```
 
-**Dependency chain**: resources → assets → run → execute → collect
+**Internal step recording**: each run skill writes step completion to `run.json → steps`. Each step has `status` (`null` / `completed` / `skipped` / `failed`) and `at` (timestamp). Used for debugging, reproducibility, and resume — on resume, the skill reads `run.json → steps` to skip completed steps.
 
-- **Resources** (`resources.json`): credentials, server configs — managed by `/resources`
-- **Assets** (`artifacts.json/input.json → sources`): concrete paths to models, data, GT — resources provide the credentials to access them
-- **Run**: snapshots the resolved assets + env, then executes
+Steps correspond to headings in the skill's SKILL.md: `##` headings are major steps, `###` headings are sub-steps. All are recorded. Different stages may have different steps (e.g., training-run may add a `monitor` step).
 
-External triggers (marked `[external]`) follow the Workflow State Protocol (below).
+`steps.ad_hoc` is an array for unplanned actions that don't match any predefined step — e.g., fixing a file permission, patching a config typo, installing a missing package. Each entry: `{ "name": "...", "description": "...", "after_step": "...", "status": "...", "at": "..." }`. If the same ad_hoc action shows up across multiple runs, it's a signal to promote it into a formal step in the SKILL.md.
+
+### Run Lineage
+
+Each run tracks two types of relationships in `run.json → lineage`:
+
+```
+lineage:
+  parents:  ["training/run_20260315_120000"]    ← cross-stage: upstream run that produced artifacts I consume
+  fork_of:  "evaluation/run_20260317_091500"    ← same-stage: the run I forked from (changed params/data)
+```
+
+- **`parents`** (vertical / cross-stage): this eval run used a checkpoint from that training run. Draws arrows across stage columns.
+- **`fork_of`** (horizontal / same-stage): this run started from that run's config, with modifications. Draws branches within the same stage column.
+
+```
+     training           evaluation
+     train_run_1  ──→   eval_run_1
+                  ──→   eval_run_2  (fork_of: eval_run_1, changed threshold)
+                  ──→   eval_run_3  (fork_of: eval_run_1, changed dataset)
+
+     train_run_2  ──→   eval_run_4  (fresh, not a fork)
+```
+
+**Fork behavior**: when `fork_of` is set, the run skill loads the base run's `config_snapshot.json`, `sources.json`, and `lineage.parents` as starting point. User only changes what they want. Assets that haven't changed are reused (Step 1 can be skipped). Fork inherits the base run's `lineage.parents` — if the user changes the model artifact (not just params), parents should be updated accordingly.
 
 ### Workflow State Protocol
 
-The dependency graph is persisted across sessions via `history.json`. Each skill is **atomic** — either completed or not. No partial internal state is tracked across conversations.
+The dependency graph is persisted across sessions via `history.json`.
 
-**Completion is defined by outputs, not by history.** Skills check upstream dependencies by examining whether the expected output artifacts exist (see Requirement Checks table), not by reading history.json for completion records. A skill that ran but didn't produce its outputs is treated as not completed.
+**Two levels of state tracking**:
+- **Inter-skill** (dependency graph): completion is defined by **output artifacts**, not by history records. Skills check upstream dependencies by examining whether the expected outputs exist (see Requirement Checks table). A skill that ran but didn't produce its outputs is treated as not completed.
+- **Intra-skill** (execution steps): progress is tracked in `run.json → steps`. On resume, the stack entry points to the exact execution and step, and `run.json → steps` shows which steps completed — so the skill can skip finished steps and continue from where it stopped.
+
+Stack entries follow the node hierarchy — they locate the exact position in the tree:
+
+```json
+{
+  "skill": "eval-run",
+  "stage": "evaluation",
+  "execution": "run_20260317_091500",
+  "step": "execute",
+  "project": "D:\\agent_space\\mlclaw\\projects\\detection"
+}
+```
+
+- `skill` + `stage`: which skill on which stage
+- `execution`: which specific execution instance (null for init skills that don't create executions yet)
+- `step`: which step within the execution (matches a key in `run.json → steps`)
+
+On resume, read the execution's `run.json → steps` to see exactly which steps completed and which didn't.
 
 Every skill MUST:
-1. **On entry**: push to `stack` with `project` field set to the current PROJECT path, append to `history` with status `started`
+1. **On entry**: push to `stack` with `project`, `skill`, `stage`, and `step` fields. For run skills, also set `execution` once the run dir is created. Append to `history` with status `started`
 2. **On calling sub-skill** (upstream dependency or downstream suggestion): update own status to `paused` in history, push sub-skill to stack (inherit `project` from parent)
 3. **On sub-skill return**: pop sub-skill from stack, append `resumed` to history, continue
 4. **On completion**: pop self from stack, append `completed` to history
@@ -292,35 +350,20 @@ history.json                        ← workflow state + history
 runs_index.json                     ← all runs quick lookup (alias, metrics, tags)
 .gitignore
 stages/
-  inference/
-    code/                           ← user's inference code (git tracked)
-    artifacts.json                  ← filled by /infer-init
-    config.json                     ← filled by /infer-init
-    input.json                      ← filled by /infer-init
-    output.json                     ← filled by /infer-init
+  {stage}/                          ← same structure for each stage (inference, evaluation, ...)
+    code/                           ← user's code (git tracked)
+    artifacts.json                  ← filled by /{stage}-init
+    config.json                     ← filled by /{stage}-init
+    input.json                      ← filled by /{stage}-init
+    output.json                     ← filled by /{stage}-init
     artifacts/                      ← actual artifact files (gitignored)
     data/                           ← actual input data (gitignored)
     runs/
-      run_{YYYYMMDD}_{HHmmss}/
-        run.json                    ← run record (code, env, metrics, lineage)
+      run_{YYYYMMDD}_{HHmmss}/      ← one execution
+        run.json                    ← run record (code, env, metrics, steps, lineage)
         sources.json                ← snapshot of sources used
         config_snapshot.json        ← frozen config
         outputs/                    ← output files
-        logs/                       ← stdout/stderr logs
-  evaluation/
-    code/                           ← user's evaluation code (git tracked)
-    artifacts.json                  ← filled by /eval-init
-    config.json                     ← filled by /eval-init (includes dataset info)
-    input.json                      ← filled by /eval-init (includes ground truth)
-    output.json                     ← filled by /eval-init (includes baseline)
-    artifacts/                      ← actual artifact files (gitignored)
-    data/                           ← actual input data + ground truth (gitignored)
-    runs/
-      run_{YYYYMMDD}_{HHmmss}/
-        run.json                    ← run record (code, env, metrics, lineage)
-        sources.json                ← snapshot of sources used (incl. GT)
-        config_snapshot.json        ← frozen config
-        outputs/                    ← output files (metrics, confusion matrices)
         logs/                       ← stdout/stderr logs
 ```
 
