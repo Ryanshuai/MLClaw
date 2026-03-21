@@ -6,6 +6,30 @@
   "description": "",
   "status": "pending",
 
+  "steps": {
+    "fork_check":     { "status": null, "at": null },
+    "resolve_assets": { "status": null, "at": null,
+      "server_matching":    { "status": null, "at": null },
+      "connectivity_test":  { "status": null, "at": null }
+    },
+    "create_run":     { "status": null, "at": null,
+      "code_snapshot":      { "status": null, "at": null },
+      "env_snapshot":       { "status": null, "at": null },
+      "dependency_check":   { "status": null, "at": null }
+    },
+    "execute":        { "status": null, "at": null,
+      "debug_mode":         { "status": null, "at": null },
+      "production_mode":    { "status": null, "at": null },
+      "status_check":       { "status": null, "at": null }
+    },
+    "collect_results":{ "status": null, "at": null,
+      "finalize":           { "status": null, "at": null },
+      "extract_metrics":    { "status": null, "at": null },
+      "update_index":       { "status": null, "at": null }
+    },
+    "ad_hoc": []
+  },
+
   "code": {
     "repo": null,
     "branch": null,
@@ -89,6 +113,7 @@
 
   "lineage": {
     "parents": [],
+    "fork_of": null,
     "local_tags": [],
     "pipeline_tags": []
   },
