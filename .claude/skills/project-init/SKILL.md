@@ -50,8 +50,6 @@ Update step as you progress. On completion: pop from stack, append `completed` t
      runs_pattern: stages/{stage}/runs
      artifacts_pattern: stages/{stage}/artifacts
      data_pattern: stages/{stage}/data
-     resources: resources.json
-
    Create? Anything to change?
    ```
 
@@ -81,7 +79,6 @@ Fixed keys, agent only modifies values.
     "runs_pattern": "stages/{stage}/runs",
     "artifacts_pattern": "stages/{stage}/artifacts",
     "data_pattern": "stages/{stage}/data",
-    "resources": "resources.json"
   }
 }
 ```
@@ -91,7 +88,6 @@ Fixed keys, agent only modifies values.
 ```
 {root}/
 ├── project.json
-├── resources.json              ← from lifecycle/resources.json
 ├── history.json             ← from lifecycle/history.json
 ├── runs_index.json          ← from lifecycle/runs_index.json
 ├── .gitignore

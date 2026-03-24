@@ -20,8 +20,11 @@ On completion: pop from stack, append `completed` to history.
 
 ## Prerequisites
 
-Ensure `{PROJECT}/resources.json` exists. If not, copy from `lifecycle/resources.json` and create it.
-All discovery results are written to `{PROJECT}/resources.json` so they persist across sessions.
+Ensure `{WORKSPACE}/resources.json` exists (workspace root, shared across all projects). If not, copy from `lifecycle/resources.json` and create it.
+
+`{WORKSPACE}` = the workspace root directory (e.g., `D:\agent_space\mlclaw\projects`). Resolve from `project.json → workspace`, or from the parent directory of the project root.
+
+All discovery results are written to `{WORKSPACE}/resources.json` so they persist across sessions and are shared by all projects.
 
 ## What to search
 
@@ -81,7 +84,7 @@ For each server found:
 
 Update workflow step to `check_cache`.
 
-Before searching, read `{PROJECT}/resources.json`. If it already has non-empty values for the requested resource type, show what's cached:
+Before searching, read `{WORKSPACE}/resources.json`. If it already has non-empty values for the requested resource type, show what's cached:
 ```
 Already configured in resources.json:
   SSH: ~/.ssh/id_rsa
@@ -112,7 +115,7 @@ Found models:
 
 Update workflow step to `save`.
 
-After showing results, propose what will be written to `{PROJECT}/resources.json`:
+After showing results, propose what will be written to `{WORKSPACE}/resources.json`:
 ```
 Will save to resources.json:
   aws.region: us-east-1
@@ -135,7 +138,7 @@ Update workflow step to `manual_input`.
 If search finds nothing for the requested type:
 1. Tell user: "No {type} credentials found in default locations."
 2. Ask: "Do you have credentials? I'll save them to resources.json."
-3. If yes → ask for each field ONE at a time, write to `{PROJECT}/resources.json`
+3. If yes → ask for each field ONE at a time, write to `{WORKSPACE}/resources.json`
 4. If no → return to calling skill
 
 ## Usage modes
@@ -153,7 +156,7 @@ If search finds nothing for the requested type:
 
 When another skill (e.g., infer-run) needs a non-local resource:
 
-1. Check `{PROJECT}/resources.json` for cached values first
+1. Check `{WORKSPACE}/resources.json` for cached values first
 2. If cached and valid → return immediately, no search needed
 3. If not cached → search only the relevant category, auto-save results
 4. If nothing found → ask user for credentials, save to resources.json
