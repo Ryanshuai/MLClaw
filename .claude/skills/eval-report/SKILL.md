@@ -85,7 +85,7 @@ From the current eval run, trace the lineage DAG to find all upstream runs acros
 ### 2c. Collect project-level data
 
 - `{PROJECT}/project.json` — project name, description, any metadata
-- `{PROJECT}/resources.json` — server info referenced by runs (for env context)
+- `{WORKSPACE}/resources.json` — server info referenced by runs (for env context)
 
 ### 2d. Build a data bag
 

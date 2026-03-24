@@ -85,7 +85,7 @@ Each entry in `artifacts.json → sources`, `input.json → sources`:
 
 - `source`: one of `local|s3|server|stage_output|registry`
 - `path`: actual file/directory path (empty = not yet filled)
-- `credentials`: key in `resources.json → servers` or `aws`, etc. Only needed when source is not `local`.
+- `credentials`: key in `resources.json (workspace-level) → servers` or `aws`, etc. Only needed when source is not `local`.
 
 ### Variable reference syntax `${}`
 

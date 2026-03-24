@@ -90,7 +90,7 @@ Each item in `artifacts.json → items`, `input.json → items`, `input.json →
 - `type`: one of `video|image|text|tabular|json|binary|model|checkpoint|config|log`
 - `format`: file extension (e.g., `.onnx`, `.mp4`, `.json`)
 - `description`: short text
-- `resource`: key in `resources.json` indicating where this item typically comes from (e.g., `"server_172_31_60_66"`, `"aws"`, or `""` for local/unknown)
+- `resource`: key in `resources.json (workspace-level)` indicating where this item typically comes from (e.g., `"server_172_31_60_66"`, `"aws"`, or `""` for local/unknown)
 
 ### Variable reference syntax `${}`
 
@@ -295,7 +295,7 @@ Additional checks (always done by Claude, not scripted):
 - config_path file exists in code/ (if specified)
 - config_format is valid
 - dataset.name is filled (warn if empty: "Consider filling dataset name for run comparison")
-- Items that reference a resource: warn if that resource key doesn't exist in resources.json
+- Items that reference a resource: warn if that resource key doesn't exist in resources.json (workspace-level)
 - Semantic sanity: does the config make sense for the code?
 
 **CRITICAL: Do not allow saving if there are broken references. User must fix before proceeding.**

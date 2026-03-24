@@ -78,7 +78,7 @@ Read `artifacts.json` and `input.json` → `sources` sections.
 ### Server matching
 
 When user references a server by description (e.g., "A100 server", "8-GPU machine", "the 4090 one"),
-read `{PROJECT}/resources.json → servers` and match against `alias`, `description`, `gpu`, `gpu_count` fields.
+read `{WORKSPACE}/resources.json → servers` and match against `alias`, `description`, `gpu`, `gpu_count` fields.
 
 - If exactly one match → show it and ask user to confirm (e.g., "Found: a100_8gpu (8x A100, 192.168.1.100). Use this?")
 - If multiple matches → list them, ask user to pick one
@@ -97,14 +97,14 @@ python lifecycle/scripts/infer-run/test_connection.py s3 <s3_path> <region> <pro
 
 **Fallback**: if script fails, run the SSH/AWS commands directly via Bash.
 
-For `server` type: resolve `<user>` and `<host>` from `{PROJECT}/resources.json → servers → <matched_key>`.
+For `server` type: resolve `<user>` and `<host>` from `{WORKSPACE}/resources.json → servers → <matched_key>`.
 
 **If test succeeds:** proceed.
 
 **If test fails:** trigger the credentials configuration flow:
 1. Tell user: "Cannot access <path>. Credentials may not be configured."
 2. Pause own workflow, invoke `/resources` for the relevant credential type (SSH, AWS, etc.)
-3. If `/resources` finds something → ask user to confirm and link it to `{PROJECT}/resources.json`
+3. If `/resources` finds something → ask user to confirm and link it to `{WORKSPACE}/resources.json`
 4. If `/resources` finds nothing → fall back to manual configuration:
    - Check if the server entry exists in `resources.json → servers`:
      - If exists but credentials wrong → ask user to update fields, ONE at a time
@@ -113,7 +113,7 @@ For `server` type: resolve `<user>` and `<host>` from `{PROJECT}/resources.json 
        2. username (required, default: ubuntu)
        3. ssh_key_path (required, suggest from resources.json → ssh)
        Optional fields (alias, description, gpu, gpu_count, port) can be filled later or auto-detected via GPU probe.
-   - Write values into `{PROJECT}/resources.json`
+   - Write values into `{WORKSPACE}/resources.json`
 5. Re-run the connectivity test
 6. If still fails → show error, ask user to debug manually or try different credentials
 
