@@ -62,6 +62,28 @@ For each server found:
 
 **Optional GPU probe**: If user agrees, try `ssh <host> "nvidia-smi --query-gpu=name,count --format=csv,noheader"` to auto-fill gpu info. Only attempt with user permission.
 
+### Python Environment Manager
+
+Detect which tool is available for creating and managing Python environments:
+
+| Tool | How to check |
+|------|-------------|
+| `mamba` | `which mamba` or `where mamba` (preferred — fastest) |
+| `conda` | `which conda` or `where conda` (fallback) |
+| `uv` | `which uv` or `where uv` |
+
+Check in preference order: mamba → conda → uv. Record the first one found in `resources.json → local.env_manager`:
+```json
+{
+  "tool": "mamba|conda|uv",
+  "path": "/path/to/mamba"
+}
+```
+
+If none found, warn: "No Python environment manager detected. `/refactor-init` needs mamba or conda to create isolated environments. Install mamba: `conda install -n base -c conda-forge mamba`."
+
+Also auto-detect existing conda/mamba environments: `conda env list` → record available envs for reference.
+
 ### Models & Artifacts
 
 | Type | Default locations to check |

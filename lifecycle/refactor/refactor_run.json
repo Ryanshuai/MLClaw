@@ -1,0 +1,92 @@
+{
+  "run_id": "run_{YYYYMMDD}_{HHmmss}",
+  "stage": "refactor",
+  "project": "",
+  "alias": "",
+  "description": "",
+  "status": "pending",
+  "round": null,
+
+  "steps": {
+    "plan_round":       { "status": null, "at": null },
+    "refactor":         { "status": null, "at": null,
+      "files_changed": [],
+      "files_deleted": [],
+      "files_added": [],
+      "summary": "",
+      "auto_cleanup": []
+    },
+    "verify_static":    { "status": null, "at": null,
+      "result": null,
+      "reason": "",
+      "references_found": []
+    },
+    "verify_smoke":     { "status": null, "at": null },
+    "verify_module":    { "status": null, "at": null,
+      "graph_check": {
+        "method": null,
+        "result": null,
+        "state_dict_compatible": null,
+        "key_diff": { "added": [], "removed": [], "mapping": {} }
+      },
+      "modules_tested": {},
+      "perf": { "modules": {}, "warnings": [] }
+    },
+    "verify_mini":      { "status": null, "at": null,
+      "num_samples": null,
+      "metrics": {},
+      "pass": null
+    },
+    "benchmark":        { "status": null, "at": null,
+      "is_milestone": false,
+      "debug_mode":       { "status": null, "at": null },
+      "production_mode":  { "status": null, "at": null },
+      "status_check":     { "status": null, "at": null }
+    },
+    "compare":          { "status": null, "at": null,
+      "pass": null,
+      "deltas": {}
+    },
+    "commit_or_revert": { "status": null, "at": null,
+      "action": null,
+      "commit_hash": null
+    },
+    "ad_hoc": []
+  },
+
+  "code": {
+    "repo": null,
+    "branch": null,
+    "origin_commit": null,
+    "refactor_commit": null
+  },
+
+  "env": {
+    "python": "",
+    "nvidia_driver": "",
+    "cuda": "",
+    "cudnn": "",
+    "gpu": "",
+    "gpu_count": 0,
+    "os": "",
+    "packages": {}
+  },
+
+  "lineage": {
+    "parents": [],
+    "fork_of": null,
+    "local_tags": [],
+    "pipeline_tags": []
+  },
+
+  "execution": "local",
+  "server": null,
+  "pid": null,
+
+  "created_at": "",
+  "started_at": null,
+  "finished_at": null,
+  "duration_s": null,
+  "error": null,
+  "metrics": {}
+}

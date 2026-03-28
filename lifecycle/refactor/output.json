@@ -1,0 +1,11 @@
+{
+  "_comment": "Benchmark outputs — metrics to verify refactored code matches paper results.",
+  "items": {},
+  "metrics": {
+    "_comment": "Paper-reported metrics as verification targets.",
+    "definitions": {},
+    "watch": [],
+    "per_class": false,
+    "baseline": null
+  }
+}

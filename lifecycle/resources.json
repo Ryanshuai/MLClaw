@@ -24,7 +24,11 @@
   "local": {
     "base_paths": [],
     "mlclaw_root": "",
-    "python_path": ""
+    "python_path": "",
+    "env_manager": {
+      "tool": "",
+      "path": ""
+    }
   },
   "registry": {
     "url": "",
