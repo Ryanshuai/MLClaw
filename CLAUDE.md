@@ -24,7 +24,7 @@ MLClaw replaces MLflow/W&B/TensorBoard with conversation-driven ML lifecycle man
 
 ## Status
 
-**Implemented**: inference (init + run), evaluation (init + run + report), project init, resources.
+**Implemented**: inference (init + run), evaluation (init + run + report), refactor (init + run), project init, resources.
 
 **Next**: training stage, run comparison, exploration stage, data stage, deployment stage. Each follows the same `{stage}-init` + `{stage}-run` pattern.
 
@@ -32,13 +32,18 @@ MLClaw replaces MLflow/W&B/TensorBoard with conversation-driven ML lifecycle man
 
 | Skill | What it does |
 |-------|-------------|
-| `/project-init` | Create a new project: directory structure, project.json, git init, resources template |
+| `/project-init` | Create a new project: directory structure, project.json, git init |
 | `/infer-init` | Analyze inference code → fill 4 JSON configs (config, artifacts, input, output) |
 | `/infer-run` | Run inference: check sources → debug mode → production mode (local/remote) → collect results |
 | `/eval-init` | Analyze evaluation code → fill 4 JSON configs (config with dataset info, artifacts, input with ground truth, output with baseline) |
 | `/eval-run` | Run evaluation: check sources + GT → debug mode → production mode → collect metrics → baseline comparison |
 | `/eval-report` | Generate self-contained HTML report from a completed eval run (metrics, baseline diff, per-class, bad cases) |
-| `/resources` | Discover local credentials, models, data. Auto-populate resources.json |
+| `/data-check` | Validate data quality: file integrity, code compatibility, annotation consistency, statistics, cross-dataset comparison |
+| `/data-report` | Generate HTML data quality report with distribution charts, outlier gallery, cross-dataset drift |
+| `/refactor-init` | Clone research repo, analyze codebase, classify modules (core/support/dead), extract paper benchmark targets |
+| `/refactor-run` | Execute one refactoring round: make changes → run benchmark → compare with paper → commit or revert |
+| `/refactor-report` | Generate refactoring audit report: round changelog, rollback points, verification results, reproduction instructions |
+| `/resources` | Discover local credentials, models, data. Auto-populate workspace-level resources.json |
 
 ### Node hierarchy
 
@@ -51,7 +56,7 @@ project
 ```
 
 - **Stage** is a lifecycle phase. **Skill** is an operation on that stage. **Execution** is one instantiation of running a skill.
-- `/project-init` and `/resources` are project-level, not tied to a stage.
+- `/project-init` is project-level, not tied to a stage. `/resources` is workspace-level — `resources.json` lives at the workspace root and is shared across all projects.
 - **Run skill** executions are fully tracked: `runs/run_20260317_.../` with run.json, steps, outputs, logs.
 - **Init skill** executions are currently not tracked separately — completion is defined by output files (4 JSON configs). Can be added later.
 - **Report skill** executions are stored as output files within a run's `outputs/` directory.
@@ -67,15 +72,21 @@ Every skill knows its position in this graph. Two types of edges:
 ```
 Skill              Requires (check on entry)              Suggests (offer on exit)
 ─────────────────  ─────────────────────────────────────  ──────────────────────────────
-/project-init      (none — root)                          /resources, /infer-init, /eval-init
-/resources         project.json exists                    (return to caller, or suggest /infer-init, /eval-init)
+/project-init      (none — root)                          /resources, /infer-init, /eval-init, /refactor-init
+/resources         (none — workspace-level)                (return to caller, or suggest /infer-init, /eval-init)
 /infer-init        project.json exists, code available    /infer-run
 /eval-init         project.json exists, code available    /eval-run
+/refactor-init     project.json exists                    /refactor-run
 /infer-run         infer-init done (config non-empty),    (done)
                    resources.json for credentials
 /eval-run          eval-init done (config non-empty),     /eval-report
                    resources.json for credentials
+/refactor-run      refactor-init done (plan.json exists), /refactor-run (next round),
+                   resources.json for credentials       /refactor-report (when complete)
+/refactor-report   refactor-run completed (run.json)    (done)
 /eval-report       eval-run completed (run.json exists)   (done)
+/data-check        project.json exists, data path         /data-report, then /{stage}-run if clean
+/data-report       data-check completed (report.json)     (done)
 ```
 
 #### How skills use this graph
@@ -94,8 +105,11 @@ Skill              Requires (check on entry)              Suggests (offer on exi
 | code available | `code_source` is configured AND code directory has files |
 | infer-init done | `{PROJECT}/stages/inference/config.json → entry_command` is non-empty |
 | eval-init done | `{PROJECT}/stages/evaluation/config.json → entry_command` is non-empty |
-| resources.json for credentials | checked lazily — only when a source needs non-local credentials |
+| resources.json for credentials | checked lazily — `{WORKSPACE}/resources.json`, only when a source needs non-local credentials |
 | eval-run completed | `{PROJECT}/stages/evaluation/runs/*/run.json` with `status: "completed"` exists |
+| refactor-init done | `{PROJECT}/stages/refactor/plan.json` exists with non-empty `modules` |
+| refactor-run completed | `{PROJECT}/stages/refactor/runs/*/run.json` with `status: "completed"` exists |
+| env_manager available | `{WORKSPACE}/resources.json → local.env_manager.tool` is non-empty |
 
 ### Run Skill Internal Dependencies
 
@@ -240,6 +254,36 @@ Skills use Python scripts from `lifecycle/scripts/<skill>/` for mechanical tasks
 
 Scripts are an optimization, not a dependency.
 
+### Environment Resolution
+
+All run skills (infer-run, eval-run, refactor-run, future train-run) need a Python environment to execute code.
+
+**One project, one env** — prefer a single shared environment per project. Different stages in the same project usually share the same codebase (or refactored version of it), so their dependencies overlap. Maintaining separate envs per stage is unnecessary overhead.
+
+Environment resolution:
+
+1. **Check `project.json → env_name`** (project-level). If set, use it for all stages.
+
+2. **If empty, look for an existing env**:
+   - Refactor stage has a verified env (`plan.json → env.env_name`)? → promote it to project-level: set `project.json → env_name`, reuse for all stages.
+   - No refactor env? → create a new one (see below).
+
+3. **Create project env**: use the env manager from `{WORKSPACE}/resources.json → local.env_manager`:
+   - Env name: `mlclaw_{project_name}` (e.g., `mlclaw_detection`)
+   - Install from: `requirements.txt` or `setup.py` in the stage's code directory
+   - Record in `project.json → env_name`
+   - If a later stage needs extra packages, install them into the same env — don't create a new one.
+
+4. **Stage-level override** (rare): if a stage truly has conflicting dependencies (e.g., inference needs TensorRT but training doesn't), set `project.json → stages.{stage}.env_name` to override. This is the exception, not the norm.
+
+5. **Remote execution**: server's `python_path` in `resources.json → servers.{key}` takes precedence. Local env resolution doesn't apply.
+
+**Env manager** is read from `{WORKSPACE}/resources.json → local.env_manager.tool` (mamba/conda/uv). If empty, invoke `/resources` to detect it.
+
+Run skills use `{run_in_env}` as shorthand for the activation command:
+- mamba/conda: `mamba run -n {env_name}` or `conda run -n {env_name}`
+- uv/venv: `source {venv_path}/bin/activate &&` (Linux) or `{venv_path}/Scripts/activate &&` (Windows)
+
 ### Code Source Resolution
 
 Each stage in `project.json` has a `code_source` block:
@@ -271,7 +315,7 @@ Skills resolve the effective code directory as:
 
 ### Path Mapping (Cross-Machine Execution)
 
-When executing code on a remote server, local MLClaw paths must be mapped to remote paths. Each compute resource (server or local) in `resources.json` has:
+When executing code on a remote server, local MLClaw paths must be mapped to remote paths. Each compute resource (server or local) in `{WORKSPACE}/resources.json` has:
 
 - `mlclaw_root`: the MLClaw workspace root on that machine (e.g., `/home/ubuntu/agent_space/mlclaw`)
 - `python_path`: the Python executable path on that machine (e.g., `/home/ubuntu/miniconda3/envs/ml/bin/python`)
@@ -298,6 +342,11 @@ CLAUDE.md                           ← this file
     eval-init/SKILL.md              ← /eval-init
     eval-run/SKILL.md               ← /eval-run
     eval-report/SKILL.md            ← /eval-report
+    data-check/SKILL.md             ← /data-check
+    data-report/SKILL.md            ← /data-report
+    refactor-init/SKILL.md          ← /refactor-init
+    refactor-run/SKILL.md           ← /refactor-run
+    refactor-report/SKILL.md        ← /refactor-report
     resources/SKILL.md              ← /resources
   settings.json
 lifecycle/
@@ -339,13 +388,27 @@ lifecycle/
     config.json                     ← includes dataset block
     input.json                      ← includes ground_truth block
     output.json                     ← includes per_class, baseline
+  refactor/                         ← refactor stage JSON templates
+    plan.json                       ← repo analysis, module classification, paper benchmarks
+    config.json                     ← benchmark entry command + params
+    artifacts.json                  ← model weights for benchmark
+    input.json                      ← benchmark data + ground truth
+    output.json                     ← expected metrics from paper
+    refactor_run.json               ← run record template (refactor-specific steps)
+```
+
+#### Workspace root (D:\agent_space\mlclaw\projects)
+
+```
+resources.json                      ← access credentials and resources, shared across all projects (NEVER commit)
+detection/                          ← one project
+another_project/                    ← another project
 ```
 
 #### User project (e.g., D:\agent_space\mlclaw\projects\detection)
 
 ```
 project.json                        ← project config (git tracked)
-resources.json                      ← access credentials and resources (NEVER commit)
 history.json                        ← workflow state + history
 runs_index.json                     ← all runs quick lookup (alias, metrics, tags)
 .gitignore
@@ -365,6 +428,17 @@ stages/
         config_snapshot.json        ← frozen config
         outputs/                    ← output files
         logs/                       ← stdout/stderr logs
+  refactor/                         ← refactor stage (special structure)
+    original/                       ← GitHub clone, read-only reference
+    code/                           ← refactored version (working copy, git tracked)
+    plan.json                       ← refactoring plan + module classification
+    config.json                     ← benchmark config
+    artifacts.json                  ← benchmark artifacts
+    input.json                      ← benchmark inputs + ground truth
+    output.json                     ← benchmark expected metrics
+    snapshots/                      ← module I/O snapshots from original code (for Tier 2 verification)
+    runs/                           ← refactoring round executions
+      run_{YYYYMMDD}_{HHmmss}/      ← one round
 ```
 
 ### Variable Reference Syntax `${}`
@@ -375,8 +449,8 @@ Used across all config files. Resolved at runtime by `/{stage}-run`.
 |-----------|--------|
 | `${project.name}` | project.json → name |
 | `${project.root}` | project.json → root |
-| `${resources.aws.region}` | resources.json → aws → region |
-| `${resources.servers.xxx.host}` | resources.json → servers → xxx → host |
+| `${resources.aws.region}` | {WORKSPACE}/resources.json → aws → region |
+| `${resources.servers.xxx.host}` | {WORKSPACE}/resources.json → servers → xxx → host |
 | `${artifact.xxx}` | stages/{stage}/artifacts.json → sources → xxx → path |
 | `${input.xxx}` | stages/{stage}/input.json → sources → xxx → path |
 | `${output.xxx}` | stages/{stage}/runs/run_NNN/outputs/ (resolved at runtime) |
