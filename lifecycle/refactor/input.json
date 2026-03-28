@@ -1,0 +1,11 @@
+{
+  "_comment": "Benchmark inputs — test/val data and ground truth for verification.",
+  "items": {},
+  "sources": {},
+  "ground_truth": {
+    "_comment": "Annotations/labels for benchmark comparison.",
+    "items": {},
+    "sources": {}
+  },
+  "pairing": ""
+}

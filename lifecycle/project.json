@@ -3,13 +3,15 @@
   "root": "",
   "workspace": "",
   "created": "",
+  "env_name": "",
   "stages": {
     "data":        { "enabled": false, "code_path": "stages/data/code",        "code_source": { "source": null, "path": null, "branch": null, "commit": null, "credentials": "" } },
     "exploration": { "enabled": false, "code_path": "stages/exploration/code","code_source": { "source": null, "path": null, "branch": null, "commit": null, "credentials": "" } },
     "training":    { "enabled": false, "code_path": "stages/training/code",   "code_source": { "source": null, "path": null, "branch": null, "commit": null, "credentials": "" } },
     "evaluation":  { "enabled": false, "code_path": "stages/evaluation/code", "code_source": { "source": null, "path": null, "branch": null, "commit": null, "credentials": "" } },
     "inference":   { "enabled": false, "code_path": "stages/inference/code",  "code_source": { "source": null, "path": null, "branch": null, "commit": null, "credentials": "" } },
-    "deployment":  { "enabled": false, "code_path": "stages/deployment/code", "code_source": { "source": null, "path": null, "branch": null, "commit": null, "credentials": "" } }
+    "deployment":  { "enabled": false, "code_path": "stages/deployment/code", "code_source": { "source": null, "path": null, "branch": null, "commit": null, "credentials": "" } },
+    "refactor":    { "enabled": false, "code_path": "stages/refactor/code",   "code_source": { "source": null, "path": null, "branch": null, "commit": null, "credentials": "" } }
   },
   "paths": {
     "stages": "stages",

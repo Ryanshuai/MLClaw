@@ -1,0 +1,54 @@
+{
+  "_comment": "Refactoring plan — repo analysis, module classification, and benchmark targets from paper.",
+  "repo": {
+    "url": "",
+    "branch": "",
+    "commit": ""
+  },
+  "paper": {
+    "title": "",
+    "url": "",
+    "benchmarks": {}
+  },
+  "env": {
+    "env_name": "",
+    "python_path": "",
+    "created_from": "",
+    "dependency_files": [],
+    "build_steps": {
+      "has_cuda_extensions": false,
+      "build_command": "",
+      "custom_ops": []
+    },
+    "submodules": []
+  },
+  "analysis": {
+    "entry_points": [],
+    "core_pipeline": {
+      "inference": [],
+      "training": [],
+      "shared": []
+    },
+    "total_files": 0,
+    "total_lines": 0,
+    "duplicate_groups": []
+  },
+  "phases": {
+    "phase_1": {
+      "_comment": "Inference/eval — verified by paper benchmark. Must complete before Phase 2.",
+      "status": "pending",
+      "benchmark_verified": false
+    },
+    "phase_2": {
+      "_comment": "Training — verified using Phase 1's eval pipeline.",
+      "status": "pending",
+      "training_baseline": {
+        "run_id": null,
+        "steps": null,
+        "metrics": {}
+      }
+    }
+  },
+  "modules": {},
+  "rounds": []
+}

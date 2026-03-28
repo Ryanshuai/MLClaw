@@ -1,0 +1,16 @@
+{
+  "_comment": "Benchmark config — how to run the benchmark for verification.",
+  "entry_command": "",
+  "config_format": "",
+  "config_path": "",
+  "framework": "",
+  "description": "",
+  "dataset": {
+    "name": "",
+    "split": "",
+    "num_samples": null,
+    "classes": []
+  },
+  "runtime_params": {},
+  "required_packages": {}
+}
