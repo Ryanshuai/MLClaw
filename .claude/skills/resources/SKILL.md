@@ -1,37 +1,26 @@
 ---
 name: resources
-description: Search local default locations for credentials, models, and data resources
+description: "Use this skill to discover and configure compute resources \u2014 SSH keys, AWS credentials, GPU servers, model files, data directories, and Python environment managers. Triggers when the user asks about available resources, credentials, servers, or when another skill needs non-local access. Use for: '\u770B\u770B\u6709\u4EC0\u4E48\u8D44\u6E90', 'scan for GPUs', 'find credentials', 'set up server access', 'what envs do I have'. Also called automatically by run skills when credentials are missing."
 ---
 
 # /resources — Resource Discovery
 
-Search the local machine for credentials, models, and data in common default locations.
-Can be invoked standalone or triggered by other skills (e.g., infer-run) when a resource is needed.
+Search the local machine for credentials, models, and data in common default locations. Can be invoked standalone or triggered by other skills when a resource is needed.
 
-## Interaction Rules — MUST FOLLOW
+Ask one question at a time — multiple questions at once overwhelms users.
 
-**Ask only ONE question at a time.** Report findings, then ask what to do.
-
-## Workflow State
-
-On entry: push `{ "skill": "resources", "step": "start", "project": "<PROJECT path>" }` to `history.json` stack.
-If called by another skill: read `project` from the parent entry in the stack (the skill that called us).
-On completion: pop from stack, append `completed` to history.
+Follow the Workflow State Protocol from CLAUDE.md: push on entry, update step as you progress, pop on completion.
 
 ## Prerequisites
 
-Ensure `{WORKSPACE}/resources.json` exists (workspace root, shared across all projects). If not, copy from `lifecycle/resources.json` and create it.
-
-`{WORKSPACE}` = the workspace root directory (e.g., `D:\agent_space\mlclaw\projects`). Resolve from `project.json → workspace`, or from the parent directory of the project root.
-
-All discovery results are written to `{WORKSPACE}/resources.json` so they persist across sessions and are shared by all projects.
+Ensure `{WORKSPACE}/resources.json` exists (workspace root, shared across projects). If not, copy from `lifecycle/resources.json`. Resolve `{WORKSPACE}` from `project.json -> workspace` or parent directory of project root.
 
 ## What to search
 
 ### Credentials
 
-| Type | Default locations to check |
-|------|--------------------------|
+| Type | Default locations |
+|------|------------------|
 | SSH keys | `~/.ssh/id_rsa`, `~/.ssh/id_ed25519`, `~/.ssh/*.pem`, `~/.ssh/config` |
 | AWS | `~/.aws/credentials`, `~/.aws/config`, env vars `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` / `AWS_PROFILE` |
 | Docker/Registry | `~/.docker/config.json` |
@@ -42,169 +31,69 @@ All discovery results are written to `{WORKSPACE}/resources.json` so they persis
 
 ### Servers
 
-Actively discover known servers from:
+Discover from `~/.ssh/config` (Host, HostName, User, IdentityFile) and `~/.ssh/known_hosts`.
 
-| Source | How to parse |
-|--------|-------------|
-| `~/.ssh/config` | Parse `Host`, `HostName`, `User`, `IdentityFile` entries → create server entries |
-| `~/.ssh/known_hosts` | Extract unique hostnames/IPs (less info, but shows previously connected hosts) |
+Run `python lifecycle/scripts/resources/parse_ssh_config.py`. **Fallback**: manually read `~/.ssh/config`.
 
-Run `python lifecycle/scripts/resources/parse_ssh_config.py` to extract server entries from SSH config.
+For each server found, create an entry with host, username, ssh_key_path, alias (SSH config Host name). Ask user for `mlclaw_root` (remote workspace root for path mapping) and `python_path` (try `ssh <host> "which python3"` to auto-detect). Leave gpu/description empty for user to fill.
 
-**Fallback**: if script fails, manually read `~/.ssh/config` and extract Host/HostName/User/IdentityFile entries.
-
-For each server found:
-1. Create an entry in `resources.json → servers` with host, username, ssh_key_path
-2. `alias`: use the SSH config `Host` name
-3. `gpu`, `gpu_count`, `description`: leave empty (user fills later, or try SSH probe below)
-4. `mlclaw_root`: ask user "MLClaw workspace root on this server?" (e.g., `/home/ubuntu/agent_space/mlclaw`). Required for any server that will execute code — remote paths are mapped from local `mlclaw_root` to the server's `mlclaw_root`
-5. `python_path`: ask user "Python executable path on this server?" (e.g., `/home/ubuntu/miniconda3/envs/ml/bin/python`). If unsure, try `ssh <host> "which python3"` to auto-detect
-
-**Optional GPU probe**: If user agrees, try `ssh <host> "nvidia-smi --query-gpu=name,count --format=csv,noheader"` to auto-fill gpu info. Only attempt with user permission.
+**Optional GPU probe**: with user permission, try `ssh <host> "nvidia-smi --query-gpu=name,count --format=csv,noheader"`.
 
 ### Python Environment Manager
 
-Detect which tool is available for creating and managing Python environments:
+Check in preference order: mamba -> conda -> uv. Record first found in `resources.json -> local.env_manager`. Also run `conda env list` to record existing environments.
 
-| Tool | How to check |
-|------|-------------|
-| `mamba` | `which mamba` or `where mamba` (preferred — fastest) |
-| `conda` | `which conda` or `where conda` (fallback) |
-| `uv` | `which uv` or `where uv` |
-
-Check in preference order: mamba → conda → uv. Record the first one found in `resources.json → local.env_manager`:
-```json
-{
-  "tool": "mamba|conda|uv",
-  "path": "/path/to/mamba"
-}
-```
-
-If none found, warn: "No Python environment manager detected. `/refactor-init` needs mamba or conda to create isolated environments. Install mamba: `conda install -n base -c conda-forge mamba`."
-
-Also auto-detect existing conda/mamba environments: `conda env list` → record available envs for reference.
+If none found, warn that `/refactor-init` needs mamba or conda.
 
 ### Models & Artifacts
 
-| Type | Default locations to check |
-|------|--------------------------|
+| Type | Locations |
+|------|-----------|
 | HuggingFace cache | `~/.cache/huggingface/hub/` |
 | Torch hub | `~/.cache/torch/hub/` |
-| ONNX models | scan common dirs: `~/models/`, `~/weights/`, `D:\models\`, stage `artifacts/` |
-| TensorRT engines | `*.engine`, `*.trt` in above locations |
+| ONNX/TensorRT | `~/models/`, `~/weights/`, `D:\models\`, stage `artifacts/` |
 
 ### Data
 
-| Type | Default locations to check |
-|------|--------------------------|
-| Common data dirs | `~/data/`, `~/datasets/`, `D:\data\`, `D:\datasets\` |
-| Project data | `{PROJECT}/stages/*/data/` |
+Common dirs: `~/data/`, `~/datasets/`, `D:\data\`, `D:\datasets\`, `{PROJECT}/stages/*/data/`.
 
 ## Flow
 
 ### Step 1: Check resources.json first
 
-Update workflow step to `check_cache`.
-
-Before searching, read `{WORKSPACE}/resources.json`. If it already has non-empty values for the requested resource type, show what's cached:
-```
-Already configured in resources.json:
-  SSH: ~/.ssh/id_rsa
-  AWS: profile "default", region us-east-1
-
-Search again to update? (y/n)
-```
-If user says no → use cached values, done.
-If user says yes or if resources.json has no values → proceed to search.
+If already has non-empty values for the requested type, show what's cached and ask whether to re-search. If user says no, use cached values.
 
 ### Step 2: Search
 
-Update workflow step to `search`.
+Run search for requested category. Report findings with types and sizes.
 
-Run the search for the requested category. Report findings:
-```
-Found credentials:
-  SSH: ~/.ssh/id_rsa (RSA 4096)
-  AWS: ~/.aws/credentials (profile: default, region: us-east-1)
-  Docker: ~/.docker/config.json (1 registry)
+### Step 3: Auto-save
 
-Found models:
-  ~/.cache/huggingface/hub/rtdetr-l/ (1.2GB)
-  D:\models\yolov8.onnx (45MB)
-```
-
-### Step 3: Auto-save to resources.json
-
-Update workflow step to `save`.
-
-After showing results, propose what will be written to `{WORKSPACE}/resources.json`:
-```
-Will save to resources.json:
-  aws.region: us-east-1
-  aws.profile: default (from ~/.aws/credentials)
-  ssh: ~/.ssh/id_rsa (RSA 4096)
-
-Save these? (y/n/edit)
-```
-
-- **y** → write to resources.json
-- **n** → skip, don't write
-- **edit** → let user modify before saving
-
-**CRITICAL: Never overwrite existing non-empty values without asking. If a field already has a value, show both old and new and ask which to keep.**
+Show proposed writes to `{WORKSPACE}/resources.json`. User confirms (y/n/edit). Existing non-empty values are shown side-by-side with new values so the user can choose — overwriting silently would lose manual configuration.
 
 ### Step 4: If nothing found
 
-Update workflow step to `manual_input`.
-
-If search finds nothing for the requested type:
-1. Tell user: "No {type} credentials found in default locations."
-2. Ask: "Do you have credentials? I'll save them to resources.json."
-3. If yes → ask for each field ONE at a time, write to `{WORKSPACE}/resources.json`
-4. If no → return to calling skill
+Report what's missing, ask if user has credentials to provide manually (one field at a time).
 
 ## Usage modes
 
-### Standalone: `/resources`
+**Standalone** (`/resources`): ask what to search for (credentials / models / data / all), then follow the flow.
 
-1. Ask: What are you looking for? Options:
-   - credentials (SSH, AWS, registry, etc.)
-   - models (weights, checkpoints, engines)
-   - data (videos, images, datasets)
-   - all
-2. Follow the flow above (check cache → search → auto-save)
-
-### Called by another skill
-
-When another skill (e.g., infer-run) needs a non-local resource:
-
-1. Check `{WORKSPACE}/resources.json` for cached values first
-2. If cached and valid → return immediately, no search needed
-3. If not cached → search only the relevant category, auto-save results
-4. If nothing found → ask user for credentials, save to resources.json
-5. Return to calling skill
+**Called by another skill**: check cache first -> if valid, return immediately -> if not, search relevant category only -> save -> return.
 
 ## AWS Credential Troubleshooting
 
-When AWS SSO (`aws sso login`) fails, common causes:
+When AWS SSO (`aws sso login`) fails:
 
 | Problem | Symptom | Fix |
 |---------|---------|-----|
-| SSO config expired | `InvalidRequestException` on `RegisterClient` | Confirm `sso_start_url` with admin — Identity Center may have migrated |
-| Region mismatch | `InvalidRequestException` | Check `sso_region` matches actual Identity Center region |
-| Network/proxy blocking | SSO hangs or returns unexpected responses | Check corporate firewall/proxy |
+| SSO config expired | `InvalidRequestException` on `RegisterClient` | Confirm `sso_start_url` with admin |
+| Region mismatch | `InvalidRequestException` | Check `sso_region` matches Identity Center region |
+| Network/proxy blocking | SSO hangs | Check corporate firewall/proxy |
 | SSO cache corrupted | Various errors | Clear `~/.aws/sso/cache/` and retry |
 
-**Fallback rule**: If SSO profile fails, always try `default` profile or static credentials in `~/.aws/credentials` before giving up. Many setups have working static credentials alongside a broken SSO config.
-
-```
-SSO login failed → try default profile → try static credentials → ask user
-```
-
-Report the SSO error to the user as a warning (so they can fix it later), but continue with whatever credential method works.
+**Fallback**: SSO fails -> try default profile -> try static credentials in `~/.aws/credentials` -> ask user. Report SSO error as warning so user can fix later, but continue with whatever works.
 
 ## Safety
 
-- NEVER display secret values (keys, passwords, tokens) in output. Only show paths, profiles, and metadata.
-- When reporting AWS credentials, show profile name and region only.
-- When reporting SSH keys, show path and key type only.
+Secret values (keys, passwords, tokens) are never displayed — only paths, profiles, and metadata. This protects against accidental exposure in logs or shared screens.
