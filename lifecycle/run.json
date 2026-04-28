@@ -118,6 +118,8 @@
     "fork_of": null,
     "_comment_variation_summary": "Auto-computed when fork_of is set. Short human-readable diff of runtime_params vs the fork_of base, e.g., 'lr: 1e-4 → 2e-4; warmup_ratio: 0 → 0.03'. Null when fork_of is null. /train-run fills this at create_run time; tools may regenerate it from snapshots if missing.",
     "variation_summary": null,
+    "_comment_session": "Optional. Set by /train-tune when this run is part of an adaptive HPO session. Format: '<YYYYMMDD>_<HHMMSS>_<slug>', matches the session directory name under stages/training/tune_sessions/. Null for ad-hoc runs (manual /train-run invocations not part of any tune session).",
+    "session": null,
     "local_tags": [],
     "pipeline_tags": []
   },

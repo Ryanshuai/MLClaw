@@ -24,9 +24,9 @@ MLClaw replaces MLflow/W&B/TensorBoard with conversation-driven ML lifecycle man
 
 ## Status
 
-**Implemented**: inference (init + run), evaluation (init + run + report), refactor (init + run), training (init + run), project init, resources.
+**Implemented**: inference (init + run), evaluation (init + run + report), refactor (init + run), training (init + run + tune + tune-report), project init, resources.
 
-**Next**: data stage, deployment stage.
+**Next**: data stage, deployment stage, exploration stage (architecture search).
 
 ## Skills & Dependencies
 
@@ -40,6 +40,8 @@ MLClaw replaces MLflow/W&B/TensorBoard with conversation-driven ML lifecycle man
 | `/eval-report` | Generate self-contained HTML report from a completed eval run (metrics, baseline diff, per-class, bad cases) |
 | `/train-init` | Analyze training code → fill 4 JSON configs (config with resources, artifacts, input with ground truth, output with streaming-metric schema + checkpoint selection + done signal) |
 | `/train-run` | Run training: validate resources → resolve sources → background launch → monitor stream (heartbeat, last_step, latest_metrics) → detect done/crash → finalize (best ckpt + retention) |
+| `/train-tune` | Adaptive HPO loop: agent observes prior runs → identifies coverage gaps → hypothesizes next config → launches trials via /train-run → iterates until budget or convergence. Auto-invokes /train-tune-report at close. |
+| `/train-tune-report` | Render a tune session as markdown chain.md: headline, best-so-far curve, coverage map, decision timeline (with [fill_grid|refine_best|add_axis|verify] tags), confirmed/refuted distillation, recipe. |
 | `/data-check` | Validate data quality: file integrity, code compatibility, annotation consistency, statistics, cross-dataset comparison |
 | `/data-report` | Generate HTML data quality report with distribution charts, outlier gallery, cross-dataset drift |
 | `/refactor-init` | Clone research repo, analyze codebase, classify modules (core/support/dead), extract paper benchmark targets |
@@ -79,8 +81,11 @@ Skill              Requires (check on entry)              Suggests (offer on exi
 /infer-init        project.json exists, code available    /infer-run
 /eval-init         project.json exists, code available    /eval-run
 /train-init        project.json exists, code available    /train-run
-/train-run         train-init done (config non-empty),    /eval-run
+/train-run         train-init done (config non-empty),    /eval-run, /train-tune
                    resources.json for credentials
+/train-tune        train-init done, ≥1 prior train-run    /train-tune-report (auto at close)
+                   completed
+/train-tune-report tune session exists with ≥1 run        (done)
 /refactor-init     project.json exists                    /refactor-run
 /infer-run         infer-init done (config non-empty),    (done)
                    resources.json for credentials
@@ -111,6 +116,8 @@ Skill              Requires (check on entry)              Suggests (offer on exi
 | infer-init done | `{PROJECT}/stages/inference/config.json → entry_command` is non-empty |
 | eval-init done | `{PROJECT}/stages/evaluation/config.json → entry_command` is non-empty |
 | train-init done | `{PROJECT}/stages/training/config.json → entry_command` is non-empty |
+| ≥1 prior train-run completed | `{PROJECT}/stages/training/runs/*/run.json` with `status: "completed"` exists |
+| tune session exists with ≥1 run | `{PROJECT}/stages/training/tune_sessions/*/state.json` exists AND ≥1 run with `lineage.session = <id>` |
 | resources.json for credentials | checked lazily — `{WORKSPACE}/resources.json`, only when a source needs non-local credentials |
 | eval-run completed | `{PROJECT}/stages/evaluation/runs/*/run.json` with `status: "completed"` exists |
 | refactor-init done | `{PROJECT}/stages/refactor/plan.json` exists with non-empty `modules` |
@@ -182,11 +189,13 @@ lineage:
   parents:             ["training/run_20260315_120000"]   ← I consume their output artifact
   fork_of:             "evaluation/run_20260317_091500"   ← I copied their config to start
   variation_summary:   "lr: 1e-4 → 2e-4; warmup: 0 → 0.03"  ← auto-derived diff vs fork_of
+  session:             "20260428_120000_lr_search"        ← optional, set by /train-tune
 ```
 
 - **`parents`** (cross-stage, hard dependency): this run consumes artifacts produced by those runs (e.g., eval consumes train ckpt). Base's artifact must exist for this run to be reproducible. Drawn as solid arrow across stage columns.
 - **`fork_of`** (same-stage, metadata only): this run started from that run's config, with modifications. **No I/O dependency** — fork is reproducible even if base is deleted. Drawn as dashed arrow within the same stage column.
 - **`variation_summary`** (auto-derived, optional): short human-readable diff of `runtime_params` vs the `fork_of` base, e.g., `"lr: 1e-4 → 2e-4; warmup_ratio: 0 → 0.03"`. Filled by the run skill at create time. Null when `fork_of` is null. Saves `/train-compare` and DAG renderers from re-diffing snapshots.
+- **`session`** (optional): when this run is part of a `/train-tune` HPO session, this field holds the session ID (matches `tune_sessions/<id>/` directory). Null for ad-hoc runs. `/train-tune-report` filters runs by this field to render a single session's chain.md without scanning all project runs.
 
 ```
      training           evaluation
