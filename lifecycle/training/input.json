@@ -1,0 +1,11 @@
+{
+  "_comment": "Training inputs — train + val data with labels. Same shape as evaluation input.json. Actual files stored in stages/training/data/.",
+  "items": {},
+  "sources": {},
+  "ground_truth": {
+    "_comment": "Labels paired with each input split (train / val).",
+    "items": {},
+    "sources": {}
+  },
+  "pairing": ""
+}

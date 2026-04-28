@@ -1,0 +1,16 @@
+{
+  "entry_command": "",
+  "config_format": "",
+  "config_path": "",
+  "framework": "",
+  "description": "",
+  "resources": {
+    "_comment": "Compute requirements. Used by /train-run to validate hardware match before launching long jobs.",
+    "gpu_count": 1,
+    "gpu_memory_gb": null,
+    "expected_duration_h": null,
+    "distributed": ""
+  },
+  "runtime_params": {},
+  "required_packages": {}
+}
