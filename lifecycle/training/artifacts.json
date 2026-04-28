@@ -1,0 +1,5 @@
+{
+  "_comment": "Static inputs to training — pretrained backbone, tokenizer, vocab, base ckpt for fine-tuning. Set once per model lineage.",
+  "items": {},
+  "sources": {}
+}

@@ -24,9 +24,9 @@ MLClaw replaces MLflow/W&B/TensorBoard with conversation-driven ML lifecycle man
 
 ## Status
 
-**Implemented**: inference (init + run), evaluation (init + run + report), refactor (init + run), project init, resources.
+**Implemented**: inference (init + run), evaluation (init + run + report), refactor (init + run), training (init + run), project init, resources.
 
-**Next**: training stage, run comparison, exploration stage, data stage, deployment stage. Each follows the same `{stage}-init` + `{stage}-run` pattern.
+**Next**: data stage, deployment stage.
 
 ## Skills & Dependencies
 
@@ -38,6 +38,8 @@ MLClaw replaces MLflow/W&B/TensorBoard with conversation-driven ML lifecycle man
 | `/eval-init` | Analyze evaluation code → fill 4 JSON configs (config with dataset info, artifacts, input with ground truth, output with baseline) |
 | `/eval-run` | Run evaluation: check sources + GT → debug mode → production mode → collect metrics → baseline comparison |
 | `/eval-report` | Generate self-contained HTML report from a completed eval run (metrics, baseline diff, per-class, bad cases) |
+| `/train-init` | Analyze training code → fill 4 JSON configs (config with resources, artifacts, input with ground truth, output with streaming-metric schema + checkpoint selection + done signal) |
+| `/train-run` | Run training: validate resources → resolve sources → background launch → monitor stream (heartbeat, last_step, latest_metrics) → detect done/crash → finalize (best ckpt + retention) |
 | `/data-check` | Validate data quality: file integrity, code compatibility, annotation consistency, statistics, cross-dataset comparison |
 | `/data-report` | Generate HTML data quality report with distribution charts, outlier gallery, cross-dataset drift |
 | `/refactor-init` | Clone research repo, analyze codebase, classify modules (core/support/dead), extract paper benchmark targets |
@@ -72,10 +74,13 @@ Every skill knows its position in this graph. Two types of edges:
 ```
 Skill              Requires (check on entry)              Suggests (offer on exit)
 ─────────────────  ─────────────────────────────────────  ──────────────────────────────
-/project-init      (none — root)                          /resources, /infer-init, /eval-init, /refactor-init
-/resources         (none — workspace-level)                (return to caller, or suggest /infer-init, /eval-init)
+/project-init      (none — root)                          /resources, /infer-init, /eval-init, /train-init, /refactor-init
+/resources         (none — workspace-level)                (return to caller, or suggest /infer-init, /eval-init, /train-init)
 /infer-init        project.json exists, code available    /infer-run
 /eval-init         project.json exists, code available    /eval-run
+/train-init        project.json exists, code available    /train-run
+/train-run         train-init done (config non-empty),    /eval-run
+                   resources.json for credentials
 /refactor-init     project.json exists                    /refactor-run
 /infer-run         infer-init done (config non-empty),    (done)
                    resources.json for credentials
@@ -105,6 +110,7 @@ Skill              Requires (check on entry)              Suggests (offer on exi
 | code available | `code_source` is configured AND code directory has files |
 | infer-init done | `{PROJECT}/stages/inference/config.json → entry_command` is non-empty |
 | eval-init done | `{PROJECT}/stages/evaluation/config.json → entry_command` is non-empty |
+| train-init done | `{PROJECT}/stages/training/config.json → entry_command` is non-empty |
 | resources.json for credentials | checked lazily — `{WORKSPACE}/resources.json`, only when a source needs non-local credentials |
 | eval-run completed | `{PROJECT}/stages/evaluation/runs/*/run.json` with `status: "completed"` exists |
 | refactor-init done | `{PROJECT}/stages/refactor/plan.json` exists with non-empty `modules` |
@@ -113,7 +119,7 @@ Skill              Requires (check on entry)              Suggests (offer on exi
 
 ### Run Skill Internal Dependencies
 
-Run skills (infer-run, eval-run) share the same internal dependency chain. Each step depends on the previous step completing, and some steps have external dependencies that trigger other skills.
+Run skills (infer-run, eval-run, train-run) share the same internal dependency chain. Each step depends on the previous step completing, and some steps have external dependencies that trigger other skills. Train-run adds a `monitor` step between `execute` and `collect_results` to handle long-running streaming state (heartbeat, last_step, latest_metrics).
 
 ```
 Locate Project
@@ -140,6 +146,9 @@ Step 2: Create Run                            depends on: assets resolved
      │  - env snapshot (packages from lifecycle/run.json template)
      │  - dependency check (required vs installed)
      │  - snapshot resolved assets → sources.json
+     │  - if fork_of is set: compute lineage.variation_summary
+     │    (diff runtime_params vs base run; null otherwise)
+     │  - if user provided hypothesis: store in run.json -> hypothesis
      ↓
 Step 3: Build & Execute                       depends on: run created
      │  - resolve ${} references (from assets)
@@ -170,12 +179,14 @@ Each run tracks two types of relationships in `run.json → lineage`:
 
 ```
 lineage:
-  parents:  ["training/run_20260315_120000"]    ← cross-stage: upstream run that produced artifacts I consume
-  fork_of:  "evaluation/run_20260317_091500"    ← same-stage: the run I forked from (changed params/data)
+  parents:             ["training/run_20260315_120000"]   ← I consume their output artifact
+  fork_of:             "evaluation/run_20260317_091500"   ← I copied their config to start
+  variation_summary:   "lr: 1e-4 → 2e-4; warmup: 0 → 0.03"  ← auto-derived diff vs fork_of
 ```
 
-- **`parents`** (vertical / cross-stage): this eval run used a checkpoint from that training run. Draws arrows across stage columns.
-- **`fork_of`** (horizontal / same-stage): this run started from that run's config, with modifications. Draws branches within the same stage column.
+- **`parents`** (cross-stage, hard dependency): this run consumes artifacts produced by those runs (e.g., eval consumes train ckpt). Base's artifact must exist for this run to be reproducible. Drawn as solid arrow across stage columns.
+- **`fork_of`** (same-stage, metadata only): this run started from that run's config, with modifications. **No I/O dependency** — fork is reproducible even if base is deleted. Drawn as dashed arrow within the same stage column.
+- **`variation_summary`** (auto-derived, optional): short human-readable diff of `runtime_params` vs the `fork_of` base, e.g., `"lr: 1e-4 → 2e-4; warmup_ratio: 0 → 0.03"`. Filled by the run skill at create time. Null when `fork_of` is null. Saves `/train-compare` and DAG renderers from re-diffing snapshots.
 
 ```
      training           evaluation
@@ -187,6 +198,17 @@ lineage:
 ```
 
 **Fork behavior**: when `fork_of` is set, the run skill loads the base run's `config_snapshot.json`, `sources.json`, and `lineage.parents` as starting point. User only changes what they want. Assets that haven't changed are reused (Step 1 can be skipped). Fork inherits the base run's `lineage.parents` — if the user changes the model artifact (not just params), parents should be updated accordingly.
+
+**Continuing training / preempt recovery / fine-tuning**: there is no separate lineage field for "I extend prior training". Express it as a `fork_of` (config copy) plus loading the base's checkpoint as initial weights via `runtime_params` — and add the base to `parents` since the new run consumes its ckpt. The reasoning ("why continue") lives in the run's `description` / `hypothesis` field, or in `decisions.jsonl` when running `/train-tune`.
+
+### Optional narrative fields
+
+Two top-level run.json fields exist purely to enrich human-readable reports. **Both are optional, default null, and tools must not require them.**
+
+- **`hypothesis`** (set at run creation): a one-sentence expectation, e.g., `"Higher lr with warmup should reach lower val_loss faster."` Skills may prompt for it but should never block on it.
+- **`outcome`** (set at run completion): a free-text retrospective, e.g., `"Refuted. val_loss 0.234 → 0.241 (+3%), convergence epoch 87 → 92."` Agents fill this when finalizing; users may also write it manually.
+
+When both are present, `/train-compare` weaves them into the narrative ("hypothesis was X; outcome confirmed/refuted"). When absent, comparisons fall back to pure metric deltas — both should remain valid.
 
 ### Workflow State Protocol
 

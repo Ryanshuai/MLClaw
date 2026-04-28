@@ -4,6 +4,8 @@
   "project": "",
   "alias": "",
   "description": "",
+  "_comment_hypothesis": "Optional. One-sentence expectation written when launching the run (e.g., 'Higher lr with warmup should reach lower val_loss faster'). Tools must not require this field. Pair with `outcome` (filled at completion) for retrospective narrative; both fields exist only to enrich /train-compare reports — absence is normal.",
+  "hypothesis": null,
   "status": "pending",
 
   "steps": {
@@ -114,6 +116,8 @@
   "lineage": {
     "parents": [],
     "fork_of": null,
+    "_comment_variation_summary": "Auto-computed when fork_of is set. Short human-readable diff of runtime_params vs the fork_of base, e.g., 'lr: 1e-4 → 2e-4; warmup_ratio: 0 → 0.03'. Null when fork_of is null. /train-run fills this at create_run time; tools may regenerate it from snapshots if missing.",
+    "variation_summary": null,
     "local_tags": [],
     "pipeline_tags": []
   },
@@ -127,5 +131,14 @@
   "finished_at": null,
   "duration_s": null,
   "error": null,
-  "metrics": {}
+
+  "_comment_runtime_state": "Streaming-state fields (used by long-running skills like /train-run). last_heartbeat: ISO timestamp updated periodically while alive — agents detect hung jobs when (now - last_heartbeat) exceeds expected interval. last_step: most recent step number observed in the jsonl stream — lets agents read ETA without re-tailing the whole log; null for stages without step concept. latest_metrics: most recent streaming snapshot (e.g., last val_epoch's key fields) — distinct from `metrics` which holds the final/terminal numbers populated on completion.",
+  "last_heartbeat": null,
+  "last_step": null,
+  "latest_metrics": {},
+
+  "metrics": {},
+
+  "_comment_outcome": "Optional. Free-text retrospective written when the run terminates, e.g., 'Refuted. val_loss 0.234 → 0.241 (+3%), convergence epoch 87 → 92'. Pairs with `hypothesis`. Tools must not require this; null is normal.",
+  "outcome": null
 }

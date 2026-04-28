@@ -1,0 +1,26 @@
+{
+  "_comment": "What training produces — checkpoints, log stream, streaming metrics. Differs from infer/eval in that metrics are emitted continuously during a long run, not just at the end.",
+  "items": {},
+  "checkpoints": {
+    "_comment": "Models saved during training. selection.best_by + direction tells /train-run and downstream stages which ckpt is canonical.",
+    "path_pattern": "",
+    "selection": {
+      "best_by": "",
+      "direction": ""
+    },
+    "retention": "keep_all"
+  },
+  "metrics": {
+    "_comment": "Streamed during training. Two granularities — step (high-freq, e.g. loss/lr) and epoch (low-freq, used for ckpt selection). primary_metric drives 'best' decisions.",
+    "log_format": "jsonl",
+    "log_path": "",
+    "stdout_extractor": null,
+    "record_types": {},
+    "definitions": {},
+    "watch_step": [],
+    "watch_epoch": [],
+    "primary_metric": "",
+    "direction": "max",
+    "done_signal": {}
+  }
+}
