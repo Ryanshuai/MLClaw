@@ -1,4 +1,5 @@
-workspace_root: D:\agent_space\mlclaw\projects
+workspace_root: ~/agent_space/mlclaw/projects
+# Where this user's MLClaw projects live. Edited by /project-init when the user picks a different path. `~/` expands to the OS home dir at use time (Windows: substitute `%USERPROFILE%\agent_space\mlclaw\projects`).
 
 # MLClaw
 
@@ -149,7 +150,7 @@ Step 1: Resolve Assets                        depends on: init (items defined),
      ↓
 Step 2: Create Run                            depends on: assets resolved
      │  - create run dir + run.json
-     │  - code snapshot (origin_commit, project_commit)
+     │  - code snapshot — see "Code snapshot (Step 2 detail)" below
      │  - env snapshot (packages from lifecycle/run.json template)
      │  - dependency check (required vs installed)
      │  - snapshot resolved assets → sources.json
@@ -160,13 +161,14 @@ Step 2: Create Run                            depends on: assets resolved
 Step 3: Build & Execute                       depends on: run created
      │  - resolve ${} references (from assets)
      │  - build command (argparse/yaml/hydra/hybrid)
+     │  - cwd + output_dir — see "Launch contract (Step 3 detail)" below
      │  - debug mode (sync, limited data) or production mode (background/remote)
      │  [if fail: diagnose → fix → retry loop]
      ↓
 Step 4: Collect Results                       depends on: execution finished
-     │  - finalize run.json (status, duration)
+     │  - finalize run.json (status, duration, metrics) — this is the
+     │    only writeback; there is no separate index file to maintain
      │  - extract metrics (from stdout/files)
-     │  - update runs_index.json
      │  eval-run extras: per-class metrics, baseline comparison, offer baseline update
      │
      │  [external: eval-run only ── offer /eval-report]
@@ -180,7 +182,62 @@ Steps correspond to headings in the skill's SKILL.md: `##` headings are major st
 
 `steps.ad_hoc` is an array for unplanned actions that don't match any predefined step — e.g., fixing a file permission, patching a config typo, installing a missing package. Each entry: `{ "name": "...", "description": "...", "after_step": "...", "status": "...", "at": "..." }`. If the same ad_hoc action shows up across multiple runs, it's a signal to promote it into a formal step in the SKILL.md.
 
-### Run Lineage
+#### Code snapshot (Step 2 detail)
+
+Every run skill captures the exact code state at run-time so a completed run is self-contained for reproduction.
+
+- **`code_dir`** is resolved by the unified rule from "Code Source Resolution":
+  ```
+  code_dir = stages/<stage>/code/_source if exists else stages/<stage>/code
+  ```
+- **Helper**: `python <mlclaw_root>/lifecycle/scripts/shared/code_snapshot.py <code_dir> <RUN_DIR>` — outputs a JSON dict; merge it into `run.json -> code`.
+- **Git working tree** (typical): records `repo` (origin URL), `branch`, `origin_commit` (SHA). If the tree is dirty, writes `<RUN_DIR>/code_dirty.patch` (output of `git diff HEAD`) and fills `dirty_patch_path` + `dirty_files_count`. Reproduction contract: `git checkout <origin_commit> && git apply <run_dir>/code_dirty.patch`.
+- **Non-git directory** (rare, one-off scripts): falls back to a full copy into `<RUN_DIR>/code_snapshot/` (excludes `__pycache__`, `.venv`, `*.pt`, `*.pth`); records `snapshot_dir` instead.
+
+The same call applies to all run skills (`/train-run`, `/eval-run`, `/infer-run`, `/refactor-run`) — no per-skill variant.
+
+#### Launch contract (Step 3 detail)
+
+Two rules, uniform across all run skills:
+
+1. **`cwd = <code_dir>`** (the same path used in Step 2). For module-style entry commands like `python -m pkg.train` this is mandatory — package imports won't resolve from anywhere else.
+2. **`output_dir` (or framework equivalent) must be overridden to an absolute path under `<RUN_DIR>/output/`**. The default config's relative `output_dir` would land artifacts back in the user's code repo, where MLClaw can't manage them and the next run would overwrite them. Override syntax depends on the framework:
+   - omegaconf / hydra: `--set output_dir=<abs>` or `+output_dir=<abs>`
+   - argparse: `--output-dir <abs>` / `--output_dir <abs>`
+   - HF Trainer: `--output_dir <abs>`
+   - accelerate: `--output_dir <abs>`
+   - env var: `OUTPUT_DIR=<abs>`
+   `/train-init` (and per-stage init skills) record which form a given codebase uses; `/{stage}-run` consumes that and substitutes.
+
+Stage-specific extras (production mode launching, monitoring, ETA computation, finalize hooks) go in each run skill's SKILL.md — these two rules do not.
+
+#### Listing runs (no separate index)
+
+There is no `runs_index.json` cache. The source of truth is the `run.json` files themselves; "list all runs" / "find comparable runs" is a `jq` query over the run tree, run on demand. This avoids cache drift after rsync, manual run deletion, schema evolution, and concurrent updates — none of which need any code to handle when there's no cache.
+
+Canonical patterns:
+
+```bash
+# All completed runs in a stage, with key fields
+jq -s '
+  map(select(.status == "completed") | {
+    run_id, alias, status, duration_s,
+    primary_metric: .metrics.best.primary_metric_value,
+    path: ("stages/" + .stage + "/runs/" + .run_id),
+    session: .lineage.session
+  })
+' stages/<stage>/runs/run_*/run.json
+
+# Runs comparable for /train-tune (same code SHA + dataset split)
+jq -s --arg sha "$SHA" '
+  map(select(.code.origin_commit == $sha and .lineage.session == null))
+' stages/training/runs/run_*/run.json
+
+# Most recent N runs (by created_at) for menus
+jq -s 'sort_by(.created_at) | reverse | .[0:10]' stages/<stage>/runs/run_*/run.json
+```
+
+If a single `run.json` is malformed, jq errors on that file; agents should `find ... -exec jq ...` per-file with `2>/dev/null` when scanning unattended. At realistic scale (≤ 10k runs per project) the scan completes in well under a second.
 
 Each run tracks two types of relationships in `run.json → lineage`:
 
@@ -235,7 +292,7 @@ Stack entries follow the node hierarchy — they locate the exact position in th
   "stage": "evaluation",
   "execution": "run_20260317_091500",
   "step": "execute",
-  "project": "D:\\agent_space\\mlclaw\\projects\\detection"
+  "project": "~/agent_space/mlclaw/projects/detection"
 }
 ```
 
@@ -315,6 +372,18 @@ Run skills use `{run_in_env}` as shorthand for the activation command:
 - mamba/conda: `mamba run -n {env_name}` or `conda run -n {env_name}`
 - uv/venv: `source {venv_path}/bin/activate &&` (Linux) or `{venv_path}/Scripts/activate &&` (Windows)
 
+### Workspace and tool-repo location
+
+**Workspace** — directory holding all of this user's MLClaw projects + their shared `resources.json`. One value, lives in `workspace_root:` at the top of this file. `/project-init` rewrites that line if the user picks a different path. No registry, no priority chain — when there's actually more than one workspace on the same machine, that's the time to add structure, not before. CLI override: `/project-init --workspace <path>`.
+
+**MLClaw repo** — auto-detected and cached in `~/.mlclaw/state.json`:
+```
+mlclaw_root  = $(python <repo>/lifecycle/scripts/shared/workspaces.py tool)
+```
+Self-bootstraps from `__file__` on first call, so skills don't need the user to pass the MLClaw path each time. Override with `workspaces.py register-tool <path>` if you have multiple clones.
+
+**Path portability**: `init_project.py` rewrites any `$HOME`-relative path in `project.json` to `~/`-prefixed form (`root`, `workspace`, every `stages.<>.code_source.path`). Always `os.path.expanduser` before using these paths.
+
 ### Code Source Resolution
 
 Each stage in `project.json` has a `code_source` block:
@@ -336,13 +405,26 @@ Each stage in `project.json` has a `code_source` block:
 | `server` | SCP code from remote `path` into `code_path`. Uses `credentials` for SSH. |
 | `null` | Code already lives in `code_path` (manually placed). |
 
-Skills resolve the effective code directory as:
-1. If `code_source.source == "local"` and `code_source.path` is set → use `code_source.path` directly
-2. If `code_source.source == "github"` → clone to `code_path` if not already cloned, then use `code_path`
-3. If `code_source.source == "server"` → scp to `code_path`, then use `code_path`
-4. If `code_source.source` is null → use `code_path` (relative to project root)
+**Unified code-dir rule** — every skill's cwd / read path is exactly one expression:
 
-`code_path` always remains as the local working directory (for overrides, local modifications). When `source == "local"`, the external path is the primary read location.
+```
+code_dir = stages/<stage>/code/_source if exists else stages/<stage>/code
+```
+
+`/project-init` puts the right thing under `stages/<stage>/code/` per source mode, so all downstream skills only see the unified path:
+
+| Source | What `/project-init` does | Effective `code_dir` |
+|---|---|---|
+| `local` | Symlink `stages/<stage>/code/_source → expanduser(code_source.path)`. The user's external repo stays the source of truth — edits in the IDE are visible immediately. | `code/_source` (the symlink) |
+| `github` | `git clone code_source.path` into `stages/<stage>/code/`, then remove `.git` so files are tracked under project git. | `code/` (no `_source`) |
+| `server` | `scp` from remote `path` into `stages/<stage>/code/`. | `code/` (no `_source`) |
+| `null` | Code was placed manually under `code/`. | `code/` (no `_source`) |
+
+**Why a symlink (not a copy) for `local`**: ML users iterate in their own repo with their own IDE/git. Copying creates two trees and bidirectional sync friction; symlink keeps a single source of truth. The lockdown of "what code did this run actually use" is solved separately at run-time by `code_snapshot.py` (SHA + dirty patch — see Run Skill Internal Dependencies).
+
+**rsync portability**: the symlink stores an *expanded* absolute path (filesystems don't expand `~` at read time), so it dangles after `rsync` to a new machine where `$HOME` is different. Recovery: `python lifecycle/scripts/shared/relink_sources.py [<project_root>]` reads the `~/`-portable `code_source.path` from `project.json` and recreates symlinks for all local-source stages on the current host. Idempotent.
+
+`code_path` (project.json) is always `stages/<stage>/code` — keep it as the join target, don't reinterpret it per source.
 
 ### Path Mapping (Cross-Machine Execution)
 
@@ -361,7 +443,7 @@ The project-relative path stays the same; only the root prefix changes. Run skil
 
 ### File Layout
 
-#### MLClaw repo (d:\10_projects\MLClaw) — the tool
+#### MLClaw repo (`<wherever the MLClaw tool repo is cloned>`, e.g. `~/code/MLClaw`) — the tool
 
 ```
 CLAUDE.md                           ← this file
@@ -385,7 +467,6 @@ lifecycle/
   resources.json                    ← access credentials and resource definitions template
   history.json                      ← workflow state template
   run.json                          ← run record template
-  runs_index.json                   ← runs index template
   scripts/
     project-init/
       init_project.py               ← create project dirs, copy templates, git init
@@ -399,7 +480,6 @@ lifecycle/
       test_connection.py            ← test SSH/S3 connectivity
       extract_metrics.py            ← extract metrics from stdout/result files
       finalize_run.py               ← update run.json with duration/status
-      update_index.py               ← append run summary to runs_index.json
     eval-init/
       validate_ground_truth.py      ← validate GT config consistency
     eval-run/
@@ -428,7 +508,7 @@ lifecycle/
     refactor_run.json               ← run record template (refactor-specific steps)
 ```
 
-#### Workspace root (D:\agent_space\mlclaw\projects)
+#### Workspace root (`{workspace_root}`, e.g. `~/agent_space/mlclaw/projects`)
 
 ```
 resources.json                      ← access credentials and resources, shared across all projects (NEVER commit)
@@ -436,12 +516,11 @@ detection/                          ← one project
 another_project/                    ← another project
 ```
 
-#### User project (e.g., D:\agent_space\mlclaw\projects\detection)
+#### User project (`{workspace_root}/{project_name}`, e.g. `~/agent_space/mlclaw/projects/detection`)
 
 ```
 project.json                        ← project config (git tracked)
 history.json                        ← workflow state + history
-runs_index.json                     ← all runs quick lookup (alias, metrics, tags)
 .gitignore
 stages/
   {stage}/                          ← same structure for each stage (inference, evaluation, ...)

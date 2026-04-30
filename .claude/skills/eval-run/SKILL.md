@@ -83,7 +83,7 @@ After execution finishes:
        mAP_small: 0.289  (-0.003, -1.0%)  <- regression
      ```
 
-6. **Alias & index** — ask user for optional alias/description. Update `runs_index.json`. Script: `update_index.py`.
+6. **Alias** — ask user for optional alias/description; write into `run.json -> alias` / `description`. No separate index file to update — `run.json` files are the source of truth, queried via `jq` on demand (see CLAUDE.md "Listing runs (no separate index)").
 
 7. **Offer baseline update** — "Set this run as the new baseline?" If yes, update `output.json -> metrics.baseline` to this run's ID.
 

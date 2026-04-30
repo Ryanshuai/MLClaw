@@ -16,7 +16,6 @@
     "log_path": "",
     "stdout_extractor": null,
     "record_types": {},
-    "definitions": {},
     "watch_step": [],
     "watch_epoch": [],
     "primary_metric": "",

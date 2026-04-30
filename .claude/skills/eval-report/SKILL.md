@@ -17,7 +17,7 @@ Follow the Workflow State Protocol from CLAUDE.md: push on entry, update step as
 
 **From /eval-run**: use current `{PROJECT}` and `{RUN_DIR}`, skip to Step 2.
 
-**Standalone**: locate project per CLAUDE.md conventions (show recent projects, let user pick). Then list recent evaluation runs from `{PROJECT}/runs_index.json` (most recent first, up to 10). Ask which run to report on. Read `{RUN_DIR}/run.json` — warn if not completed.
+**Standalone**: locate project per CLAUDE.md conventions (show recent projects, let user pick). Then list recent evaluation runs by jq-scanning `{PROJECT}/stages/evaluation/runs/run_*/run.json` (sort by `created_at` desc, take top 10 — see CLAUDE.md "Listing runs (no separate index)" for the canonical query). Ask which run to report on. Read `{RUN_DIR}/run.json` — warn if not completed.
 
 ## Step 2: Gather Report Data
 
