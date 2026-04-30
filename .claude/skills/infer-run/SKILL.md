@@ -65,7 +65,7 @@ After execution finishes:
 
 3. **Collect metrics** — extract from stdout/result files into `run.json -> metrics`. Script: `extract_metrics.py`. Fallback: parse logs manually.
 
-4. **Alias & index** — ask user for optional alias/description. Update `runs_index.json`. Script: `update_index.py`.
+4. **Alias** — ask user for optional alias/description; write into `run.json -> alias` / `description`. No separate index file to update — `run.json` files are the source of truth, queried via `jq` on demand (see CLAUDE.md "Listing runs (no separate index)").
 
 5. **Show summary**:
    ```

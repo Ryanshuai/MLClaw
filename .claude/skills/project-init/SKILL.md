@@ -14,15 +14,15 @@ Follow the Workflow State Protocol from CLAUDE.md: push on entry, update step as
 ## Conversation flow
 
 1. Ask: What is the project name? (lowercase, underscores, e.g., `rtdetr_detection`)
-2. Ask: Where to create the project? (default: `D:\agent_space\mlclaw\projects`)
+2. Resolve workspace. Default = `workspace_root:` line at the top of CLAUDE.md (read it once, expand `~/`). Confirm with user; if they pick a different path, replace the `workspace_root:` line in CLAUDE.md so subsequent invocations get the new default. If `--workspace <path>` was passed in the user's prompt, skip the confirm and use it directly. `mkdir -p` whichever path won — workspaces are cheap, accidentally creating one is harmless.
 3. Ask: Which stages to enable? Options: data, exploration, training, evaluation, inference, deployment
 4. For each enabled stage, ask one at a time: Code source for {stage}? (git URL / local path / skip for now)
 
 5. **Show a full summary** with all fields and values (including defaults):
    ```
    Project: detection
-   Workspace: D:\agent_space\mlclaw\projects
-   Root: D:\agent_space\mlclaw\projects\detection
+   Workspace: ~/agent_space/mlclaw/projects
+   Root: ~/agent_space/mlclaw/projects/detection
    Created: 2026-03-16
 
    Stages:
@@ -44,20 +44,27 @@ Each stage has: `enabled`, `code_path` (`stages/{stage}/code`), `code_source` (`
 
 ## Create project
 
-Run `python lifecycle/scripts/project-init/init_project.py '<project_json_string>' 'd:\10_projects\MLClaw'` — creates directories, copies templates, writes .gitignore, runs git init + initial commit.
+```
+MLCLAW_ROOT=$(python <repo>/lifecycle/scripts/shared/workspaces.py tool)
+python "$MLCLAW_ROOT/lifecycle/scripts/project-init/init_project.py" '<project_json_string>' "$MLCLAW_ROOT"
+```
+
+Creates directories, copies templates, writes `.gitignore`, runs git init + initial commit. `$HOME`-relative paths (project root, workspace, each stage's `code_source.path`) are rewritten to `~/`-prefixed form in `project.json` so the file survives rsync across machines.
 
 **Fallback**: if script fails, manually create directories (`stages/{stage}/code`, `runs`, `artifacts`, `data` for each enabled stage), copy JSON templates from `lifecycle/`, write .gitignore, git init + commit.
 
 ## Clone / Link code
 
-For each stage with a repo value:
-- **Git URL**: `git clone` into `stages/{stage}/code/`, record branch + commit in `project.json`, remove `.git` so code becomes plain files tracked by project git.
-- **Local path**: symlink `stages/{stage}/code/_source` -> local path.
+The unified contract (see CLAUDE.md "Code Source Resolution") is `code_dir = stages/{stage}/code/_source if exists else stages/{stage}/code`. Per source mode:
 
-Code modifications during runs stay in project git — never pushed back to original repo.
+- **Git URL** (`code_source.source == "github"`): `git clone <code_source.path>` into `stages/{stage}/code/`, record `branch` + `commit` (HEAD SHA) in `project.json`, remove `.git` so the code becomes plain files tracked by project git. No `_source` symlink for this mode.
+- **Local path** (`code_source.source == "local"`): `init_project.py` already creates the symlink `stages/{stage}/code/_source -> expanduser(code_source.path)` during creation. **Do not copy — the user iterates in their own repo, copy creates bidirectional sync friction**. Reproducibility comes from `code_snapshot.py` at run-time, not from a project-wide copy. After rsync to a new machine the symlink will dangle (it stores an expanded absolute path); recreate with `ln -sfn $(python -c "import json,os;print(os.path.expanduser(json.load(open('project.json'))['stages']['<stage>']['code_source']['path']))") stages/<stage>/code/_source`.
+- **Server** (`code_source.source == "server"`): `scp` into `stages/{stage}/code/`, no `_source` symlink.
+
+Code modifications during runs stay in project git (for github/server) or are captured per-run via `code_snapshot.py` SHA + dirty patch (for local) — never pushed back to the original repo.
 
 ## After creation
 
-1. Verify project is under `workspace_root` from CLAUDE.md. If user chose a different workspace, update `workspace_root`.
+1. The chosen workspace was already upserted in step 2d — `last_used` is fresh and `n_projects` is now incremented to include this new project. If it wasn't yet upserted (unusual — only when the script was unavailable and you used the bootstrap fallback path), run `python lifecycle/scripts/shared/workspaces.py upsert <workspace>` now.
 2. Tell user: Project created at `{root}`.
 3. **Downstream**: offer `/resources` and available `/{stage}-init` skills for enabled stages. For stages without an init skill yet, note it's not available.

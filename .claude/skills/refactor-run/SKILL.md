@@ -123,6 +123,8 @@ Verification uses a cost-efficient hierarchy — only escalate when the current 
 
 **Tier 0 can short-circuit everything**: if static analysis proves the deletion is safe (zero surviving references), skip Tiers 1-3 entirely and go straight to commit.
 
+When a tier requires actually launching the user's code (Tier 1+ smoke / mini / full benchmark), follow CLAUDE.md "Run Skill Internal Dependencies" Step 2 (`code_snapshot.py` for SHA + dirty patch) and Step 3 (`cwd` = unified code_dir, `output_dir` = absolute under `<RUN_DIR>/output/`). Refactor-run is the exception in that the code_dir is `stages/refactor/code/` directly (no `_source` symlink — refactor edits in place); the cwd / output_dir / snapshot rules still apply.
+
 Read `references/verification-tiers.md` for detailed tier descriptions, Phase 1 vs Phase 2 variants, graph comparison methods, tensor snapshot procedures, tolerance values, and JSON recording schemas.
 
 ## Step 4: Compare Results
@@ -162,7 +164,7 @@ Step key: `commit_or_revert`.
 
 Step key: `finalize`.
 
-1. Finalize `run.json` (status, duration, metrics). Update `runs_index.json`.
+1. Finalize `run.json` (status, duration, metrics). No separate index file — `run.json` is the source of truth (see CLAUDE.md "Listing runs (no separate index)" for the jq query pattern).
 2. Pop from `history.json` stack, append `completed`.
 
 Show progress:

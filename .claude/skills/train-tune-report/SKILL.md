@@ -71,19 +71,26 @@ If `hypothesis` is null and there's no decision tag: render as `[unlabeled]`.
 **Best**: trial_<id> (<primary_metric>=<value>) | <N> trials | <wall_h>h wall | <status>
 ```
 
-Status from `state.json`: running | converged | budget_exhausted | stopped.
+Status from `state.json`: running | converged | budget_exhausted | stopped | **no_signal**.
 
-### 4b. Best-so-far text bar chart
-
-For each iter, compute best-so-far metric. Render as text bars with quantiles:
+**`no_signal` headline override** — when `state.status == "no_signal"`, replace the entire headline with:
 
 ```
-Iter:   0   1   2   3   4   5   6   ...
-Val:   .965 .963 .968 .969 .969 .971 .972
-       ▁   ▂   ▃   ▄   ▄   ▅   █
+**⚠️ NO SIGNAL** — `<primary_metric>` = <value> across all <N> trials. The search produced no information to rank trials. Likely causes: training too short / metric saturated / NaN crash / wrong metric choice. Do not take any trial as production. | <N> trials | <wall_h>h wall
 ```
 
-Bar height: 8-level Unicode block (▁▂▃▄▅▆▇█) mapped to (val - min_val) / (max_val - min_val).
+Use `state.no_signal_value` for `<value>` if present; else read from any trial. **Do not pick a "best" trial.** The "Best:" prefix and BEST highlight in the timeline must not appear at all in this mode — they would falsely imply ranking.
+
+### 4b. Best-so-far sequence
+
+For each iter, compute the best primary_metric value seen up to that iter. Render as a one-line numeric sequence:
+
+```
+Iter:   0     1     2     3     4     5     6     ...
+Best:  .965  .965  .968  .969  .969  .971  .972
+```
+
+The information is in the numbers; readers can see plateaus and jumps without ASCII bars. (Earlier versions rendered an 8-level Unicode block bar — dropped because it added zero information beyond the numeric line and degenerated to a single character when the metric stayed flat.)
 
 ### 4c. Coverage map
 
@@ -125,8 +132,27 @@ From the agent's final state in decisions (last few iters' analysis): list axes 
 that haven't been fully explored. If user supplied `research_goals.md` with `search_priors`,
 compare coverage map against priors and call out untested portions.
 
-Add a hard-coded reminder if the best run is single-seed: "**Single seed** — recommend
-multi-seed verification before deployment".
+**Single-seed-best detection** (fires regardless of `state.status`, **except** when status is `no_signal` — there's no best to verify in that case):
+
+```python
+if state.status != "no_signal" and state.best_run is not None:
+    best_params = state.best_run.runtime_params
+    seeds_at_best = {
+        t.runtime_params.seed for t in trials
+        if {k: v for k, v in t.runtime_params.items() if k != "seed"}
+        == {k: v for k, v in best_params.items() if k != "seed"}
+    }
+    if len(seeds_at_best) == 1:
+        open_questions.append(
+            f"**Single seed ({next(iter(seeds_at_best))})** — best config "
+            f"({state.best_run}) was only run with one seed. The reported winner "
+            f"may be a lucky outlier. Recommend re-running the same config with "
+            f"2+ different seeds and confirming the metric stays within noise "
+            f"before deployment."
+        )
+```
+
+This is the canonical place for the warning — it fires for every status that produces a `best_run` (`converged`, `budget_exhausted`, manual stop, ...). `/train-tune` does not need to launch `[verify]` trials before stopping; the reminder in the report is enough to prompt a follow-up session if the user wants verification.
 
 ### 4g. Recipe
 
@@ -134,6 +160,20 @@ Final config dict from current best run's `runtime_params`, formatted as YAML.
 
 Plus a one-line **Recommend** action: typically "run 3-seed verification" or "test on
 held-out set".
+
+**No-signal mode**: replace the recipe section entirely with a diagnostic block — there is no recipe to recommend, and printing one would imply confidence that doesn't exist.
+
+```
+## What to do next
+
+The search did not produce comparable signal. Before re-running the search:
+
+1. Verify training is actually learning at this scale — pick the strongest config from `runtime_params` (likely `[baseline]`) and run **once** with ≥3x the trials' epochs / training data. If the primary metric is still `<value>`, the bug is upstream of `/train-tune` (eval / data / metric definition).
+2. Check the metric is sensible: `<primary_metric>` should be a continuous quantity that varies smoothly with model quality. If it's a strict-match accuracy and the model is far from solving any sample, expect 0.0 across reasonable hparams.
+3. If you intended to stress-test the skill (not actually search), that's fine — just don't take any trial's `runtime_params` as production.
+```
+
+Skip 4f's "single-seed reminder" in `no_signal` mode — there is no best run to verify.
 
 ## Step 5: Write chain.md
 

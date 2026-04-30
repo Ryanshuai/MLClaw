@@ -103,8 +103,11 @@ comparable = [
 ]
 ```
 
-Use `lifecycle/scripts/shared/similar_runs.py` (when implemented). Until then, do this
-filter manually with Bash + jq.
+Filter inline with Bash + jq, e.g.:
+```bash
+jq -r 'select(.code.origin_commit=="<sha>" and .lineage.session==null) | .run_id' \
+   stages/training/runs/*/run.json
+```
 
 For each comparable run extract: `runtime_params`, `hypothesis`, `outcome`, primary
 metric value, `lineage.fork_of`, `lineage.variation_summary`. **All session sources
@@ -157,22 +160,42 @@ Agent picks based on observation:
 - gap detected on axis X (large step between tested values) → `fill_grid` on X
 - best metric stable across 3+ trials → `refine_best` to confirm or push for marginal gain
 - best stable AND no obvious gaps → `add_axis` (new axis: warmup if not tried, etc.)
-- best is single-seed and budget allows → `verify` before declaring final
+- best is single-seed and budget allows → `verify` (optional; the report will warn anyway, so launch only when budget permits and you genuinely want noise estimates)
 
 ## Step 5: Stop Conditions
 
-Two paths to stop:
+Three paths to stop:
 
 | Stop reason | Condition |
 |---|---|
 | `budget_exhausted` | iteration ≥ `budget.max_trials` OR wall-time ≥ `budget.max_wall_hours` |
 | `converged` | Agent self-judges based on observation: best stable for last 3-5 iters AND coverage map shows no obvious gaps AND last few hypotheses' alternatives are all "minor variations". |
+| `no_signal` | All completed trials produced **the exact same** `primary_metric` value (typical causes: training too short / metric saturated at 0 or NaN / broken eval / wrong metric choice). Agent does not pick a winner — see "No-signal handling" below. |
 
 Convergence is **agent's call** — write the rationale into the final hypothesis or
 chain.md, e.g., "stopping: best stable 4 iters, all axes covered ≥5 trials, marginal
 gain expected < 0.1%."
 
 Update state.json `status` accordingly.
+
+### No-signal handling (Hard Rule)
+
+At session close, before writing `state.best_run` / `state.best_metric`:
+
+```python
+values = {t.metrics["best"]["primary_metric_value"] for t in completed_trials}
+if len(values) == 1:
+    state["status"] = "no_signal"
+    state["best_run"] = None
+    state["best_metric"] = None
+    state["no_signal_value"] = next(iter(values))   # the shared value, for the report
+```
+
+Strict equality, no epsilon — primary metric is a real number that won't accidentally collide across trials when there's actual signal. This catches the cases that matter: 0.0 (model never solved any sample), NaN (loss exploded), or a metric the user accidentally rounded to int.
+
+Do not invent a tiebreaker. Do not silently pick `trials[0]`. The whole point is to surface "the search produced no information" as a user-visible result, not to pretend there is a winner. `/train-tune-report` renders a loud warning — see that skill's "No-signal report" section.
+
+`no_signal` overrides both `budget_exhausted` and `converged`: if the values check trips, status is `no_signal` regardless of how the loop ended.
 
 ## Step 6: Render Report
 
@@ -192,11 +215,8 @@ own preferences:
    explore one before opening another. Multi-axis simultaneous variation only when
    user explicitly requests interaction study, or as `[refine_best]` micro-step.
 3. **Hypothesis must include confidence**. End hypothesis with `(confidence: low|medium|high based on N comparable trials)`. This forces honest uncertainty estimates.
-4. **Multi-seed verification before declaring final winner**. Before stopping with
-   `converged`, if best is single-seed and budget allows ≥ 2 more trials, launch
-   `[verify]` re-runs at the best config with different seeds. If all match within
-   noise, declare converged. If they diverge, the "best" was a lucky outlier — keep
-   searching.
+
+(Single-seed-best detection lives in `/train-tune-report`'s Open Questions section — it's a reporting concern that fires regardless of session status, not a stop-condition for the search loop. The agent can still proactively launch `[verify]` re-runs as a `refine_best` decision if budget allows, but it's no longer mandatory before stopping.)
 
 ## Failure Modes
 

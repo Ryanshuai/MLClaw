@@ -12,16 +12,15 @@ Empty sections rendered with "—" (don't omit).
 
 ## Headline
 
-- lr 是主导轴。best lr=2.5e-4，区间 [2e-4, 3e-4] 内差异 < 0.1%
-- warmup_ratio 弱信号：0.03-0.05 几乎一样
-- weight_decay 在测试范围内无信号
+- lr is the dominant axis. Best lr=2.5e-4; differences within [2e-4, 3e-4] are < 0.1%.
+- warmup_ratio is a weak signal: 0.03-0.05 are nearly indistinguishable.
+- weight_decay shows no signal in the tested range.
 
-## Best-so-far curve
+## Best-so-far sequence
 
 ```
-Iter:   0   1   2   3   4   5   6   7   8   9   10  11  12  13  14  15  16  17
-Val:   .965 .963 .968 .969 .969 .971 .972 .972 .972 .971 .971 .972 .971 .972 .972 .972 .971 .972
-       ▁   ▂   ▃   ▄   ▄   ▅   ▆   ▆   ▆   ▅   ▅   █   ▅   █   █   █   ▅   █
+Iter:   0     1     2     3     4     5     6     7     8     9     10    11    12    13    14    15    16    17
+Best:  .965  .965  .968  .969  .969  .971  .972  .972  .972  .972  .972  .972  .972  .972  .972  .972  .972  .972
 ```
 
 ## Coverage map
@@ -35,53 +34,53 @@ Val:   .965 .963 .968 .969 .969 .971 .972 .972 .972 .971 .971 .972 .971 .972 .97
 ## Decision timeline
 
 ### Iter 0 · [baseline] · trial_0
-- **Hypothesis**: 建立基准. lr=1e-4 (领域常识默认)
+- **Hypothesis**: Establish baseline. lr=1e-4 (domain default).
 - **Diff vs base**: — (no fork)
 - **Outcome**: val_acc=0.965
 
 ### Iter 1 · [fill_grid] · trial_1
-- **Hypothesis**: 试 lr=2e-4，看更高 lr 是否更优
+- **Hypothesis**: Try lr=2e-4 to see if a larger lr is better.
 - **Diff vs base**: lr 1e-4 → 2e-4
 - **Outcome**: val_acc=0.963 (-0.2%) — refuted
 
 ### Iter 2 · [fill_grid] · trial_2
-- **Hypothesis**: 反向试 lr=5e-5，可能更稳
+- **Hypothesis**: Try lr=5e-5 in the opposite direction; may be more stable.
 - **Diff vs base**: lr 1e-4 → 5e-5
-- **Outcome**: val_acc=0.968 (+0.3%) — confirmed, 更小 lr 更稳
+- **Outcome**: val_acc=0.968 (+0.3%) — confirmed, smaller lr is more stable.
 
 ### Iter 5 · [refine_best] · trial_5
-- **Hypothesis**: lr=5e-5 优于基线。试 [3e-5, 7e-5] 看是否还能往下
+- **Hypothesis**: lr=5e-5 beats baseline. Try [3e-5, 7e-5] to see if it goes lower still.
 - **Diff vs base**: lr 5e-5 → 3e-5 (fork_of trial_2)
-- **Outcome**: val_acc=0.969 (+0.001) — 信号弱，达到平台
+- **Outcome**: val_acc=0.969 (+0.001) — weak signal, plateau reached.
 
 ### Iter 8 · [add_axis] · trial_8
-- **Hypothesis**: lr 探索充分，best 区间 [2e-4, 3e-4] 确认。引入 warmup 看是否还有空间
-- **Diff vs base**: warmup 0 → 0.03 (lr 锁 2.5e-4)
-- **Outcome**: val_acc=0.971 (+0.2%) — confirmed, warmup 有用
+- **Hypothesis**: lr is well explored; best region [2e-4, 3e-4] confirmed. Introduce warmup to see if there's more room.
+- **Diff vs base**: warmup 0 → 0.03 (lr fixed at 2.5e-4)
+- **Outcome**: val_acc=0.971 (+0.2%) — confirmed, warmup helps.
 
 ### Iter 15 · [refine_best] · trial_15  ← BEST
-- **Hypothesis**: lr=2.5e-4 + warmup=0.03 当前 best。再试 ±10% 微调
+- **Hypothesis**: lr=2.5e-4 + warmup=0.03 is current best. Try ±10% micro-tuning.
 - **Diff vs base**: lr 2.5e-4 → 2.6e-4 (fork_of trial_8)
-- **Outcome**: val_acc=0.972 — same as 2.5e-4, plateau detected
+- **Outcome**: val_acc=0.972 — same as 2.5e-4, plateau detected.
 
-(其余 iter 省略)
+(other iters omitted)
 
 ## Confirmed
 
-- lr 区间 [2e-4, 3e-4] 是 sweet spot，内部差异 < 0.1%
-- warmup_ratio=0.03 优于 0（微弱信号）
+- lr range [2e-4, 3e-4] is the sweet spot; internal differences < 0.1%.
+- warmup_ratio=0.03 beats 0 (weak signal).
 
 ## Refuted
 
-- lr ≥ 5e-3：数值不稳，loss 在 epoch 30 前后发散
-- warmup_ratio ≥ 0.1：前期收敛慢，最终 val_acc 落后
-- weight_decay = 1e-2：val_acc 下降 2%
+- lr ≥ 5e-3: numerically unstable; loss diverges around epoch 30.
+- warmup_ratio ≥ 0.1: slow early convergence; final val_acc lags.
+- weight_decay = 1e-2: val_acc drops 2%.
 
 ## Open questions
 
-- weight_decay 微小区间 [1e-7, 1e-5] 未测
-- batch_size 被 fixed=256，未变
-- **单 seed 结果** — best 未多 seed 复验
+- weight_decay narrow range [1e-7, 1e-5] not tested.
+- batch_size held fixed at 256.
+- **Single-seed result** — best config has not been verified across multiple seeds.
 
 ## Recipe (locked in by this session)
 
@@ -92,7 +91,7 @@ warmup_ratio: 0.03
 weight_decay: 1e-4
 ```
 
-**Recommend**: 跑 3-seed 验证 trial_15 config 后再 deploy。
+**Recommend**: run 3-seed verification on trial_15's config before deploying.
 ```
 
 ---

@@ -32,11 +32,14 @@
     "ad_hoc": []
   },
 
+  "_comment_code": "Filled by run skills at create_run.code_snapshot via lifecycle/scripts/shared/code_snapshot.py. SHA + dirty_patch_path is the reproduction contract: `git checkout <origin_commit> && git apply <run_dir>/<dirty_patch_path>`.",
   "code": {
     "repo": null,
     "branch": null,
     "origin_commit": null,
-    "project_commit": null
+    "project_commit": null,
+    "dirty_patch_path": null,
+    "dirty_files_count": null
   },
 
   "env": {
@@ -140,6 +143,9 @@
   "latest_metrics": {},
 
   "metrics": {},
+
+  "_comment_outputs": "Canonical artifact paths produced by this run, relative to <run_dir>. Filled by run skills at finalize. Per-stage conventions: training fills best_checkpoint / last_checkpoint / train_log / config_yaml; eval fills report / metrics_json; infer fills predictions / etc. Downstream skills (e.g. /eval-run consuming a train run's best ckpt) read these instead of re-deriving paths from config conventions.",
+  "outputs": {},
 
   "_comment_outcome": "Optional. Free-text retrospective written when the run terminates, e.g., 'Refuted. val_loss 0.234 → 0.241 (+3%), convergence epoch 87 → 92'. Pairs with `hypothesis`. Tools must not require this; null is normal.",
   "outcome": null

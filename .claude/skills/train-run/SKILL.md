@@ -60,11 +60,13 @@ For remote servers, query the server's `nvidia-smi` over SSH first; resolve via 
 
 ## Steps 1-3: Shared Run Mechanics
 
-Follow CLAUDE.md "Run Skill Internal Dependencies":
+Follow CLAUDE.md "Run Skill Internal Dependencies" — that section owns the cross-skill rules. The shared parts in plain words:
 
 1. **Resolve Assets** (step `check_sources`) — fill paths in `artifacts.json` (pretrained backbone, tokenizer, base ckpt for fine-tuning), `input.json` train sources + val sources, AND `input.json -> ground_truth` for both splits. When extending a prior training run (fork + ckpt-as-init), auto-resolve the base run's last ckpt from `parents[-1] -> {RUN_DIR}/<ckpt_path>` and confirm with user — don't re-prompt for it.
-2. **Create Run** (step `create_run`) — create run dir, init `run.json`, code snapshot (git SHA, dirty flag), env snapshot (pip freeze + GPU + CUDA), dependency check.
-3. **Build & Launch** (step `execute`) — resolve `${}` references, build command per `config_format` and `distributed` setting, save `config_snapshot.json` and `sources.json`, confirm with user.
+
+2. **Create Run** (step `create_run`) — create run dir, init `run.json`, env snapshot (pip freeze + GPU + CUDA), dependency check. **Code snapshot via `code_snapshot.py`** — see CLAUDE.md "Code snapshot (Step 2 detail)". Train-specific: nothing extra.
+
+3. **Build & Launch** (step `execute`) — resolve `${}` references, build command per `config_format` and `distributed` setting, save `config_snapshot.json` and `sources.json`, confirm with user. **`cwd` + `output_dir` rules** — see CLAUDE.md "Launch contract (Step 3 detail)". Train-specific overrides: production mode runs in background (see "Execution Modes" below).
 
 ### Execution Modes
 
@@ -167,10 +169,10 @@ Confirm with user before any deletion. Show what will be kept and what removed.
 - `last_heartbeat`: final jsonl mtime
 - Reset `last_step` / `latest_metrics`? No — keep them for retrospective. They're now historical, not live.
 
-### 5d. Update index + summary
+### 5d. Summary
 
-- `runs_index.json` updated via `update_index.py` (or manual fallback).
-- Ask user for optional alias / description.
+- No separate index file to update — `run.json` is the source of truth, queried on demand via `jq` (see CLAUDE.md "Listing runs (no separate index)" for canonical patterns).
+- Ask user for optional alias / description, write into `run.json -> alias` / `description`.
 - Show summary:
   ```
   Run: training/run_20260427_180000  status: completed  duration 4h 12m

@@ -64,11 +64,35 @@ def main():
     os.makedirs(root, exist_ok=True)
 
     # Copy project-level templates
-    for fname in ["secrets.json", "history.json", "runs_index.json"]:
+    for fname in ["secrets.json", "history.json"]:
         src = os.path.join(lifecycle, fname)
         dst = os.path.join(root, fname)
         if os.path.isfile(src) and not os.path.isfile(dst):
             shutil.copy2(src, dst)
+
+    # Portable-ify any absolute paths under $HOME using the ~/ prefix so
+    # project.json survives a cross-machine rsync. Applies to top-level
+    # `root` / `workspace` and every stage's `code_source.path`.
+    home = os.path.realpath(os.path.expanduser("~"))
+    def _portable(p):
+        if not p or not isinstance(p, str):
+            return p
+        try:
+            absp = os.path.realpath(os.path.expanduser(p))
+        except (TypeError, ValueError):
+            return p
+        if absp == home:
+            return "~"
+        if absp.startswith(home + os.sep):
+            return "~/" + absp[len(home) + 1:].replace(os.sep, "/")
+        return p
+
+    project["root"] = _portable(project.get("root"))
+    project["workspace"] = _portable(project.get("workspace"))
+    for _stage, _cfg in project.get("stages", {}).items():
+        cs = _cfg.get("code_source") or {}
+        if cs.get("path"):
+            cs["path"] = _portable(cs["path"])
 
     # Write project.json
     project["created"] = datetime.now().isoformat()
@@ -102,6 +126,22 @@ def main():
             if os.path.isfile(src) and not os.path.isfile(dst):
                 shutil.copy2(src, dst)
 
+        # source=local: create stages/<stage>/code/_source symlink → expanded
+        # absolute path. Filesystems don't expand ~ at read time, so the
+        # target is stored expanded; after rsync to a new machine the
+        # symlink dangles and the user re-runs `ln -sfn` from the
+        # ~/-portable code_source.path in project.json.
+        cs = cfg.get("code_source") or {}
+        if cs.get("source") == "local" and cs.get("path"):
+            link = os.path.join(stage_dir, "code", "_source")
+            target = os.path.expanduser(cs["path"])
+            if os.path.islink(link) or os.path.exists(link):
+                os.remove(link) if os.path.islink(link) else None
+            try:
+                os.symlink(target, link)
+            except OSError as e:
+                print(json.dumps({"warning": f"could not symlink {link} -> {target}: {e}"}), file=sys.stderr)
+
     # Write .gitignore
     with open(os.path.join(root, ".gitignore"), "w") as f:
         f.write(GITIGNORE)
@@ -109,7 +149,7 @@ def main():
     # Git init + initial commit (skip if git not available)
     try:
         subprocess.run(["git", "init"], cwd=root, capture_output=True, check=True)
-        subprocess.run(["git", "add", "project.json", ".gitignore", "history.json", "runs_index.json"], cwd=root, capture_output=True)
+        subprocess.run(["git", "add", "project.json", ".gitignore", "history.json"], cwd=root, capture_output=True)
         for stage, cfg in project.get("stages", {}).items():
             if cfg.get("enabled"):
                 for jf in ["artifacts.json", "config.json", "input.json", "output.json"]:
