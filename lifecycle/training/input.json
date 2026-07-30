@@ -1,11 +1,24 @@
 {
-  "_comment": "Training inputs — train + val data with labels. Same shape as evaluation input.json. Actual files stored in stages/training/data/.",
+  "_comment": "Training inputs — train + val data with labels. Three layers: `items` = what the code needs (schema, survives moving machines); `candidates` = what is actually available here and how well each fits (machine-specific, re-scan after rsync); `sources` = which candidate a given run chose (snapshotted per run). Actual files stored in stages/training/data/.",
   "items": {},
+  "candidates": {
+    "_comment": "Per item name, an ordered list of usable options found by /train-init. Entry: {location, path, match, notes, evidence?, host?, scanned_at?, needs?}. location: code_default | local | s3 | server:<key> | downloadable — this determines how /train-run uses it (use directly / download / run ON that machine / reference only). match: ok | mismatch | absent. The code_default entry (the original author's path) must be listed even when absent — it is the reference for directory layout and the yardstick for judging the others. Search order: code-declared + local + downloadable are done by default; S3 and remote servers are slow and need credentials, so ask first.",
+    "items": {}
+  },
   "sources": {},
   "ground_truth": {
     "_comment": "Labels paired with each input split (train / val).",
     "items": {},
+    "candidates": { "items": {} },
     "sources": {}
   },
-  "pairing": ""
+  "pairing": "",
+  "preprocessing": {
+    "_comment": "The transform chain applied to inputs before the model sees them. CROSS-STAGE CONTRACT: normalization / input_layout / label_transform must match between training and eval/infer — a mismatch trains and infers without error and silently degrades production output. augmentation is train-only; its presence in an eval/infer stage is a bug. Every block carries `evidence` (path:line) because these values are read out of code, not declared anywhere.",
+    "normalization": { "mean": [], "std": [], "source": "", "evidence": "" },
+    "input_layout": { "size": [], "resize_mode": "", "channel_order": "", "evidence": "" },
+    "label_transform": { "index_base": null, "class_mapping": "", "background_class": null, "evidence": "" },
+    "augmentation": [],
+    "pipeline_evidence": ""
+  }
 }

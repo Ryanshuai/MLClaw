@@ -110,7 +110,10 @@ def main():
         os.makedirs(os.path.join(stage_dir, "artifacts"), exist_ok=True)
         os.makedirs(os.path.join(stage_dir, "data"), exist_ok=True)
 
-        # Copy 4 JSON templates (use stage-specific if exists, else inference fallback)
+        # Copy the stage's JSON templates (stage-specific dir if it exists,
+        # else fall back to inference's). Globbed rather than hardcoded so a new
+        # template file lands in projects without also editing this script —
+        # provenance.json was added to training and silently never copied.
         template_dir = os.path.join(lifecycle, stage)
         fallback_dir = os.path.join(lifecycle, "inference")
         if not os.path.isdir(template_dir):
@@ -120,7 +123,13 @@ def main():
                 print(json.dumps({"warning": f"No templates found for stage '{stage}', skipping template copy"}), file=sys.stderr)
                 continue
 
-        for jf in ["artifacts.json", "config.json", "input.json", "output.json"]:
+        # Run-record templates live in the same dir but are instantiated per run
+        # (by the run skill), not per stage — don't copy them as stage config.
+        run_record_templates = {"refactor_run.json"}
+
+        for jf in sorted(os.listdir(template_dir)):
+            if not jf.endswith(".json") or jf in run_record_templates:
+                continue
             src = os.path.join(template_dir, jf)
             dst = os.path.join(stage_dir, jf)
             if os.path.isfile(src) and not os.path.isfile(dst):

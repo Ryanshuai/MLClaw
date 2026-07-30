@@ -62,11 +62,33 @@ For remote servers, query the server's `nvidia-smi` over SSH first; resolve via 
 
 Follow CLAUDE.md "Run Skill Internal Dependencies" — that section owns the cross-skill rules. The shared parts in plain words:
 
-1. **Resolve Assets** (step `check_sources`) — fill paths in `artifacts.json` (pretrained backbone, tokenizer, base ckpt for fine-tuning), `input.json` train sources + val sources, AND `input.json -> ground_truth` for both splits. When extending a prior training run (fork + ckpt-as-init), auto-resolve the base run's last ckpt from `parents[-1] -> {RUN_DIR}/<ckpt_path>` and confirm with user — don't re-prompt for it.
+1. **Resolve Assets** (step `check_sources`) — **pick from `candidates`; don't ask for paths.** `/train-init` Step 1c already located the options for every item in `artifacts.json` and `input.json` (plus `ground_truth` for both splits). Present each item's `match: "ok"` candidates and let the user choose; when there's exactly one, default to it and just confirm. Verify the chosen path still resolves — candidates are machine-specific and go stale after an rsync to a different host, so if they all dangle, re-run `/train-init` Step 1c here rather than falling back to interrogating the user path by path. Record the choice in the run's `sources.json`.
 
-2. **Create Run** (step `create_run`) — create run dir, init `run.json`, env snapshot (pip freeze + GPU + CUDA), dependency check. **Code snapshot via `code_snapshot.py`** — see CLAUDE.md "Code snapshot (Step 2 detail)". Train-specific: nothing extra.
+   The chosen `location` changes what happens next: `local` → use directly; `s3` / `downloadable` → fetch before launch and record where it landed; **`server:<key>` → this is the signal to run on that machine** instead of copying the data to this one. Raise that as an option rather than silently starting a 19GB transfer.
 
-3. **Build & Launch** (step `execute`) — resolve `${}` references, then build the command **per-param from `config.json -> param_injection.items`**, not by guessing from `config_format`: `via: cli` → append its `flag`, `via: yaml` → write its `key` into the config copy, `via: env` → export it. A `runtime_params` key with no `param_injection` entry is an error, not a "just try `--key value`" — stop and ask, because a silently-ignored flag produces a run whose recorded config doesn't match what trained. Params marked `overridable: false` must never be passed (they can't take effect); if the user wants one changed, tell them which `path:line` to edit. Then save `config_snapshot.json` and `sources.json`, confirm with user. **`cwd` + `output_dir` rules** — see CLAUDE.md "Launch contract (Step 3 detail)". Train-specific overrides: production mode runs in background (see "Execution Modes" below).
+   When extending a prior training run (fork + ckpt-as-init), auto-resolve the base run's last ckpt from `parents[-1] -> {RUN_DIR}/<ckpt_path>` and confirm with user — don't re-prompt for it.
+
+2. **Create Run** (step `create_run`) — create run dir, init `run.json`, env snapshot (pip freeze + GPU + CUDA), dependency check. **Code snapshot via `code_snapshot.py`** — see CLAUDE.md "Code snapshot (Step 2 detail)".
+
+   **Train-specific: diff the captured env against `config.json -> env_snapshot`** (what the original author had) and report key-package mismatches before launching:
+
+   ```
+   env differs from the original:  torch 2.1.0 → 2.4.1   timm 0.9.12 → 1.0.3
+   timm's default model configs changed between those versions.
+   ```
+
+   Don't block on it — just say it. This is the first thing to check when the author's numbers won't reproduce: same code, same data, different `torch` or `timm` → different results, and without this line the code takes the blame for an environment difference. When `env_snapshot.source` is `"none"`, say that instead: there's no record to compare against, so a reproduction gap can't be attributed either way.
+
+3. **Build & Launch** (step `execute`) — resolve `${}` references, then build the command **per-param from `config.json -> param_injection.items`**, not by guessing from `config_format`: `via: cli` → append its `flag`, `via: yaml` → write its `key` into the config copy, `via: env` → export it. A `runtime_params` key with no `param_injection` entry is an error, not a "just try `--key value`" — stop and ask, because a silently-ignored flag produces a run whose recorded config doesn't match what trained. Params marked `overridable: false` must never be passed (they can't take effect); if the user wants one changed, tell them which `path:line` to edit. Then save `config_snapshot.json` and `sources.json`.
+
+   **Echo `config.json -> hazards` before asking for confirmation** — one line per `degrades` and `risks` entry. This is the only moment anyone reads them; left sitting in JSON they may as well not exist. Judge `risks` against *this* launch, since the condition is finally knowable: a `world_size` hazard matters now that the GPU count is decided, `network_required` now that you know whether this host has egress.
+
+   ```
+   ⚠ risks    · code asserts world_size == 8, launching with 1 — lr is scaled by world size (train.py:52)
+   ⚠ degrades · val split unseeded — metrics drift between runs (dataset.py:118)
+   ```
+
+   A `blocks` entry should never reach here (init stops on those), so if you find one, treat it as a bug in the init record and stop. Then confirm with user. **`cwd` + `output_dir` rules** — see CLAUDE.md "Launch contract (Step 3 detail)". Train-specific overrides: production mode runs in background (see "Execution Modes" below).
 
 ### Execution Modes
 

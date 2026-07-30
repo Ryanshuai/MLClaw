@@ -39,7 +39,7 @@ MLClaw replaces MLflow/W&B/TensorBoard with conversation-driven ML lifecycle man
 | `/eval-init` | Analyze evaluation code → fill 4 JSON configs (config with dataset info, artifacts, input with ground truth, output with baseline) |
 | `/eval-run` | Run evaluation: check sources + GT → debug mode → production mode → collect metrics → baseline comparison |
 | `/eval-report` | Generate self-contained HTML report from a completed eval run (metrics, baseline diff, per-class, bad cases) |
-| `/train-init` | Analyze training code → fill 4 JSON configs (config with resources, artifacts, input with ground truth, output with streaming-metric schema + checkpoint selection + done signal) |
+| `/train-init` | Analyze training code → sweep every reachable source (repo, git history, company docs, S3, tracking backend, compute) → fill 4 JSON configs (resources + param injection + hazards + env snapshot; data/weight candidates + preprocessing contract; streaming-metric schema + checkpoint selection + done signal + tracking locator) + `provenance.json` (sources checked, evidence, what's guessed) + `recipe.md` (handover doc) |
 | `/train-run` | Run training: validate resources → resolve sources → background launch → monitor stream (heartbeat, last_step, latest_metrics) → detect done/crash → finalize (best ckpt + retention) |
 | `/train-tune` | Adaptive HPO loop: agent observes prior runs → identifies coverage gaps → hypothesizes next config → launches trials via /train-run → iterates until budget or convergence. Auto-invokes /train-tune-report at close. |
 | `/train-tune-report` | Render a tune session as markdown chain.md: headline, best-so-far curve, coverage map, decision timeline (with [fill_grid|refine_best|add_axis|verify] tags), confirmed/refuted distillation, recipe. |
@@ -224,6 +224,16 @@ Three rules, uniform across all run skills:
    - This applies to params **MLClaw sets on its own** too, not just user-supplied ones: debug-mode `epochs=1` / sample limits, OOM auto-retry `batch_size ÷ 2`, resume-from-checkpoint flags. Those are the dangerous ones — the user never typed them, so nobody is watching whether they took effect.
 
 Stage-specific extras (production mode launching, monitoring, ETA computation, finalize hooks) go in each run skill's SKILL.md — these three rules do not.
+
+#### Preprocessing contract (cross-stage)
+
+`input.json -> preprocessing` records what happens to an input before the model sees it: normalization constants, resize mode, channel order, label index base, augmentation. Filled from code by the stage's init skill (`/train-init` Step 1b), never guessed — a framework default written into this field is worse than a blank, because a blank gets asked about.
+
+**`normalization`, `input_layout`, and `label_transform` must be identical between training and any eval/infer stage of the same model.** A mismatch raises nothing anywhere: training converges, evaluation reports plausible metrics, inference returns plausible outputs, and the deployed model is quietly degraded. An eval stage whose preprocessing differs from training doesn't measure the model you trained — its metrics are fake in exactly the sense of "Metric comparability" below. Recurring instances: BGR/RGB swap (cv2 vs PIL), ImageNet constants reused on X-ray / satellite / spectrogram data, COCO 91-vs-80 category id remapping, an off-by-one background class.
+
+**`augmentation` is training-only.** Non-empty in an eval or infer stage is a bug, not a variation.
+
+When initializing a stage while another stage of the same project already has `preprocessing` filled, diff the three shared blocks and surface any difference before proceeding. Deliberate differences exist — test-time augmentation, a different inference resolution — but they must be stated at that moment, not discovered from a confusing metric three weeks later.
 
 #### Listing runs (no separate index)
 
@@ -551,6 +561,7 @@ stages/
     config.json                     ← filled by /{stage}-init
     input.json                      ← filled by /{stage}-init
     output.json                     ← filled by /{stage}-init
+    provenance.json                 ← sidecar: source_mode, sources_checked, evidence, unresolved (training only so far)
     artifacts/                      ← actual artifact files (gitignored)
     data/                           ← actual input data (gitignored)
     runs/

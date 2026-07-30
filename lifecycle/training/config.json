@@ -16,5 +16,16 @@
     "_comment": "One entry per runtime_params key. Records how a value actually reaches the code and whether an external override survives. CRITICAL: values in runtime_params must be the EFFECTIVE-at-runtime value — if a yaml says lr=3e-4 but code hardcodes 1e-4 after loading it, record 1e-4. Entry shape: {via, flag|key|env|derived_from, overridable, evidence, note}. via: cli | yaml | env | hardcoded | derived. overridable=false means /train-run must not pass it and /train-tune must not search it.",
     "items": {}
   },
-  "required_packages": {}
+  "required_packages": {},
+  "hazards": [],
+  "_comment_hazards": "Landmines found in the code that CANNOT be expressed as a param (those live in param_injection with overridable:false). Entry: {kind, what, evidence, impact, fix}. impact decides when it must be dealt with: `blocks` = won't run until fixed (dead absolute path, missing dir structure); `degrades` = runs and produces plausible-but-wrong results (dependency version that silently changed defaults, train/val overlap inflating metrics); `risks` = breaks only under some condition (code asserts 8 GPUs, you have 1). kind: absolute_path | dir_structure | dependency_version | world_size | nondeterminism | network_required | platform | data_leakage | other. Collected throughout /train-init (each analysis step appends what it trips over) plus a dedicated sweep in Step 1e for the kinds no other step would touch. `blocks` entries must be surfaced BEFORE the user fills in the rest — don't let someone complete four JSON files for code that can't start, and a `blocks` entry should therefore never survive to launch. /train-run echoes degrades + risks right before launch, because that is the only moment anyone reads them.",
+  "env_snapshot": {
+    "_comment": "WHAT THE ORIGINAL AUTHOR ACTUALLY HAD INSTALLED — distinct from required_packages above, which is what the code declares it needs. A lock file or a tracking backend's captured pip-freeze is evidence; an unpinned requirements.txt is not. key_packages holds only the ones whose version silently changes behavior (framework, CUDA, numpy, model-zoo libs) — the full freeze goes in a file and its path in full_snapshot_path. /train-run diffs this against the current run's captured env and warns on key mismatches. See train-init references/schemas.md -> env_snapshot for the source-strength ranking.",
+    "source": "",
+    "python": "",
+    "key_packages": {},
+    "cuda": "",
+    "evidence": "",
+    "full_snapshot_path": null
+  }
 }

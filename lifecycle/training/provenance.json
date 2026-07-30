@@ -1,0 +1,19 @@
+{
+  "_comment": "Where the values in the other four JSON files came from, and which ones aren't settled. Kept separate so config/artifacts/input/output stay clean for /train-run to consume. Design rule: enumerate what can be enumerated, and anchor free text to a fixed key — machines locate problems by key, humans read the `why`. Nothing here is required for a run to launch; it exists so the next person (or the same person in three months) can tell a read fact from a guess.",
+
+  "_comment_source_mode": "Where this code came from, which sets how much of the rest was excavated vs. asked. authored = the user wrote it (ask them, they know). explored = produced by an /explore-* search (read its output). inherited = someone else's repo, paper release, or handover (dig: code, git history, tracking backend).",
+  "source_mode": "",
+
+  "_comment_sources_checked": "Result of the Step 0 sweep — every place information could come from, checked ONCE before any element-specific step runs. Organized by source, not by element, so each backend is contacted a single time and every credential gap surfaces together instead of ambushing you at step 4. Entry: {status, what_found, needs?, checked_at}. status: reachable (connected, content extracted) | needs_auth (exists but no credentials/authorization — a TODO) | absent (confirmed not to exist — a CONCLUSION, stop looking) | skipped (user declined). Extracted content lands in the real fields (candidates / tracking / env_snapshot / hazards); this block only records where it came from and what couldn't be reached. `absent` vs `needs_auth` is the distinction that keeps an agent from re-searching forever.",
+  "sources_checked": {},
+
+  "_comment_evidence": "key -> \"path:line\" for values that have no evidence field of their own. param_injection, preprocessing, hazards, and artifacts origin already carry their own evidence inline — don't duplicate those here. This map is for the rest: entry_command, done_signal, primary_metric, pairing, checkpoints.path_pattern, resources.gpu_count. Those are exactly the values most often gotten wrong when taking over unfamiliar code, and they're the only ones with nowhere else to record how they were determined.",
+  "evidence": {},
+
+  "_comment_unresolved": "Values that are not settled. `key` is the dotted path into one of the four files; `status` is enumerated; `why` is free text aimed at a human. status: blocking = cannot proceed without an answer, ask now. guessed = a value IS filled in (the file would be unusable empty) but it was inferred, not read — must be confirmed at Step 7 review. absent = confirmed not to exist in this codebase (e.g. no done signal is emitted at all); a conclusion, not a gap. unverified = taken from a secondary source such as a README or the author's word, plausible but unchecked. The distinction that matters: `guessed` entries have a value in the config that may be wrong, so they need review; `blocking` entries leave the config empty and stop the flow.",
+  "unresolved": [],
+
+  "_comment_notes": "Free-text observations for a human reader that don't belong to any single key — things worth knowing that aren't hazards (those go in config.json -> hazards) and aren't wrong (those would be blocking). Optional. No tool reads this."
+  ,
+  "notes": []
+}

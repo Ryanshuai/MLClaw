@@ -20,6 +20,13 @@
     "watch_epoch": [],
     "primary_metric": "",
     "direction": "max",
-    "done_signal": {}
+    "done_signal": {},
+    "tracking": {
+      "_comment": "WHERE THE ORIGINAL AUTHOR'S HISTORY LIVES — distinct from log_format/log_path above, which is how MLClaw reads THIS run. This block is what makes past runs retrievable: entity/project for wandb, tracking_uri + experiment for mlflow, log_dir for raw tensorboard. backend:\"none\" is a CONCLUSION (no tracking call anywhere in the code), not a gap — record it and stop looking. Reachability and missing credentials are NOT recorded here: provenance.json -> sources_checked owns that for every source, and duplicating it here would let the two drift. Record the locator even when unreachable — a locator you can't use yet is a todo. When pulling history, include failed runs (the only record of what the author ruled out) and bound the pull.",
+      "backend": "",
+      "locator": {},
+      "evidence": "",
+      "imported_runs": null
+    }
   }
 }

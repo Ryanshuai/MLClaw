@@ -1,5 +1,10 @@
 {
-  "_comment": "Static inputs to training — pretrained backbone, tokenizer, vocab, base ckpt for fine-tuning. Set once per model lineage.",
+  "_comment": "Static inputs to training — pretrained backbone, tokenizer, vocab, base ckpt for fine-tuning. Set once per model lineage. Same three layers as input.json: items (what's needed) / candidates (what's available here) / sources (what a run chose).",
+  "_comment_origin": "An item inherited from someone else (a handed-over checkpoint, a paper release) carries an `origin` block alongside the usual item fields: {why, metrics, scope, confidence, config, env, source}. Two are required. `scope` — same shape as run.json's scope; a claimed mAP of 48.5 is uncomparable to anything without knowing what it was measured on. `confidence` — verified | claimed | asked, defaulting to claimed: an unverified inherited metric is the most dangerous kind of fake metric, because every later comparison is calibrated against it. See train-init references/schemas.md -> origin for the full rationale and how to promote claimed to verified.",
   "items": {},
+  "candidates": {
+    "_comment": "Same entry shape as input.json -> candidates. For weights, `location` also covers `registry` (resources.json -> registry) and `downloadable` (HF hub, torchvision, the paper's release URL). The code_default entry matters as much as for data: `pretrained/resnet50.pth` tells you which weights the original author used, which is often the only record of it.",
+    "items": {}
+  },
   "sources": {}
 }
