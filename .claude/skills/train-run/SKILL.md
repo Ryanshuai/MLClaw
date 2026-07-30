@@ -39,7 +39,7 @@ If skip: fresh run, `fork_of = null`.
 **Continuing training / preempt recovery / fine-tuning** is a common case but does NOT need a separate lineage field. Express it as fork + ckpt-as-init:
 
 1. Fork the prior run (sets `fork_of = prior_run`, copies config)
-2. Set `runtime_params.resume_from` (or your code's equivalent) to point at `prior_run/last.pt` so weights load on launch
+2. Set `runtime_params.resume_from` (or your code's equivalent) to point at `prior_run/last.pt` so weights load on launch. Confirm the key exists in `param_injection` with `overridable: true` — a resume flag the code ignores means training silently restarts from scratch, which looks identical to a successful resume until the loss curve gives it away hours later.
 3. Append `prior_run` to `lineage.parents` (since you now consume its ckpt — hard dependency)
 
 The reasoning ("why continue") goes in `description` / `hypothesis`, or in `decisions.jsonl` if running under `/train-tune`.
@@ -66,17 +66,18 @@ Follow CLAUDE.md "Run Skill Internal Dependencies" — that section owns the cro
 
 2. **Create Run** (step `create_run`) — create run dir, init `run.json`, env snapshot (pip freeze + GPU + CUDA), dependency check. **Code snapshot via `code_snapshot.py`** — see CLAUDE.md "Code snapshot (Step 2 detail)". Train-specific: nothing extra.
 
-3. **Build & Launch** (step `execute`) — resolve `${}` references, build command per `config_format` and `distributed` setting, save `config_snapshot.json` and `sources.json`, confirm with user. **`cwd` + `output_dir` rules** — see CLAUDE.md "Launch contract (Step 3 detail)". Train-specific overrides: production mode runs in background (see "Execution Modes" below).
+3. **Build & Launch** (step `execute`) — resolve `${}` references, then build the command **per-param from `config.json -> param_injection.items`**, not by guessing from `config_format`: `via: cli` → append its `flag`, `via: yaml` → write its `key` into the config copy, `via: env` → export it. A `runtime_params` key with no `param_injection` entry is an error, not a "just try `--key value`" — stop and ask, because a silently-ignored flag produces a run whose recorded config doesn't match what trained. Params marked `overridable: false` must never be passed (they can't take effect); if the user wants one changed, tell them which `path:line` to edit. Then save `config_snapshot.json` and `sources.json`, confirm with user. **`cwd` + `output_dir` rules** — see CLAUDE.md "Launch contract (Step 3 detail)". Train-specific overrides: production mode runs in background (see "Execution Modes" below).
 
 ### Execution Modes
 
 **Debug mode** (default for first run on a new config):
-- Override `epochs=1` (or `max_steps=200` if step-based) and `batch_size` ÷ 4 if needed for fast iteration.
+- Override `epochs=1` (or `max_steps=200` if step-based) and `batch_size` ÷ 4 if needed for fast iteration. **Check `param_injection` first** — if `epochs` is `overridable: false`, debug mode cannot shorten the run, and launching it would silently start a full-length job under the label "quick debug". Say so and offer: (a) edit the code line, (b) run debug at full length anyway, (c) cancel.
 - Run synchronously, stream stdout. Watch for crash signatures (see references/crash-signatures.md).
 - On failure: diagnose, propose fix, ask "Apply and re-run debug?". On success: ask "production / inspect / cancel?"
 - Debug mode runs in foreground because it's short. Production mode never does.
+- **Set `run.json -> mode: "debug"` and `scope`** (epochs / steps actually reached, actual batch size — read from the log, not from what you passed). A debug run's val metric describes a 1-epoch model and must never be compared against, or ranked alongside, a full run's — see CLAUDE.md "Metric comparability".
 
-**Production mode** — ask local or server:
+**Production mode** — ask local or server. In both cases set `run.json -> mode: "production"` and `scope` (full epochs, full data) at launch, then correct `scope` at finalize from what the log actually reports:
 - **Local**: launch in background (`run_in_background`), redirect stdout to `{RUN_DIR}/logs/stdout.log`. Set `run.json -> pid`, `started_at`, `status: "running"`. Return immediately.
 - **Remote**: SCP run dir to server, launch via tmux session. Record session name in `run.json -> server` and `pid: tmux:<session>`. Return immediately.
 
@@ -196,5 +197,5 @@ Pop from workflow stack, append `completed` to history.
 When user provides paths inline (e.g., "train on /data/imagenet with config configs/r50.yaml, batch 256, 100 epochs"):
 1. Match paths to declared items by type/extension (data, GT, pretrained backbone)
 2. Fill sources in `artifacts.json` / `input.json`
-3. Apply inline param overrides to `runtime_params`
+3. Apply inline param overrides to `runtime_params` — but check `param_injection.items` first. If the user names a param marked `overridable: false` (or one absent from `param_injection`), say so instead of accepting it silently: "`seed` is hardcoded at `train.py:12`; changing it needs a code edit, not a flag." Accepting it would produce a run whose recorded config lies about what actually trained.
 4. Skip source-filling dialogue, proceed to Resource Validation

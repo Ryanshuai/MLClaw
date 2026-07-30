@@ -76,10 +76,14 @@ Status from `state.json`: running | converged | budget_exhausted | stopped | **n
 **`no_signal` headline override** — when `state.status == "no_signal"`, replace the entire headline with:
 
 ```
-**⚠️ NO SIGNAL** — `<primary_metric>` = <value> across all <N> trials. The search produced no information to rank trials. Likely causes: training too short / metric saturated / NaN crash / wrong metric choice. Do not take any trial as production. | <N> trials | <wall_h>h wall
+**⚠️ NO SIGNAL** — `<primary_metric>` = <value> across all <N> trials. The search produced no information to rank trials. Likely causes: **the swept axis never reached the code** / training too short / metric saturated / NaN crash / wrong metric choice. Do not take any trial as production. | <N> trials | <wall_h>h wall
 ```
 
 Use `state.no_signal_value` for `<value>` if present; else read from any trial. **Do not pick a "best" trial.** The "Best:" prefix and BEST highlight in the timeline must not appear at all in this mode — they would falsely imply ranking.
+
+**Diagnose the connection before the other four causes.** Identical metrics across trials most often mean the swept axis never reached the code — a `--lr` flag shadowed by a literal at the use site, or a value recomputed from another param. This is cheap and definitive to check: read `config.json -> param_injection.items.<axis>`. If `overridable` is `false`, or the axis has no entry at all, the sweep was disconnected and every trial ran the identical configuration; report *that* as the cause instead of listing five possibilities the reader has to triage.
+
+The strong tell is **bit-identical** values — equal to every decimal place, not merely close. Genuine metric saturation still shows run-to-run noise unless the seed is also pinned, so exact equality across trials points at a disconnected knob rather than a flat objective.
 
 ### 4b. Best-so-far sequence
 
@@ -91,6 +95,8 @@ Best:  .965  .965  .968  .969  .969  .971  .972
 ```
 
 The information is in the numbers; readers can see plateaus and jumps without ASCII bars. (Earlier versions rendered an 8-level Unicode block bar — dropped because it added zero information beyond the numeric line and degenerated to a single character when the metric stayed flat.)
+
+**One sequence per `mode` / `scope` population.** If the session mixed screening trials with full ones (`screen_then_refine`), render separate sequences with each scale labeled. A best-so-far line that steps up at the moment the scale changed reads as a discovery and is not one — it's the same model measured differently. Never carry a screen-phase best into the production-phase sequence, and never let a `mode: "debug"` run appear in either.
 
 ### 4c. Coverage map
 

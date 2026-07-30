@@ -85,10 +85,18 @@ Look for `stages/training/research_goals.md`. If present, parse:
 | `fixed:` | Hard constraints — agent never modifies these `runtime_params` keys |
 | `avoid:` | Soft constraints — agent should not propose these unless prior data refutes the avoidance reason |
 | `search_priors:` | Per-axis range / scale priors (e.g., `lr: {scale: log, range: [1e-5, 5e-3]}`) — agent stays within these unless user override |
-| `mode:` | `full` (default, full-epoch trials) or `screen_then_refine` (short trials first) |
+| `mode:` | `full` (default, full-epoch trials) or `screen_then_refine` (short trials first). This is the **search strategy** — distinct from `run.json -> mode` (`debug` / `screen` / `production`), which records one run's scale. |
 
 If absent, agent uses domain-default priors (lr log-uniform 1e-5..1e-2, etc.) and no
 hard constraints. Print a one-line note: "no research_goals.md, using domain defaults".
+
+**Searchable axes are bounded by `param_injection`, not by this file.** Before choosing any axis, read `config.json -> param_injection.items`. A param marked `overridable: false` cannot be changed from outside the code, so it is **implicitly fixed** no matter what `research_goals.md` says or the user asks for — this constraint outranks user config. A user asking to "tune seed" when `seed` is hardcoded at `train.py:12` gets told to edit that line, not handed N trials.
+
+**`screen_then_refine` crosses scales — carry direction, not magnitude.** Launch screening trials with `run.json -> mode: "screen"` (and their real `scope`); full trials get `production`. The comparability filter in Step 3 then keeps the two populations apart, which is correct: a 5-epoch metric and a 100-epoch metric are different quantities that share a name.
+
+What legitimately crosses the boundary is **which region is worth trying**. "Screening says the useful lr region is near 1e-4, refine there" is sound. "Screening's best was 0.71, so this full trial at 0.68 is a regression" is not — that compares across scales. Never put a screen number and a production number in one ranking, one curve, or one best-so-far claim.
+
+Params **absent** from `param_injection` are equally off-limits until `/train-init` classifies them. This is the exact failure this guards against: the sweep launches, every trial returns the same number, and the session concludes "this hyperparameter doesn't matter" — a wrong result that looks like a finding. If an axis you want isn't classified, stop and run `/train-init` Step 2b on it rather than assuming a flag works.
 
 ## Step 3: Read Prior Comparable Runs
 
@@ -100,12 +108,15 @@ comparable = [
   if r.code.origin_commit  == query.code.origin_commit
   and r.cfg.data.dataset_id == query.cfg.data.dataset_id
   and r.cfg.data.split_seed == query.cfg.data.split_seed
+  and r.mode  == query.mode          # debug / screen / production never mix
+  and r.scope == query.scope         # same epochs + data scale
 ]
 ```
 
 Filter inline with Bash + jq, e.g.:
 ```bash
-jq -r 'select(.code.origin_commit=="<sha>" and .lineage.session==null) | .run_id' \
+jq -r 'select(.code.origin_commit=="<sha>" and .lineage.session==null
+              and .mode=="production") | .run_id' \
    stages/training/runs/*/run.json
 ```
 
@@ -126,7 +137,8 @@ loop:
   3. HYPOTHESIS
      - choose decision tag (see "Decision tags" below)
      - choose base run to fork from
-     - choose runtime_params overrides (within fixed / avoid / priors)
+     - choose runtime_params overrides (within fixed / avoid / priors,
+       and only over axes with param_injection.overridable = true)
      - write hypothesis text starting with [<tag>]
   4. LAUNCH
      - invoke /train-run as sub-skill with:
@@ -153,7 +165,7 @@ Every hypothesis begins with one bracketed tag chosen from:
 | `[baseline]` | iter 0 only — establishing reference. Use the project's known good config or first reasonable default. |
 | `[fill_grid]` | An axis has tested values with gaps in between. Fill gap to identify shape. |
 | `[refine_best]` | Best is plateau / unstable. Densify around best with smaller deltas. |
-| `[add_axis]` | Current axes are well-explored; introduce a new axis to vary. |
+| `[add_axis]` | Current axes are well-explored; introduce a new axis to vary. Confirm the candidate is `overridable: true` in `param_injection` before committing trials to it — this is where an unsearchable axis is most likely to slip in. |
 | `[verify]` | Re-run a prior config (typically with different seed) to assess noise. |
 
 Agent picks based on observation:

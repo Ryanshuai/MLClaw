@@ -31,12 +31,13 @@ Follow CLAUDE.md "Run Skill Internal Dependencies" for the shared step flow:
 
 1. **Resolve Assets** (step `check_sources`) — fill concrete paths in `artifacts.json` and `input.json` sources. For server matching, connectivity tests, and credential flows, see CLAUDE.md "Run Skill Internal Dependencies" Step 1. Scripts in `lifecycle/scripts/infer-run/` (test_connection.py, etc). If any script fails, do the same work manually with Bash.
 2. **Create Run** (step `create_run`) — create run dir, initialize run.json, code snapshot, env snapshot, dependency check. Scripts: `create_run.py`, `capture_env.py`, `check_deps.py`. For code source resolution and environment resolution, see CLAUDE.md conventions.
-3. **Build & Execute** (step `execute`) — resolve `${}` references, build command per `config_format`, save `config_snapshot.json` and `sources.json`, confirm with user.
+3. **Build & Execute** (step `execute`) — resolve `${}` references, then build the command **per-param from `config.json -> param_injection.items`** (CLAUDE.md "Launch contract" rule 3), not by guessing from `config_format`. A `runtime_params` key with no entry, or one marked `overridable: false`, is an error — stop and ask rather than passing a flag the code may ignore. Set `run.json -> mode` and `scope` before launching. Save `config_snapshot.json` and `sources.json`, confirm with user.
 
 ### Execution Modes
 
 **Debug mode** (default for first run):
-- Limit data to a small subset (video: 10s, images: 5, text: 10 rows). Use code's own limiting args if available (--num_samples, --max_frames, --limit), otherwise copy a slice to a temp location.
+- Limit data to a small subset (video: 10s, images: 5, text: 10 rows). Use code's own limiting args if available (--num_samples, --max_frames, --limit), otherwise copy a slice to a temp location. A limiting arg is itself a param subject to `param_injection` — if the code ignores it, "debug" quietly becomes a full-scale run.
+- **Record `scope` from what actually happened**, not from what you asked for: read the real processed count from stdout / output files and write it to `run.json -> scope` with `mode: "debug"`. A mismatch against the limit you passed means the arg didn't take effect — report it instead of recording the intended number. This matters for throughput numbers especially: FPS measured over 5 frames including warmup is not FPS.
 - Run synchronously, stream output.
 - On failure: diagnose, propose fix, ask "Apply and re-run?". On success: show output files, ask "production / retry / inspect?"
 

@@ -88,7 +88,13 @@ Which categories do you want to see?
 
 **3b. Expand requested categories** with current values, let user pick which MLClaw should manage per run.
 
-**3c. Record**: selected params → `config.json → runtime_params` with `${artifact.xxx}` / `${input.xxx}` references. Unselected params stay in original config files untouched.
+**3c. Verify each pick is actually overridable.** A value in a config file is only the *declared* value — code may shadow it. For each param the user selected, trace it to the line that consumes it and look for: a literal at the use site (`nms(boxes, iou=0.5)` ignoring `cfg.nms_iou`), a post-parse assignment (`args.conf = 0.25`), or a value recomputed from another.
+
+This matters more in eval than anywhere else, because **eval params shape the metric directly**. A `--conf-threshold` the code ignores turns a threshold sweep into five identical numbers — and the natural reading of five identical numbers is "the metric is insensitive to threshold", a wrong conclusion that looks exactly like a finding. Nothing errors; the runs all complete.
+
+Cheap checks: `grep -rn "conf_thres\|confidence\|nms" --include=*.py <code_dir>` then read the use site; `python eval.py --help` confirms which flags actually exist.
+
+**3d. Record**: selected params → `config.json → runtime_params` (**effective values** — what the code runs with, not what the yaml declares) with `${artifact.xxx}` / `${input.xxx}` references. Each key also gets a `config.json → param_injection.items` entry recording `via` / flag-or-key / `overridable` / `evidence` (`path:line`), per CLAUDE.md "Launch contract" rule 3. Params found `overridable: false` must **not** go into `runtime_params` — keep them in `param_injection` with a note and tell the user which line to edit to change them. Unselected params stay in original config files untouched.
 
 ## Step 4: Present Each File for Review
 
@@ -98,6 +104,11 @@ For each file: show proposed content, then wait for the user to confirm before m
 
 After output.json is confirmed, ask about baseline:
 "Set a baseline for comparison? (1) a previous run ID, (2) external numbers like paper results, (3) skip"
+
+Whichever is chosen, **record the scale the baseline describes** — this is the source of every later comparison, so an unqualified number here propagates into every diff downstream.
+
+- For (1), accept only a run with `run.json -> mode: "production"`. A debug run as baseline silently poisons every future comparison, and whoever reads those diffs months later has no way to see why the numbers look wrong. Store the run's `scope` next to the baseline so `/eval-run` can check comparability without re-reading it.
+- For (2), record what the external numbers were measured on (e.g. `"COCO val2017, all 5000 images"`). Paper numbers are full-test-set numbers; a truncated run compared against them yields a delta made of sampling noise.
 
 ## Step 5: Validate
 

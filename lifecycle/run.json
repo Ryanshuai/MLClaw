@@ -8,6 +8,10 @@
   "hypothesis": null,
   "status": "pending",
 
+  "_comment_mode": "How much of the real workload this run actually processed. `production` = full data / full schedule, metrics are canonical. `debug` = deliberately truncated for fast iteration (sample limit, epochs=1, reduced batch). `screen` = short trial in a /train-tune screen_then_refine sweep. Set by the run skill at launch, never left null on a run that produced metrics. Metrics are ONLY comparable between runs with the same `mode` AND equivalent `scope` — a debug mAP over 20 images and a production mAP over 5000 are different quantities that happen to share a name.",
+  "mode": null,
+  "scope": {},
+
   "steps": {
     "fork_check":     { "status": null, "at": null },
     "resolve_assets": { "status": null, "at": null,

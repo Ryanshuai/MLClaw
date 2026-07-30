@@ -20,7 +20,7 @@ If nothing matches, fall through to "Unknown" at the bottom — never guess; dum
 
 **Diagnosis**: GPU memory exhausted. Common causes: batch_size too large, sequence/image too long, mixed precision not enabled, KV-cache (LLM) overflow, intermediate activations too big.
 
-**Fix priority** (try top-down, surface first 2-3 to user):
+**Fix priority** (try top-down, surface first 2-3 to user). **Every fix below works by changing a param — check `config.json -> param_injection` before proposing one.** A fix applied to an `overridable: false` param does nothing: the relaunch OOMs with identical settings and the loop repeats. When the param you need is hardcoded or derived, escalate to "edit `<path:line>`" rather than retrying.
 1. `runtime_params.batch_size ÷ 2`
 2. Add or raise `gradient_accumulation_steps` to keep effective batch the same
 3. Enable `mixed_precision: bf16` (preferred) or `fp16`

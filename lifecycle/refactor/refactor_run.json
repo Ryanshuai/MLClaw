@@ -5,6 +5,9 @@
   "alias": "",
   "description": "",
   "status": "pending",
+  "_comment_mode": "Scale of this round's verification run. Tier 3 (mini, ~100 samples) -> \"debug\", with the exact subset (sample list, or seed + count) recorded in `scope` so later rounds reuse the identical one. Tier 4 (full benchmark) -> \"production\". Only production-scale results may be compared against paper numbers; mini results are compared against a pre-refactor mini baseline over the same subset. See refactor-run Step 4 and CLAUDE.md \"Metric comparability\".",
+  "mode": null,
+  "scope": {},
   "round": null,
 
   "steps": {

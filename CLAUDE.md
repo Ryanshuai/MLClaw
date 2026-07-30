@@ -198,7 +198,7 @@ The same call applies to all run skills (`/train-run`, `/eval-run`, `/infer-run`
 
 #### Launch contract (Step 3 detail)
 
-Two rules, uniform across all run skills:
+Three rules, uniform across all run skills:
 
 1. **`cwd = <code_dir>`** (the same path used in Step 2). For module-style entry commands like `python -m pkg.train` this is mandatory — package imports won't resolve from anywhere else.
 2. **`output_dir` (or framework equivalent) must be overridden to an absolute path under `<RUN_DIR>/output/`**. The default config's relative `output_dir` would land artifacts back in the user's code repo, where MLClaw can't manage them and the next run would overwrite them. Override syntax depends on the framework:
@@ -207,9 +207,23 @@ Two rules, uniform across all run skills:
    - HF Trainer: `--output_dir <abs>`
    - accelerate: `--output_dir <abs>`
    - env var: `OUTPUT_DIR=<abs>`
-   `/train-init` (and per-stage init skills) record which form a given codebase uses; `/{stage}-run` consumes that and substitutes.
+   Which form a given codebase uses is recorded as a `param_injection` entry (rule 3), not re-derived per framework at launch time.
 
-Stage-specific extras (production mode launching, monitoring, ETA computation, finalize hooks) go in each run skill's SKILL.md — these two rules do not.
+3. **Every managed param needs a `config.json -> param_injection.items` entry, and `runtime_params` must hold the effective-at-runtime value.** A config file's declared value is not necessarily the one the code uses: a `--lr` flag is dead if the optimizer is built with a literal, a `warmup` value is discarded if it's recomputed from `epochs`, and `lr * world_size` means one config trains differently on 1 vs 8 GPUs. Passing a param the code ignores produces a **fake metric** — the run completes, records the value you asked for, and reports a number produced by a different value. Nothing errors.
+
+   ```json
+   "lr":   { "via": "cli", "flag": "--lr", "overridable": true, "evidence": "train.py:33" },
+   "seed": { "via": "hardcoded", "overridable": false, "evidence": "train.py:12",
+             "note": "torch.manual_seed(42) after arg parse — --seed is dead" }
+   ```
+
+   `via`: `cli` (+`flag`) | `yaml` (+`key`) | `env` (+`env`) | `hardcoded` | `derived` (+`derived_from`). The last two imply `overridable: false`.
+
+   - **`/{stage}-init`** fills this while selecting managed params, and must not put an `overridable: false` param into `runtime_params` — it isn't a knob. Keep it in `param_injection` as documentation of why, and surface it as a risk ("changing this needs a code edit at `<path:line>`").
+   - **`/{stage}-run`** builds the launch command per-param from these entries instead of guessing from `config_format`. A `runtime_params` key with no entry is an error — stop and ask; never fall back to trying `--key value`, because a silently-ignored flag yields a run whose recorded config lies about what ran.
+   - This applies to params **MLClaw sets on its own** too, not just user-supplied ones: debug-mode `epochs=1` / sample limits, OOM auto-retry `batch_size ÷ 2`, resume-from-checkpoint flags. Those are the dangerous ones — the user never typed them, so nobody is watching whether they took effect.
+
+Stage-specific extras (production mode launching, monitoring, ETA computation, finalize hooks) go in each run skill's SKILL.md — these three rules do not.
 
 #### Listing runs (no separate index)
 
@@ -220,17 +234,18 @@ Canonical patterns:
 ```bash
 # All completed runs in a stage, with key fields
 jq -s '
-  map(select(.status == "completed") | {
-    run_id, alias, status, duration_s,
+  map(select(.status == "completed" and .mode == "production") | {
+    run_id, alias, status, mode, duration_s,
     primary_metric: .metrics.best.primary_metric_value,
     path: ("stages/" + .stage + "/runs/" + .run_id),
     session: .lineage.session
   })
 ' stages/<stage>/runs/run_*/run.json
 
-# Runs comparable for /train-tune (same code SHA + dataset split)
+# Runs comparable for /train-tune (same code SHA + dataset split, full-scale only)
 jq -s --arg sha "$SHA" '
-  map(select(.code.origin_commit == $sha and .lineage.session == null))
+  map(select(.code.origin_commit == $sha and .lineage.session == null
+             and .mode == "production"))
 ' stages/training/runs/run_*/run.json
 
 # Most recent N runs (by created_at) for menus
@@ -238,6 +253,13 @@ jq -s 'sort_by(.created_at) | reverse | .[0:10]' stages/<stage>/runs/run_*/run.j
 ```
 
 If a single `run.json` is malformed, jq errors on that file; agents should `find ... -exec jq ...` per-file with `2>/dev/null` when scanning unattended. At realistic scale (≤ 10k runs per project) the scan completes in well under a second.
+
+**Metric comparability.** `mode` is not cosmetic — filter on it in **every** query that compares, ranks, or aggregates metrics: leaderboards, baseline diffs, best-so-far curves, `/train-tune` observation, DAG renderings. A debug run's numbers are real but describe a different workload (20 images instead of 5000, 1 epoch instead of 100), so mixing them in produces a **fake comparison**: nothing errors, no data is missing, and a wrong conclusion gets drawn from correctly-recorded numbers. Two rules:
+
+- Compare only across runs with the same `mode` **and** equivalent `scope`. Two production runs over different sample counts aren't comparable either.
+- When you deliberately want debug runs ("did my last smoke test pass?"), select `mode == "debug"` explicitly rather than dropping the filter — an absent filter reads as a bug to the next person.
+
+A run that produced metrics with `mode: null` is unusable for comparison and should be reported as such, not silently included.
 
 Each run tracks two types of relationships in `run.json → lineage`:
 

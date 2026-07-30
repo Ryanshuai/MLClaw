@@ -40,6 +40,53 @@ Cross-check by reading `accelerate config` output (`~/.cache/huggingface/acceler
 - `gpu_count`: from `--nproc_per_node`, `--num_gpus`, `accelerate config -> num_processes`, or hard-coded
 - `gpu_memory_gb`: read user-supplied estimate; or compute from model param count + batch_size × seq_len × dtype_bytes (rough). Don't auto-fill; ask user.
 
+## Param shadowing detection (for Step 2 and Step 3)
+
+A config file value is only the *declared* value. What matters is the value at the moment the code uses it. Trace each candidate param from declaration to use, and look for these shadowing patterns:
+
+```python
+# 1. Post-parse literal — the flag exists but is dead
+args = parser.parse_args()
+args.lr = 1e-4                       # --lr is silently discarded
+
+# 2. Recompute from other params
+cfg.warmup_steps = int(0.03 * cfg.epochs * steps_per_epoch)   # override discarded
+
+# 3. Scaling by world size — the value you pass is not the value used
+lr = cfg.lr * dist.get_world_size()  # single-GPU vs 8-GPU differ 8×
+
+# 4. Constructor literal ignoring config
+optimizer = Adam(model.parameters(), lr=3e-4)   # cfg.lr never read
+
+# 5. Framework default winning
+TrainingArguments(output_dir=out)     # learning_rate defaults to 5e-5, cfg.lr unused
+
+# 6. Later config layer winning
+cfg = OmegaConf.merge(base_cfg, exp_cfg)   # whichever is merged last wins
+```
+
+Cheap first pass — for each param name, list every assignment site and compare against the read site:
+
+```bash
+grep -rn "\blr\b\|learning_rate" --include=*.py --include=*.yaml <code_dir>
+```
+
+If a param is assigned more than once, the **last write before the read** is the effective value. Read the surrounding lines rather than guessing from the grep hit alone.
+
+Then classify:
+
+| What the trace shows | `via` | `overridable` |
+|---|---|---|
+| Flag / yaml key read once, used directly | `cli` / `yaml` | `true` |
+| Flag exists but overwritten after parse (pattern 1, 4, 5) | `hardcoded` | `false` |
+| Computed from other params (pattern 2, 3) | `derived` | `false` |
+| Read from env var | `env` | `true` |
+| Multiple config layers merged (pattern 6) | `yaml` | `true` — record the *winning* layer as `key` |
+
+**Verify instead of assume when it's cheap.** For an argparse entry point, `python train.py --help` confirms which flags exist. For omegaconf/hydra, printing the resolved config at startup settles the whole question at once — if the code doesn't already do that, it's a one-line addition the user can run once in debug mode. A confirmed override beats a traced one.
+
+Pattern 3 (world-size scaling) deserves a note even when `overridable` is `true` for the base value: the effective lr depends on `resources.gpu_count`, so a run reproduced on a different GPU count silently trains differently. Record it in `note` and flag it as a risk.
+
 ## Log writer detection (for Step 4a)
 
 | Code pattern | log_format | Notes |

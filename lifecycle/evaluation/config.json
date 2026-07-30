@@ -11,5 +11,9 @@
     "classes": []
   },
   "runtime_params": {},
+  "param_injection": {
+    "_comment": "One entry per runtime_params key — see CLAUDE.md 'Launch contract' rule 3. Records how a value actually reaches the code (via: cli | yaml | env | hardcoded | derived) and whether an external override survives (overridable). runtime_params must hold the EFFECTIVE-at-runtime value. For eval this guards the metric-shaping params — a --conf-threshold or --nms-iou the code ignores makes every threshold sweep return the same numbers.",
+    "items": {}
+  },
   "required_packages": {}
 }

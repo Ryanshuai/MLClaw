@@ -65,13 +65,28 @@ Determine:
 
 ## Step 2: Discover Real Config
 
-Look for actual config files in the code directory:
+**2a. Find the config.** Look for actual config files in the code directory:
 1. Check `config_path` from analysis
 2. Scan `configs/`, `config/`, `conf/`, `recipes/` directories
 3. Prefer files named "train", "training", "pretrain", "finetune", "default", "baseline", "base", "main"
 4. Pick the largest YAML / JSON config as fallback
 
-If found, load all discovered parameters.
+If found, load all discovered parameters. **These are declared values, not effective ones** — 2b resolves the difference.
+
+**2b. Trace declared → effective.** A config file value is only what the code *claims* to use. For each parameter worth managing, trace it from declaration to the line that consumes it, and check whether anything overwrites it on the way. Read `references/detection-patterns.md` → "Param shadowing detection" for the patterns (post-parse literals, recompute-from-other-params, world-size scaling, framework defaults, config-layer merges) and the grep-then-read procedure.
+
+For each param record four things:
+
+| | |
+|---|---|
+| **effective value** | what the code actually runs with — this is what goes in `runtime_params` |
+| **how it gets in** | `cli` (+flag) / `yaml` (+key) / `env` / `hardcoded` / `derived` (+derived_from) |
+| **overridable** | does an externally supplied value survive to the read site? |
+| **evidence** | `path:line` of the read site, plus the shadowing site when they differ |
+
+A yaml saying `lr: 3e-4` is worthless if `optim.py:44` passes a literal `1e-4`. Record `1e-4`, mark it `hardcoded` / `overridable: false`, and note the shadowing. Getting this backwards silently breaks `/train-tune` — it would sweep a disconnected knob, produce N identical runs, and conclude the hyperparameter doesn't matter.
+
+When verification is cheap, verify instead of tracing: `python train.py --help` for argparse, or a one-time resolved-config print for omegaconf/hydra.
 
 ## Step 3: Select Managed Parameters
 
@@ -85,7 +100,11 @@ Common training parameters worth offering as managed:
 - **Precision / hardware**: `mixed_precision`, `bf16`, `fp16`, `compile`
 - **Output**: `output_dir`, `run_name`
 
-Selected params → `config.json -> runtime_params` with `${artifact.xxx}` / `${input.xxx}` references where applicable.
+**Overridability gate.** Only offer a param as managed if Step 2b found it `overridable: true`. A param that can't be changed from outside is not a knob — offering it invites the user to "set" a value that silently does nothing.
+
+For each `overridable: false` param found, still record it in `param_injection.items` (documenting *why* it can't be tuned) and surface it to the user as a risk: "changing this requires editing `<path:line>`". Don't put it in `runtime_params`.
+
+Selected params → `config.json -> runtime_params` (**effective values from Step 2b**) with `${artifact.xxx}` / `${input.xxx}` references where applicable. Every key also gets a `config.json -> param_injection.items` entry recording `via` / flag-or-key / `overridable` / `evidence` — see `references/schemas.md` → "config.json -> param_injection". `/train-run` reads this to build the launch command per-param instead of guessing from `config_format`; `/train-tune` reads it to know which axes are actually searchable.
 
 ## Step 4: Identify Log Format and Streaming Schema
 
@@ -164,6 +183,9 @@ Confirm the schema is internally consistent:
 - `metrics.watch_epoch` items must appear in `record_types` (any type whose `is_terminal` is false)
 - `checkpoints.selection.best_by` typically equals `metrics.primary_metric` (warn if different)
 - `done_signal` must reference an actual record type or stdout pattern
+- every `runtime_params` key has a matching `param_injection.items` entry — a managed param with unknown injection can't be launched correctly
+- no `param_injection.items` entry with `overridable: false` appears in `runtime_params` (**hard failure**, not a warning — this is the case that silently corrupts `/train-tune` conclusions)
+- every `param_injection.items` entry has non-empty `evidence`; `via: derived` entries also have `derived_from`
 
 If any check fails, surface it to the user and ask to fix or override.
 

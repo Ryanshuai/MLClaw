@@ -6,6 +6,7 @@
     "definitions": {},
     "watch": [],
     "per_class": false,
+    "_comment_baseline": "Reference for comparison. Either a run ID string (which must point at a mode:\"production\" run) or an object {source, scope, metrics}. `scope` is REQUIRED — it records what the numbers were measured on (dataset + split + sample count). /eval-run refuses to compute deltas when this run's scope differs from the baseline's, so a baseline stored without scope makes every delta against it unverifiable.",
     "baseline": null
   }
 }

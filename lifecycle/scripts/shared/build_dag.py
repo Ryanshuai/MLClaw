@@ -79,8 +79,11 @@ def build_graph(runs):
             except (ValueError, TypeError):
                 short_date = created[:10] if len(created) >= 10 else created
 
-        # Extract key metric
+        # Extract key metric. Anything not full-scale gets tagged — an unlabeled
+        # debug number sitting next to production ones on the same graph invites
+        # exactly the false comparison CLAUDE.md "Metric comparability" warns about.
         metrics = run.get("metrics", {})
+        mode = run.get("mode")
         key_metric = ""
         for k in ["map/map", "mAP", "accuracy", "f1"]:
             if k in metrics:
@@ -89,6 +92,8 @@ def build_graph(runs):
         if not key_metric and metrics:
             first_key = next(iter(metrics))
             key_metric = f"{first_key}={metrics[first_key]}"
+        if key_metric and mode != "production":
+            key_metric += f" [{mode or 'scale?'}]"
 
         nodes[full_id] = {
             "run_id": run_id,

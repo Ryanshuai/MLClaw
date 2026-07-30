@@ -133,7 +133,13 @@ Step key: `compare`. Only applies when Tier 3 or Tier 4 was run; skip if only Ti
 
 ### Phase 1: compare against paper targets
 
-Extract metrics (same as `/eval-run` Step 4). Compare against `plan.json -> paper.benchmarks`:
+**Only Tier 4 results may be compared against paper numbers.** Paper benchmarks are measured on the full test set. A Tier 3 mini run (100 samples) differs from that by sampling noise alone — routinely far more than the ±0.5% tolerance below. Comparing the two yields a verdict that is noise, and this verdict drives an irreversible decision: committing a refactor that broke the model, or reverting one that didn't.
+
+For **Tier 3, compare against a pre-refactor mini baseline** instead: the same fixed subset, run on the original code before this round. That comparison is valid, and it's what mini benchmarks are actually for — detecting regression, not verifying absolute correctness. Record the subset identity (explicit sample list, or seed + count) in `run.json -> scope` so later rounds reuse the identical subset; a mini baseline over a *different* 100 samples is not a baseline. If no pre-refactor mini baseline exists yet, produce one from `original/` before judging this round.
+
+Also set `run.json -> mode` / `scope` on the verification run: Tier 3 → `mode: "debug"` with the subset in `scope`; Tier 4 → `mode: "production"`. This keeps mini numbers out of every downstream comparison automatically (CLAUDE.md "Metric comparability").
+
+Tier 4 — extract metrics (same as `/eval-run` Step 4), compare against `plan.json -> paper.benchmarks`:
 ```
 Milestone benchmark (after priority 1 — dead code removal):
   mAP:  48.3  (paper: 48.5, delta: -0.2, -0.4%)  within tolerance
@@ -145,6 +151,8 @@ Default tolerance: +/-0.5% relative or +/-0.3 absolute (whichever is more lenien
 ### Phase 2: compare against training baseline
 
 Same comparison as Tier 3 Phase 2 (train N steps -> eval -> compare against baseline), applied to full benchmark when Tier 4 runs. Training tolerance: +/-1% relative (CUDA non-determinism in backward pass).
+
+**The baseline must have been trained for the same N steps on the same data.** A 100-step result compared against a fully-trained baseline is not a regression signal — the gap is dominated by remaining training, not by your refactor. Record `training_steps` in both and refuse the comparison when they differ; if no same-N baseline exists, produce one from `original/` first.
 
 Record in `steps.compare`: `pass`, `phase`, `deltas`; Phase 2 adds `training_steps`, `baseline_run_id`. Also write metrics to `run.json -> metrics`.
 

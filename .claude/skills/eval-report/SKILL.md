@@ -29,7 +29,8 @@ Read from the eval run:
 - `run.json` — all fields (metrics, per_class, env, lineage, code, duration, etc.)
 - `config_snapshot.json` — resolved config at run time
 - `sources.json` — artifacts and inputs used
-- Stage's `config.json -> dataset`, `output.json -> metrics.baseline` (compute deltas if set)
+- Stage's `config.json -> dataset`, `output.json -> metrics.baseline` — compute deltas **only if the baseline is comparable** to this run (same `mode`, equivalent `scope`, same dataset + split). If it isn't, say so in place of the delta table rather than printing numbers whose difference means nothing. This report gets shared with the team, so a fake delta here travels further than anywhere else in the lifecycle.
+- `run.json -> mode` and `scope` — render them in the report header. A `mode: "debug"` run must carry a visible banner stating the metrics describe a truncated workload (e.g. "DEBUG RUN — 20 of 5000 images; not comparable to full evaluations"). Reports are read months later by people who weren't there.
 - `outputs/` — list files, note images for embedding
 - `logs/stdout.log` — scan for summary tables
 

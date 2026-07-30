@@ -33,12 +33,13 @@ Follow CLAUDE.md "Run Skill Internal Dependencies" for the shared step flow:
 
 1. **Resolve Assets** (step `check_sources`) — fill concrete paths in `artifacts.json`, `input.json` sources, AND `input.json -> ground_truth -> sources`. Ground truth sources are what makes eval different from inference — ask for those after regular input sources. For server matching, connectivity tests, and credential flows, see CLAUDE.md "Run Skill Internal Dependencies" Step 1. Scripts in `lifecycle/scripts/infer-run/` (test_connection.py, etc). If any script fails, do the same work manually with Bash.
 2. **Create Run** (step `create_run`) — create run dir, initialize run.json, code snapshot, env snapshot, dependency check. Scripts: `create_run.py`, `capture_env.py`, `check_deps.py` (all in `lifecycle/scripts/infer-run/`). For code source resolution and environment resolution, see CLAUDE.md conventions.
-3. **Build & Execute** (step `execute`) — resolve `${}` references, build command per `config_format`, save `config_snapshot.json` and `sources.json` (including GT sources), confirm with user.
+3. **Build & Execute** (step `execute`) — resolve `${}` references, then build the command **per-param from `config.json -> param_injection.items`** (CLAUDE.md "Launch contract" rule 3), not by guessing from `config_format`. A `runtime_params` key with no entry, or one marked `overridable: false`, is an error — stop and ask. For eval this is the difference between a real threshold sweep and five runs that silently share one threshold. Set `run.json -> mode` and `scope` before launching. Save `config_snapshot.json` and `sources.json` (including GT sources), confirm with user.
 
 ### Execution Modes
 
 **Debug mode** (default for first run):
-- Limit data — evaluation needs more samples than inference for meaningful metrics. Defaults: images 20, video 30s, text/tabular 50 rows. Use code's own limiting args if available (--num_samples, --max_det, --limit, --subset).
+- Limit data — evaluation needs more samples than inference for meaningful metrics. Defaults: images 20, video 30s, text/tabular 50 rows. Use code's own limiting args if available (--num_samples, --max_det, --limit, --subset) — but treat the limiting arg as a param subject to `param_injection`: if the code ignores it, you get a full-scale run mislabeled as debug, or worse, a metric computed over an unknown subset.
+- **Record `scope` from what actually happened, not from what you asked for.** After the run, read the real processed count out of stdout / the result file ("Evaluated 20 images", `len(results)`) and write that into `run.json -> scope` (e.g. `{"samples": 20}`), with `mode: "debug"`. If the actual count doesn't match the limit you passed, the limiting arg didn't take effect — say so, fix `param_injection`, and don't let the metric be compared against anything.
 - For `single_file` pairing (COCO-style), warn that truncating annotation files is complex — prefer the code's own limiting args. If none exist, suggest adding one.
 - Run synchronously, stream output.
 - On failure: diagnose, propose fix, ask "Apply and re-run?". On success: show debug metrics with caveat ("on N samples — expect different on full dataset"), ask "production / retry / inspect?"
@@ -74,6 +75,7 @@ After execution finishes:
    - In summary, show top-3 best and worst performing classes
 
 5. **Baseline comparison** — if `output.json -> metrics.baseline` is set:
+   - **Check comparability before computing any delta.** The baseline run and this run must agree on three things: `run.json -> mode`, equivalent `run.json -> scope`, and `config.json -> dataset` (name + split). If any differs, report **not comparable** and name the differing dimension — do not print a delta or a percentage next to it. A mAP difference between a 20-image debug run and a 5000-image production run is arithmetic performed on unrelated quantities; formatting it as `+2.5%` is what turns a mistake into a decision. A baseline with `mode: null` (pre-dating this field) is also not comparable — ask the user to confirm what scale it was run at.
    - Script: `lifecycle/scripts/eval-run/compare_baseline.py {RUN_DIR}/run.json <baseline>`. Baseline can be a run ID (resolved to that run's run.json) or inline JSON. Fallback: manually load both metric sets and compute deltas.
    - Show delta table with improvements highlighted and regressions flagged:
      ```
@@ -85,7 +87,7 @@ After execution finishes:
 
 6. **Alias** — ask user for optional alias/description; write into `run.json -> alias` / `description`. No separate index file to update — `run.json` files are the source of truth, queried via `jq` on demand (see CLAUDE.md "Listing runs (no separate index)").
 
-7. **Offer baseline update** — "Set this run as the new baseline?" If yes, update `output.json -> metrics.baseline` to this run's ID.
+7. **Offer baseline update** — "Set this run as the new baseline?" **Only offer this for `mode: "production"` runs at full `scope`.** A debug run must never become the baseline: every future comparison would silently inherit the error, and the person reading those diffs months later has no way to see why the numbers look off. If the current run is debug, skip this step and say why. If yes, update `output.json -> metrics.baseline` to this run's ID.
 
 8. **Show summary**:
    ```

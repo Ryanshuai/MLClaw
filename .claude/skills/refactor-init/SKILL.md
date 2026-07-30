@@ -35,10 +35,13 @@ Record in `plan.json -> paper`: title, url.
 
 Ask: "What are the benchmark results from the paper that we should match?" Guide user to provide dataset, model variant, and metrics. These become acceptance criteria — after refactoring, code must reproduce within tolerance (e.g., +/-0.5%).
 
-Also set `output.json -> metrics.baseline` to paper numbers:
+Also set `output.json -> metrics.baseline` to paper numbers, **including the scale they were measured at** — paper results are full-test-set results, and only an equally full run may be compared against them:
 ```json
-"baseline": { "source": "paper", "metrics": { "mAP": 48.5, "AP50": 67.3 } }
+"baseline": { "source": "paper",
+              "scope": { "dataset": "COCO val2017", "samples": 5000 },
+              "metrics": { "mAP": 48.5, "AP50": 67.3 } }
 ```
+Without `scope` recorded here, a later round's 100-sample mini benchmark looks comparable to `48.5` and isn't — the ±0.5% tolerance is smaller than the sampling noise between a 100-image subset and the full set.
 
 ## Step 3: Environment Detection
 

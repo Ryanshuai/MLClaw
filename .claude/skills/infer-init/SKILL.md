@@ -88,7 +88,13 @@ Which categories do you want to see?
 
 **3b. Expand requested categories** with current values, let user pick which MLClaw should manage per run.
 
-**3c. Record**: selected params -> `config.json -> runtime_params` with `${artifact.xxx}` / `${input.xxx}` references where applicable. Unselected params stay in original config files untouched.
+**3c. Verify each pick is actually overridable.** A value in a config file is only the *declared* value — code may shadow it. For each param the user selected, trace it to the line that consumes it and look for: a literal at the use site, a post-parse assignment (`args.batch_size = 1`), or a value recomputed from another.
+
+For inference the casualty is the **performance number**: if `batch_size`, `precision`, or `device` doesn't actually take effect, the FPS / latency you record belongs to a different configuration than the one written in the run record. Benchmarks then get compared across runs that were never actually different.
+
+Cheap checks: `grep -rn "batch_size\|half\|fp16\|device" --include=*.py <code_dir>` then read the use site; `python infer.py --help` confirms which flags actually exist.
+
+**3d. Record**: selected params -> `config.json -> runtime_params` (**effective values** — what the code runs with, not what the config declares) with `${artifact.xxx}` / `${input.xxx}` references where applicable. Each key also gets a `config.json -> param_injection.items` entry recording `via` / flag-or-key / `overridable` / `evidence` (`path:line`), per CLAUDE.md "Launch contract" rule 3. Params found `overridable: false` must **not** go into `runtime_params` — keep them in `param_injection` with a note and tell the user which line to edit. Unselected params stay in original config files untouched.
 
 ## Step 4: Present Each File for Review
 
