@@ -94,7 +94,7 @@ This matters more in eval than anywhere else, because **eval params shape the me
 
 Cheap checks: `grep -rn "conf_thres\|confidence\|nms" --include=*.py <code_dir>` then read the use site; `python eval.py --help` confirms which flags actually exist.
 
-**3d. Record**: selected params → `config.json → runtime_params` (**effective values** — what the code runs with, not what the yaml declares) with `${artifact.xxx}` / `${input.xxx}` references. Each key also gets a `config.json → param_injection.items` entry recording `via` / flag-or-key / `overridable` / `evidence` (`path:line`), per CLAUDE.md "Launch contract" rule 3. Params found `overridable: false` must **not** go into `runtime_params` — keep them in `param_injection` with a note and tell the user which line to edit to change them. Unselected params stay in original config files untouched.
+**3d. Record**: selected params → `config.json → runtime_params` (**effective values** — what the code runs with, not what the yaml declares) with `${artifact.xxx}` / `${input.xxx}` references. Each key also gets a `config.json → param_injection.items` entry recording `via` / flag-or-key / `overridable` / `evidence` (`path:line`), per `lifecycle/references/run-mechanics.md` "Launch contract (Step 3 detail)" rule 3. Params found `overridable: false` must **not** go into `runtime_params` — keep them in `param_injection` with a note and tell the user which line to edit to change them. Unselected params stay in original config files untouched.
 
 ## Step 4: Present Each File for Review
 
@@ -112,11 +112,20 @@ Whichever is chosen, **record the scale the baseline describes** — this is the
 
 ## Step 5: Validate
 
-Run `python lifecycle/scripts/infer-init/validate_refs.py <stage_dir>` and `python lifecycle/scripts/eval-init/validate_ground_truth.py <stage_dir>`. If scripts fail, check manually:
+Two scripts, one job each — they do not overlap, so run both:
+
+```
+python lifecycle/scripts/infer-init/validate_refs.py <stage_dir>          # every ${} reference, all four files
+python lifecycle/scripts/eval-init/validate_ground_truth.py <stage_dir>   # GT items/sources, dataset cross-check, preprocessing contract
+```
+
+`validate_refs.py` is the **only** reference validator. It is the one that knows all four files and folds `ground_truth.items` into the `input` namespace, so `${input.gt_ann}` resolves. Don't add a second reference check beside it and don't hand-verify references when it reports clean — two validators answering one question is how this step used to block saves on correct configs.
+
+Exit codes, per CLAUDE.md "Script Integration": `1` means the script worked and found errors — fix them, don't redo the check by hand. `2` means the script broke; then check manually:
 
 - Entry script file exists in code/
 - All items have a valid `type` field
-- `${artifact.xxx}` / `${input.xxx}` / `${output.xxx}` references match actual keys
+- `${artifact.xxx}` / `${input.xxx}` / `${output.xxx}` references match actual keys — remembering that `${input.xxx}` may name either a plain input or a `ground_truth.items` entry
 - If `ground_truth.items` is non-empty, `pairing` must be set
 - config_path file exists (if specified)
 - dataset.name is filled (warn if empty — it helps when comparing runs later)

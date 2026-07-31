@@ -32,7 +32,9 @@ You got a training repo from GitHub. Now what?
 
 **6 hours of plumbing. 0 hours of actual ML work.**
 
-MLflow records step 5-6. The other 80%? You're on your own.
+Then you start tuning, and the second problem shows up. Three weeks later nobody
+remembers why lr=3e-4 got abandoned. All 40 runs are still on disk. The reasoning isn't —
+it was never written anywhere.
 
 ## The Solution
 
@@ -70,7 +72,59 @@ MLClaw:   Running on server-2, epoch 47/100, loss 0.23 (still decreasing).
           ETA ~3 hours. No errors. GPU memory 78%.
 ```
 
-**MLflow manages the boxes. MLClaw manages the arrows between them.**
+*Working today: the clone → train → tune → eval → report path. Not yet: data conversion,
+cross-run diffing, deployment — see [Status](#status).*
+
+## What a Tracker Can't Record
+
+```
+You:     "Tune lr for this model. 20 trials, then tell me what you learned."
+
+MLClaw:   [iter 0] [baseline]    lr=1e-4                        → val_acc 0.965
+          [iter 1] [fill_grid]   "2e-4 should be better"        → 0.963, refuted
+          [iter 2] [fill_grid]   "try the other direction, 5e-5"→ 0.968, confirmed
+          ...
+          [iter 8] [add_axis]    "lr is covered, introduce warmup" → 0.971
+          Stopping: best stable 4 iters, no gaps left.
+          Wrote chain.md — best 0.972 @ lr=2.5e-4 + warmup=0.03, 18 trials.
+```
+
+`/train-tune` is an agent-driven search loop, not a grid. Each iteration it re-reads every
+comparable prior run, asks *where is the evidence weakest*, and tags the decision it makes:
+`fill_grid` (an axis has a gap) · `refine_best` (densify around the leader) · `add_axis`
+(current axes are covered) · `verify` (re-run for noise). Each trial gets a **hypothesis**
+written before it launches and an **outcome** written after.
+
+`/train-tune-report` then renders the session as a `chain.md` — headline, best-so-far
+sequence, per-axis coverage map, the full decision timeline, and the part that matters
+three weeks later:
+
+```
+## Confirmed
+- lr range [2e-4, 3e-4] is the sweet spot; internal differences < 0.1%.
+- warmup_ratio=0.03 beats 0 (weak signal).
+
+## Refuted
+- lr ≥ 5e-3: numerically unstable; loss diverges around epoch 30.
+- weight_decay = 1e-2: val_acc drops 2%.
+
+## Open questions
+- **Single-seed result** — best config has not been verified across multiple seeds.
+```
+
+A tracker records that run 17 won. It cannot tell you that lr above 3e-4 was ruled out on
+iteration 4 and why — that sentence was never produced, because nothing in a sweep is
+asked to produce it. This is the one axis where MLClaw is doing something a tracker
+structurally can't.
+
+**And it will tell you when the search was worthless.** If every trial comes back with the
+exact same metric, the session refuses to name a winner: status `no_signal`, no recipe, and
+a diagnosis pointing at the likeliest cause — a swept flag that never reached the code.
+
+**Where MLClaw is not the tool**: there is no live dashboard, nothing streams to a browser,
+and runs are a directory tree on your disk sized for one user and ≲10k runs per project.
+If you want a real-time UI or team-scale run storage, keep W&B or TensorBoard — MLClaw
+reads what your code already writes and doesn't care what else is watching.
 
 ## Why It Won't Break Your Stuff
 
@@ -85,11 +139,26 @@ MLClaw:   Running on server-2, epoch 47/100, loss 0.23 (still decreasing).
 
 Every arrow is a **fixed-schema JSON contract** — agent fills values, can't change structure. Your code stays untouched, nothing changes until you confirm, and every run is a frozen snapshot you can always go back to.
 
+**Zero code invasion.** You are never asked to add a logging call, a decorator, or an SDK
+import. Metrics are read from the jsonl or stdout your training loop already emits; code
+version (git SHA plus a diff of the dirty tree), environment, and effective params are
+captured from outside the process.
+
+**Params are checked before they're trusted.** `/train-init` records, per param, whether it
+can actually be overridden from outside — a `--lr` flag is dead if the optimizer is built
+with a literal, and a run that silently ignores your value reports a number produced by a
+different one. Params it can't reach are marked unsearchable and excluded from tuning
+instead of being swept for nothing.
+
+One stage sits off that line: **refactor**. Point it at a research repo and each round cuts
+dead code, re-runs the paper's benchmark, and commits or reverts on whether the number
+still reproduces.
+
 ## Quick Start
 
 ```bash
 npm install -g @anthropic-ai/claude-code
-git clone https://github.com/user/mlclaw.git && cd mlclaw
+git clone https://github.com/Ryanshuai/MLClaw.git && cd MLClaw
 claude
 # "Create a new project for vehicle detection"
 # "I have inference code at https://github.com/xxx, set it up"
@@ -97,15 +166,17 @@ claude
 
 ## Status
 
-- [x] Project Init + Resource Discovery
-- [x] Inference (init + run)
-- [x] Evaluation (init + run + report)
+- [x] Project init + resource discovery — `/project-init`, `/resources`
+- [x] Inference — `/infer-init`, `/infer-run`
+- [x] Evaluation — `/eval-init`, `/eval-run`, `/eval-report`
+- [x] Training — `/train-init`, `/train-run` (background launch, stream monitoring, crash diagnosis, best-checkpoint selection + retention)
+- [x] Adaptive HPO — `/train-tune`, `/train-tune-report` (hypothesis/outcome per trial, chain.md)
+- [x] Refactor — `/refactor-init`, `/refactor-run`, `/refactor-report`
 - [x] Skill dependency system (inter-skill graph + internal dependency chain + cross-session resume)
 - [x] Remote execution + path mapping
-- [ ] Training (init + run with step-level monitoring)
 - [ ] Run comparison (side-by-side metrics/params/env diff)
-- [ ] Exploration (automated experiment loops)
-- [ ] Data (auto-format conversion)
+- [ ] Exploration (architecture search)
+- [ ] Data (quality checks + auto-format conversion)
 - [ ] Deployment (edge + cloud)
 
 ## License

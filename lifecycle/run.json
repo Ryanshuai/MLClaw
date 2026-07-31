@@ -12,8 +12,10 @@
   "mode": null,
   "scope": {},
 
+  "_comment_steps": "Every key here except `ad_hoc` is a step record `{status, at}`; nested keys are sub-steps. Resume reads this block to skip completed steps, so a skill MUST write the exact key names below — a key the template doesn't have is never recognized as completed and the step re-runs forever. `monitor` is long-running stages only (/train-run): it is re-entrant, so its `status` stays null while the job runs and infer/eval leave it `skipped`.",
   "steps": {
     "fork_check":     { "status": null, "at": null },
+    "resource_validation": { "status": null, "at": null },
     "resolve_assets": { "status": null, "at": null,
       "server_matching":    { "status": null, "at": null },
       "connectivity_test":  { "status": null, "at": null }
@@ -28,22 +30,32 @@
       "production_mode":    { "status": null, "at": null },
       "status_check":       { "status": null, "at": null }
     },
+    "monitor":        { "status": null, "at": null,
+      "stream_state":       { "status": null, "at": null },
+      "health_check":       { "status": null, "at": null },
+      "crash_diagnosis":    { "status": null, "at": null }
+    },
     "collect_results":{ "status": null, "at": null,
-      "finalize":           { "status": null, "at": null },
+      "reconcile_metrics":  { "status": null, "at": null },
+      "select_checkpoint":  { "status": null, "at": null },
+      "retention":          { "status": null, "at": null },
       "extract_metrics":    { "status": null, "at": null },
-      "update_index":       { "status": null, "at": null }
+      "finalize":           { "status": null, "at": null }
     },
     "ad_hoc": []
   },
 
-  "_comment_code": "Filled by run skills at create_run.code_snapshot via lifecycle/scripts/shared/code_snapshot.py. SHA + dirty_patch_path is the reproduction contract: `git checkout <origin_commit> && git apply <run_dir>/<dirty_patch_path>`.",
+  "_comment_code": "Filled at create_run.code_snapshot via lifecycle/scripts/shared/code_snapshot.py — merge that script's output dict in whole; do not hand-assemble it. Reproduction contract: `git checkout <origin_commit> && git apply <run_dir>/<dirty_patch_path>`, run from the code dir. Read `reproducible` first: false means a differing file was NOT embedded (too large), so checkout+apply rebuilds a different tree than the one that ran. `dirty_files_count` counts every entry in the patch, tracked and untracked alike — untracked files are invisible to `git diff HEAD`, and counting them as clean is how a run silently reproduces different code. `repo_subdir` is non-null when the code dir sits inside a larger repo (the github/server/null source modes put it under the project repo): the patch is then scoped to that subtree, but `origin_commit` still moves whenever anything else in the repo is committed, so it is not a stable identity for this code alone.",
   "code": {
     "repo": null,
     "branch": null,
     "origin_commit": null,
-    "project_commit": null,
+    "repo_subdir": null,
     "dirty_patch_path": null,
-    "dirty_files_count": null
+    "dirty_files_count": null,
+    "untracked_skipped": [],
+    "reproducible": null,
+    "warnings": []
   },
 
   "env": {
@@ -141,12 +153,23 @@
   "duration_s": null,
   "error": null,
 
-  "_comment_runtime_state": "Streaming-state fields (used by long-running skills like /train-run). last_heartbeat: ISO timestamp updated periodically while alive — agents detect hung jobs when (now - last_heartbeat) exceeds expected interval. last_step: most recent step number observed in the jsonl stream — lets agents read ETA without re-tailing the whole log; null for stages without step concept. latest_metrics: most recent streaming snapshot (e.g., last val_epoch's key fields) — distinct from `metrics` which holds the final/terminal numbers populated on completion.",
+  "_comment_runtime_state": "Streaming-state fields (used by long-running skills like /train-run). last_heartbeat: ISO timestamp of the last monitor check at which the job was observed to be making progress — agents detect hung jobs when (now - last_heartbeat) exceeds expected interval. last_step: most recent step number observed in the jsonl stream — lets agents read ETA without re-tailing the whole log; null for stages without step concept. latest_metrics: most recent streaming snapshot (e.g., last val_epoch's key fields) — distinct from `metrics` which holds the final/terminal numbers populated on completion.",
   "last_heartbeat": null,
   "last_step": null,
   "latest_metrics": {},
 
-  "metrics": {},
+  "_comment_liveness_probe": "Raw observation backing last_heartbeat, written by the monitor step (steps.monitor.stream_state) on every check. Progress = process alive AND any of the three counters advanced since the previous probe. Needed as stored state because a single observation cannot tell 'advanced' from 'frozen'. jsonl_size is not redundant with jsonl_mtime: Python's buffered writer flushes roughly every 8 KB, so ~200-byte jsonl records can leave mtime minutes behind a healthy process while size still grows. stdout_mtime is the reliable leg — MLClaw owns the redirect to logs/stdout.log and launches with PYTHONUNBUFFERED=1, so it advances without any cooperation from the training code. observed_at is the ISO timestamp of this probe; it advances every check whether or not the job progressed, so never use it as a liveness signal.",
+  "liveness_probe": {
+    "observed_at": null,
+    "jsonl_mtime": null,
+    "jsonl_size": null,
+    "stdout_mtime": null
+  },
+
+  "_comment_metrics": "Terminal numbers, filled at collect_results. The `best` block is a fixed shape because two things read it without being able to ask: list_runs.py sorts leaderboards on `best.primary_metric_value`, and /train-tune reads it as the stop condition. `primary_metric_value` must be the value of the checkpoint recorded in outputs.best_checkpoint — when the stream's peak epoch was never saved to disk, select_checkpoint.py reports `best_record_skipped` with the value to record here instead. Writing the stream's peak next to a lower-scoring artifact is a fake metric.",
+  "metrics": {
+    "best": { "primary_metric": null, "primary_metric_value": null, "epoch": null }
+  },
 
   "_comment_outputs": "Canonical artifact paths produced by this run, relative to <run_dir>. Filled by run skills at finalize. Per-stage conventions: training fills best_checkpoint / last_checkpoint / train_log / config_yaml; eval fills report / metrics_json; infer fills predictions / etc. Downstream skills (e.g. /eval-run consuming a train run's best ckpt) read these instead of re-deriving paths from config conventions.",
   "outputs": {},

@@ -55,10 +55,10 @@ Creates directories, copies templates, writes `.gitignore`, runs git init + init
 
 ## Clone / Link code
 
-The unified contract (see CLAUDE.md "Code Source Resolution") is `code_dir = stages/{stage}/code/_source if exists else stages/{stage}/code`. Per source mode:
+The unified contract (see `lifecycle/references/layout.md` "Code Source Resolution") is `code_dir = stages/{stage}/code/_source if exists else stages/{stage}/code`. Per source mode:
 
 - **Git URL** (`code_source.source == "github"`): `git clone <code_source.path>` into `stages/{stage}/code/`, record `branch` + `commit` (HEAD SHA) in `project.json`, remove `.git` so the code becomes plain files tracked by project git. No `_source` symlink for this mode.
-- **Local path** (`code_source.source == "local"`): `init_project.py` already creates the symlink `stages/{stage}/code/_source -> expanduser(code_source.path)` during creation. **Do not copy — the user iterates in their own repo, copy creates bidirectional sync friction**. Reproducibility comes from `code_snapshot.py` at run-time, not from a project-wide copy. After rsync to a new machine the symlink will dangle (it stores an expanded absolute path); recreate with `ln -sfn $(python -c "import json,os;print(os.path.expanduser(json.load(open('project.json'))['stages']['<stage>']['code_source']['path']))") stages/<stage>/code/_source`.
+- **Local path** (`code_source.source == "local"`): `init_project.py` already creates the symlink `stages/{stage}/code/_source -> expanduser(code_source.path)` during creation. **Do not copy — the user iterates in their own repo, copy creates bidirectional sync friction**. Reproducibility comes from `code_snapshot.py` at run-time, not from a project-wide copy. After rsync to a new machine the symlink will dangle (it stores an expanded absolute path); repair every stage at once with `python <mlclaw_root>/lifecycle/scripts/shared/relink_sources.py <project_root>`. It is idempotent, and it refuses rather than replacing a real directory that has taken the `_source` slot — which a hand-written `ln -sfn` would silently clobber.
 - **Server** (`code_source.source == "server"`): `scp` into `stages/{stage}/code/`, no `_source` symlink.
 
 Code modifications during runs stay in project git (for github/server) or are captured per-run via `code_snapshot.py` SHA + dirty patch (for local) — never pushed back to the original repo.

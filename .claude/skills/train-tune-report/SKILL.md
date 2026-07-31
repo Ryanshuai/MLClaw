@@ -43,9 +43,14 @@ If no session exists at all: tell the user, exit. (Don't create one — that's `
 
 ## Step 2: Collect Runs
 
-Scan `stages/training/runs/*/run.json`, keep those with `lineage.session == <session_id>`.
+```bash
+python <mlclaw_root>/lifecycle/scripts/shared/list_runs.py <project_root> --stage training --mode production \
+    --session <session_id> --sort created_at --asc
+```
 
-Sort by `created_at` ascending. This gives the iteration timeline.
+Sorting happens inside the script, on parsed instants — a raw string sort over
+`created_at` misorders a `Z`-suffixed timestamp against a `+00:00` one, which
+silently scrambles the iteration timeline this report is entirely about.
 
 If `--include-running` not set: drop runs with `status != "completed"`.
 

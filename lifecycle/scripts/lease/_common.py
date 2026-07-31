@@ -47,7 +47,7 @@ def resources_path(arg):
 
 def _from_claude_md():
     """CLAUDE.md's `workspace_root:` is the single source of truth for where projects and
-    the shared resources.json live (CLAUDE.md "Workspace and tool-repo location")."""
+    the shared resources.json live (lifecycle/references/layout.md "Workspace and tool-repo location")."""
     # .../<repo>/lifecycle/scripts/lease/_common.py -> <repo>
     repo = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
     try:

@@ -3,7 +3,7 @@
   "items": {},
   "sources": {},
   "preprocessing": {
-    "_comment": "MUST MATCH the training stage's input.json -> preprocessing on normalization / input_layout / label_transform — see CLAUDE.md 'Preprocessing contract (cross-stage)'. This is where train/serve skew lives: the model converges fine, inference returns plausible-looking output, and quality is quietly degraded with nothing to show in a log. `augmentation` must stay empty, or hold only explicitly-declared test-time augmentation.",
+    "_comment": "MUST MATCH the training stage's input.json -> preprocessing on normalization / input_layout / label_transform — see lifecycle/references/run-mechanics.md 'Preprocessing contract (cross-stage)'. This is where train/serve skew lives: the model converges fine, inference returns plausible-looking output, and quality is quietly degraded with nothing to show in a log. `augmentation` must stay empty, or hold only explicitly-declared test-time augmentation.",
     "normalization": { "mean": [], "std": [], "source": "", "evidence": "" },
     "input_layout": { "size": [], "resize_mode": "", "channel_order": "", "evidence": "" },
     "label_transform": { "index_base": null, "class_mapping": "", "background_class": null, "evidence": "" },

@@ -3,6 +3,7 @@
   "items": {},
   "metrics": {
     "_comment": "Metrics to track. Discovered from code by /infer-init, confirmed by user.",
+    "_comment_definitions": "Per-metric shape: unit, description, direction (max|min), source (stdout|file), plus pattern for stdout or path+key for file. `direction` is REQUIRED for any metric that will be compared against a baseline \u2014 compare_baseline.py reads it and reports `unknown_direction` rather than guessing from the name, because whether a drop is an improvement is not decidable from the word `loss` appearing in a metric someone called `focal_loss_weight`. Aliases (maximize / lower_is_better / \u2026) normalize via shared/compare.py.",
     "definitions": {},
     "watch": []
   }

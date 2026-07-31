@@ -1,6 +1,6 @@
 ---
 name: eval-report
-description: "Use this skill to generate a self-contained HTML evaluation report from a completed eval run. Includes metrics, baseline comparison, per-class breakdown, training context from upstream DAG, and embedded charts. Triggers for: '\u751F\u6210\u8BC4\u4F0B\u62A5\u544A', 'make eval report', 'create HTML report from eval results', 'share eval results with team'. Not for running evaluation (use eval-run)."
+description: "Use this skill to generate a self-contained HTML evaluation report from a completed eval run. Includes metrics, baseline comparison, per-class breakdown, training context from upstream DAG, and embedded charts. Triggers for: '\u751F\u6210\u8BC4\u4F30\u62A5\u544A', '\u8BC4\u4F30\u62A5\u544A', 'make eval report', 'create HTML report from eval results', 'share eval results with team'. Not for running evaluation (use eval-run)."
 ---
 
 # /eval-report — Generate Evaluation Report
@@ -17,7 +17,15 @@ Follow the Workflow State Protocol from CLAUDE.md: push on entry, update step as
 
 **From /eval-run**: use current `{PROJECT}` and `{RUN_DIR}`, skip to Step 2.
 
-**Standalone**: locate project per CLAUDE.md conventions (show recent projects, let user pick). Then list recent evaluation runs by jq-scanning `{PROJECT}/stages/evaluation/runs/run_*/run.json` (sort by `created_at` desc, take top 10 — see CLAUDE.md "Listing runs (no separate index)" for the canonical query). Ask which run to report on. Read `{RUN_DIR}/run.json` — warn if not completed.
+**Standalone**: locate project per CLAUDE.md conventions (show recent projects, let user pick). Then list recent evaluation runs:
+
+```bash
+python <mlclaw_root>/lifecycle/scripts/shared/list_runs.py {PROJECT} --stage evaluation --all-modes-not-comparable --limit 10
+```
+
+`--all-modes-not-comparable` is correct here and only here: this is a menu, not a
+comparison, so a debug run belongs in the list. The result is tagged
+`comparable: false` — do not carry those entries into a delta table. Ask which run to report on. Read `{RUN_DIR}/run.json` — warn if not completed.
 
 ## Step 2: Gather Report Data
 

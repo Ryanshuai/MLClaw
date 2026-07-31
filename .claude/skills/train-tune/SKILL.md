@@ -113,12 +113,16 @@ comparable = [
 ]
 ```
 
-Filter inline with Bash + jq, e.g.:
+Do not hand-write this filter. `tune_comparable_runs` exists because the
+condition above is four clauses long and forgetting the fourth is invisible:
+
 ```bash
-jq -r 'select(.code.origin_commit=="<sha>" and .lineage.session==null
-              and .mode=="production") | .run_id' \
-   stages/training/runs/*/run.json
+python <mlclaw_root>/lifecycle/scripts/shared/list_runs.py <project_root> --stage training --mode production --commit <sha> --no-session
 ```
+
+Read `comparable` in the result before ranking anything. False means the matched
+runs span more than one `scope` (or none recorded one), so their metrics are not
+a series — `distinct_scopes` says which groups you actually have.
 
 For each comparable run extract: `runtime_params`, `hypothesis`, `outcome`, primary
 metric value, `lineage.fork_of`, `lineage.variation_summary`. **All session sources

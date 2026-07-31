@@ -16,7 +16,7 @@ Execute a training run: validate resources, resolve sources, launch in backgroun
 
 **One question at a time** — training has many knobs (lr, bs, epochs, seed, optimizer, scheduler, mixed precision, save policy …). Asking them all at once overwhelms; ask one, record, ask next.
 
-**Workflow state, dependency checks, locate project, variable references** — follow CLAUDE.md (Workflow State Protocol, Skill Dependency Graph, Variable Reference Syntax). Stage = `training`, upstream = `/train-init` (check `config.json -> entry_command` non-empty).
+**Workflow state, dependency checks, locate project, variable references** — follow CLAUDE.md (Workflow State Protocol, Skill Dependency Graph) and `lifecycle/references/layout.md` (Variable Reference Syntax). Stage = `training`, upstream = `/train-init` (check `config.json -> entry_command` non-empty).
 
 **Re-entry behavior** — when this skill is invoked again on an existing run, do NOT re-launch. Read `run.json -> status` and route:
 
@@ -44,7 +44,7 @@ If skip: fresh run, `fork_of = null`.
 
 The reasoning ("why continue") goes in `description` / `hypothesis`, or in `decisions.jsonl` if running under `/train-tune`.
 
-## Resource Validation
+## Resource Validation (step `resource_validation`)
 
 Before launching, check that the host has enough hardware to run the configured training:
 
@@ -60,15 +60,26 @@ For remote servers, query the server's `nvidia-smi` over SSH first; resolve via 
 
 ## Steps 1-3: Shared Run Mechanics
 
-Follow CLAUDE.md "Run Skill Internal Dependencies" — that section owns the cross-skill rules. The shared parts in plain words:
+Follow `lifecycle/references/run-mechanics.md` "Run Skill Internal Dependencies" — that section owns the cross-skill rules. The shared parts in plain words:
 
-1. **Resolve Assets** (step `check_sources`) — **pick from `candidates`; don't ask for paths.** `/train-init` Step 1c already located the options for every item in `artifacts.json` and `input.json` (plus `ground_truth` for both splits). Present each item's `match: "ok"` candidates and let the user choose; when there's exactly one, default to it and just confirm. Verify the chosen path still resolves — candidates are machine-specific and go stale after an rsync to a different host, so if they all dangle, re-run `/train-init` Step 1c here rather than falling back to interrogating the user path by path. Record the choice in the run's `sources.json`.
+1. **Resolve Assets** (step `resolve_assets`) — **pick from `candidates`; don't ask for paths.** `/train-init` Step 1c already located the options for every item in `artifacts.json` and `input.json` (plus `ground_truth` for both splits). Present each item's `match: "ok"` candidates and let the user choose; when there's exactly one, default to it and just confirm. Verify the chosen path still resolves — candidates are machine-specific and go stale after an rsync to a different host, so if they all dangle, re-run `/train-init` Step 1c here rather than falling back to interrogating the user path by path. Record the choice in the run's `sources.json`.
 
    The chosen `location` changes what happens next: `local` → use directly; `s3` / `downloadable` → fetch before launch and record where it landed; **`server:<key>` → this is the signal to run on that machine** instead of copying the data to this one. Raise that as an option rather than silently starting a 19GB transfer.
 
    When extending a prior training run (fork + ckpt-as-init), auto-resolve the base run's last ckpt from `parents[-1] -> {RUN_DIR}/<ckpt_path>` and confirm with user — don't re-prompt for it.
 
-2. **Create Run** (step `create_run`) — create run dir, init `run.json`, env snapshot (pip freeze + GPU + CUDA), dependency check. **Code snapshot via `code_snapshot.py`** — see CLAUDE.md "Code snapshot (Step 2 detail)".
+2. **Create Run** (step `create_run`) — **use the scripts; do not create the run dir by hand.**
+
+   ```bash
+   python <mlclaw_root>/lifecycle/scripts/shared/create_run.py <stage_dir> <mlclaw_root>/lifecycle/run.json
+   python <mlclaw_root>/lifecycle/scripts/shared/code_snapshot.py <code_dir> <RUN_DIR>   # merge into run.json -> code
+   python <mlclaw_root>/lifecycle/scripts/shared/capture_env.py <RUN_DIR>
+   python <mlclaw_root>/lifecycle/scripts/shared/check_deps.py  <code_dir> <RUN_DIR>
+   ```
+
+   `create_run.py` is not a convenience here. `run_id` has one-second resolution, and a `/train-tune` session with `max_concurrent > 1` launches trials in the same second — hand-rolled `mkdir -p` lets two runs share a directory and the second `run.json` write destroys the first run's record. The script allocates a free id and says so. It also writes `created_at` as UTC-with-offset, which is what makes `list_runs.py`'s ordering correct across machines.
+
+   **Code snapshot** — see `lifecycle/references/run-mechanics.md` "Code snapshot (Step 2 detail)". Read `reproducible` in its output before continuing; false means the snapshot cannot rebuild this tree.
 
    **Train-specific: diff the captured env against `config.json -> env_snapshot`** (what the original author had) and report key-package mismatches before launching:
 
@@ -88,7 +99,7 @@ Follow CLAUDE.md "Run Skill Internal Dependencies" — that section owns the cro
    ⚠ degrades · val split unseeded — metrics drift between runs (dataset.py:118)
    ```
 
-   A `blocks` entry should never reach here (init stops on those), so if you find one, treat it as a bug in the init record and stop. Then confirm with user. **`cwd` + `output_dir` rules** — see CLAUDE.md "Launch contract (Step 3 detail)". Train-specific overrides: production mode runs in background (see "Execution Modes" below).
+   A `blocks` entry should never reach here (init stops on those), so if you find one, treat it as a bug in the init record and stop. Then confirm with user. **`cwd` + `output_dir` rules** — see `lifecycle/references/run-mechanics.md` "Launch contract (Step 3 detail)". Train-specific overrides: production mode runs in background (see "Execution Modes" below).
 
 ### Execution Modes
 
@@ -97,41 +108,56 @@ Follow CLAUDE.md "Run Skill Internal Dependencies" — that section owns the cro
 - Run synchronously, stream stdout. Watch for crash signatures (see references/crash-signatures.md).
 - On failure: diagnose, propose fix, ask "Apply and re-run debug?". On success: ask "production / inspect / cancel?"
 - Debug mode runs in foreground because it's short. Production mode never does.
-- **Set `run.json -> mode: "debug"` and `scope`** (epochs / steps actually reached, actual batch size — read from the log, not from what you passed). A debug run's val metric describes a 1-epoch model and must never be compared against, or ranked alongside, a full run's — see CLAUDE.md "Metric comparability".
+- **Set `run.json -> mode: "debug"` and `scope`** (epochs / steps actually reached, actual batch size — read from the log, not from what you passed). A debug run's val metric describes a 1-epoch model and must never be compared against, or ranked alongside, a full run's — see `lifecycle/references/run-mechanics.md` "Metric comparability".
 
 **Production mode** — ask local or server. In both cases set `run.json -> mode: "production"` and `scope` (full epochs, full data) at launch, then correct `scope` at finalize from what the log actually reports:
-- **Local**: launch in background (`run_in_background`), redirect stdout to `{RUN_DIR}/logs/stdout.log`. Set `run.json -> pid`, `started_at`, `status: "running"`. Return immediately.
-- **Remote**: SCP run dir to server, launch via tmux session. Record session name in `run.json -> server` and `pid: tmux:<session>`. Return immediately.
+- **Local**: launch in background (`run_in_background`) with `PYTHONUNBUFFERED=1` in the environment, redirect stdout to `{RUN_DIR}/logs/stdout.log`. Set `run.json -> pid`, `started_at`, `status: "running"`. Return immediately.
+- **Remote**: SCP run dir to server, launch via tmux session with `PYTHONUNBUFFERED=1` set **inside** the session command (`tmux new-session -d ... 'PYTHONUNBUFFERED=1 <cmd> > logs/stdout.log 2>&1'`) — tmux does not inherit the local shell's env. Record session name in `run.json -> server` and `pid: tmux:<session>`. Return immediately.
 
-For path mapping (so jsonl on the server is readable from local), see CLAUDE.md "Path Mapping". For multi-GPU launchers, the entry_command from `config.json` already encodes them — pass through.
+`PYTHONUNBUFFERED=1` is not cosmetic: it is what makes `logs/stdout.log` advance in real time, and that file is the reliable leg of the Step 4b liveness check. MLClaw controls the launch environment, so this costs the training code nothing — zero code invasion holds.
 
-## Step 4: Monitor (training-specific)
+For path mapping (so jsonl on the server is readable from local), see `lifecycle/references/run-mechanics.md` "Path Mapping (Cross-Machine Execution)". For multi-GPU launchers, the entry_command from `config.json` already encodes them — pass through.
+
+## Step 4: Monitor (step `monitor`, training-specific)
 
 Invoked when the skill re-enters with `status: "running"`. **Never block here** — read state, report, return.
 
-### 4a. Update streaming state in run.json
+Re-entrant, so `steps.monitor.status` stays null while the job runs; set it `completed` only when the run terminates. Infer/eval have no such step and leave it `skipped`.
 
-Read the jsonl at `{RUN_DIR}/<output.json -> metrics.log_path>`:
+### 4a. Update streaming state in run.json (sub-step `stream_state`)
 
-- `last_heartbeat` ← jsonl file mtime (ISO timestamp). This is implicit-heartbeat: if jsonl is being written, training is alive. Avoids requiring train code to write heartbeat itself (zero code invasion).
+Read the jsonl at `{RUN_DIR}/<output.json -> metrics.log_path>` and `{RUN_DIR}/logs/stdout.log`:
+
+- `liveness_probe` ← `{observed_at, jsonl_mtime, jsonl_size, stdout_mtime}` as observed right now.
+- `last_heartbeat` ← `observed_at`, but **only if at least one of those three counters advanced past the stored `liveness_probe`**. If none did, leave the previous `last_heartbeat` in place — the widening gap is exactly what 4b reads as a hang.
 - `last_step` ← step from the most recent record matching `record_types` with a `step` field.
 - `latest_metrics` ← key fields from the most recent epoch-level record (e.g., last `val_epoch`'s primary_metric and watch_epoch fields).
 
-Write all three to `run.json` atomically.
+Write all four to `run.json` atomically. Liveness needs a *previous* observation to compare against, which is why `liveness_probe` is persisted rather than recomputed; on the first check of a run there is nothing to diff, so store the probe, set `last_heartbeat = started_at`, and classify healthy.
 
-### 4b. Health classification
+Three counters, not one, because **jsonl mtime alone is a false-alarm generator**: Python's buffered writer flushes roughly every 8 KB while a jsonl record is ~200 bytes, so mtime can lag many minutes behind a perfectly healthy process.
+
+| Counter | Advances when | Stale on a *healthy* run when |
+|---|---|---|
+| `jsonl_mtime` | records get flushed to disk | writer is still buffering (up to ~8 KB of records) |
+| `jsonl_size` | the file grows, including before mtime moves | logging interval is long ("every N steps") |
+| `stdout_mtime` | the process prints anything | code is silent between epochs |
+
+`stdout_mtime` is the reliable leg: MLClaw itself owns the redirect to `logs/stdout.log` and sets `PYTHONUNBUFFERED=1` at launch, so it advances with zero cooperation from the training code.
+
+### 4b. Health classification (sub-step `health_check`)
 
 | Signal | Status |
 |---|---|
-| Process alive + jsonl mtime within last 2× expected_interval | **healthy** |
-| Process alive + jsonl mtime stale > 2× expected_interval | **likely hung** (dataloader, deadlock, GPU hang) |
+| Process alive + **any** counter advanced (`last_heartbeat` within 2× expected_interval) | **healthy** |
+| Process alive + **all three** counters stale > 2× expected_interval | **likely hung** (dataloader, deadlock, GPU hang) |
 | Process dead + last record matches `done_signal` | **completed** → go to Step 5 |
 | Process dead + last record does NOT match `done_signal` | **crashed** → go to Step 4c |
 | Process dead + node SIGTERM signature in stdout | **preempted** → suggest fork + load last.pt as init on re-invoke |
 
-`expected_interval` is derived from `record_types[step_type].frequency` (e.g., "every 50 steps" + observed step throughput). If unknown, default 5 minutes.
+All three, not any one — a single stale counter is the normal case per the 4a table, and "likely hung" is a claim the user acts on by killing a run that may be six hours in. `expected_interval` is derived from `record_types[step_type].frequency` (e.g., "every 50 steps" + observed step throughput). If unknown, default 5 minutes.
 
-### 4c. Crash diagnosis
+### 4c. Crash diagnosis (sub-step `crash_diagnosis`)
 
 For details on signature → fix mapping, read `references/crash-signatures.md`. High-level patterns:
 
@@ -145,7 +171,7 @@ For details on signature → fix mapping, read `references/crash-signatures.md`.
 
 Show diagnosis, offer "Apply suggested fix and retry as fork?" If user accepts: create new run with `fork_of = self`, apply fix, launch.
 
-### 4c'. ETA report
+### 4d. ETA report (no tracked sub-step — output, not state)
 
 Format:
 ```
@@ -158,43 +184,78 @@ ETA:   ~ 11 minutes (based on throughput × remaining_steps)
 last_heartbeat: 12s ago
 ```
 
-## Step 5: Finalize
+## Step 5: Finalize (step `collect_results`)
 
-After done_signal matched (or user manually marks completed):
+After done_signal matched (or user manually marks completed). **Run these three in order — each one's output is the next one's input, and running them out of order or skipping one means ranking a checkpoint against a schema nobody checked.**
 
-### 5a. Pick best checkpoint
+### 5a'. Reconcile the metric schema (sub-step `reconcile_metrics`)
 
-Read `output.json -> checkpoints`:
+```bash
+python <mlclaw_root>/lifecycle/scripts/train-run/reconcile_metrics.py \
+    <stage>/output.json --run-dir <RUN_DIR>
+```
 
-1. Scan jsonl for all epoch-level records.
-2. Rank by `selection.best_by` in `selection.direction`.
-3. Resolve the corresponding checkpoint file via `path_pattern` + epoch/step substitution.
-4. If the file exists: record path in `run.json -> outputs.best_checkpoint`. If multiple matches (e.g., script saved every epoch), the highest-ranking one wins.
-5. If the script already saved a `best.pt` (independent best-tracking inside training), prefer it and verify the metric matches.
+Checks the schema `/train-init` wrote against what the stream actually emitted: does `primary_metric` exist in the stream, on which record types, on the training or the held-out split, and does its declared `direction` contradict its own name. **A `fail` verdict stops finalization** — do not select a checkpoint or record a metric from a stream the schema does not describe. Fix `output.json` (or re-run `/train-init` Step 3) and re-reconcile.
 
-### 5b. Apply retention policy
+The verdict this catches most often: `primary_metric` names a field the code never emits, and the near-miss list shows what it emits instead (`val_loss` declared, `loss` and `train_loss` present). Second most often: a training-split metric driving checkpoint selection.
 
-Per `output.json -> checkpoints.retention`:
+### 5a. Pick best checkpoint (sub-step `select_checkpoint`)
 
-| Policy | Action |
+```bash
+python <mlclaw_root>/lifecycle/scripts/train-run/select_checkpoint.py \
+    <stage>/output.json <RUN_DIR>/<log_path> --output-dir <RUN_DIR>/output
+```
+
+Returns the chosen file **plus the ranking with the values as they literally appear in the jsonl, and the raw record behind the winner**. Show the ranking to the user, not just the path — a path alone carries no evidence that the sort was right.
+
+Record `chosen.path` in `run.json -> outputs.best_checkpoint`. Cases it surfaces that need a decision:
+
+| Finding | What it means |
 |---|---|
-| `keep_all` | Do nothing. |
-| `keep_last_n` | Delete all checkpoints except the `n` most recent (by epoch/step). Default `n=3` if not specified. Always keep the chosen best. |
-| `keep_best_only` | Delete all except the chosen best. |
-| `keep_best_and_last` | Keep best + last. Delete the rest. |
+| `best_record_skipped` | the peak epoch was never saved (`save_every=N`). Falling through to the next-best is fine — but record **that** checkpoint's value, not the stream's peak. Recording the peak next to a lower-scoring artifact is a fake metric. |
+| `script_saved_best_differs` | the training script tracked "best" itself and disagrees with this ranking. Two rankings disagreeing means one uses a different metric or direction. Resolve before trusting either. |
+| `best_by_differs_from_primary` | the checkpoint chosen and the number on the leaderboard describe different things. |
+| `checkpoints_without_a_metric` | files on disk with no record in the stream — retention will refuse to delete these. |
 
-Confirm with user before any deletion. Show what will be kept and what removed.
+### 5b. Apply retention policy (sub-step `retention`)
 
-### 5c. Finalize run.json
+`output.json -> checkpoints.retention`: `keep_all` | `keep_last_n` (default `n=3`) | `keep_best_only` | `keep_best_and_last`. The chosen best survives every policy.
 
-- `status: "completed"`, `finished_at`, `duration_s`
-- `metrics`: terminal snapshot (final epoch's full record + best epoch's primary_metric)
-- `last_heartbeat`: final jsonl mtime
+**This is the only irreversible operation in MLClaw, so it is two commands, not one.** "Confirm with the user" is not by itself a safeguard — a user shown a list of filenames has no way to check whether the sort behind it was right.
+
+```bash
+# 1. plan — deletes nothing, ever. Prints each file with the metric value that decided its fate.
+python <mlclaw_root>/lifecycle/scripts/train-run/retention.py plan \
+    <stage>/output.json <RUN_DIR>/<log_path> --output-dir <RUN_DIR>/output \
+    --plan <RUN_DIR>/retention_plan.json
+
+# 2. show the table to the user, then apply with the token from the plan file
+python <mlclaw_root>/lifecycle/scripts/train-run/retention.py apply \
+    --plan <RUN_DIR>/retention_plan.json --confirm <confirm_token>
+```
+
+`plan` refuses outright — no plan, no token, nothing deleted — when the ranking has a `fail` finding, when the best is not in the keep set, when the keep set would be empty, when everything would be deleted, or when **a file scheduled for deletion has no metric in the stream**. That last one is the rule worth remembering: never delete what you cannot rank.
+
+`apply` re-stats every file against the plan's digest and aborts on any drift (a file changed, vanished, or a new checkpoint appeared). It deletes nothing partially — drift blocks the whole operation, and the fix is to re-plan, not to force through.
+
+### 5c. Finalize run.json (sub-step `finalize`)
+
+```bash
+python <mlclaw_root>/lifecycle/scripts/shared/finalize_run.py <RUN_DIR>/run.json completed
+```
+
+Sets `status` / `finished_at` / `duration_s`. Read the `warnings` it returns rather than only the duration — it reports when `started_at` carried no timezone (so the duration rests on an assumption), when the subtraction could not be done at all, and when the result is negative from clock skew between the launch host and this one. A null `duration_s` with no explanation is indistinguishable from a run that never started.
+
+Then fill the rest by hand:
+
+- `metrics`: terminal snapshot (final epoch's full record + best epoch's primary_metric). Write the `best` block in the shape `list_runs.py` and `/train-tune` read: `metrics.best = {primary_metric, primary_metric_value, epoch}`.
+- **The recorded metric must be the chosen checkpoint's value.** If 5a reported `best_record_skipped`, use `record_this_value` from that finding, not the stream's peak.
+- `last_heartbeat`: the last probe at which the job was still advancing (per 4a) — **not** `finished_at`. Leave `liveness_probe` holding its final observation. Together they distinguish "finished at 04:12" from "stopped moving at 02:40 and was reaped at 04:12".
 - Reset `last_step` / `latest_metrics`? No — keep them for retrospective. They're now historical, not live.
 
 ### 5d. Summary
 
-- No separate index file to update — `run.json` is the source of truth, queried on demand via `jq` (see CLAUDE.md "Listing runs (no separate index)" for canonical patterns).
+- No separate index file to update — `run.json` is the source of truth, queried on demand via `shared/list_runs.py` (see `lifecycle/references/run-mechanics.md` "Listing runs (no separate index)" for canonical patterns).
 - Ask user for optional alias / description, write into `run.json -> alias` / `description`.
 - Show summary:
   ```

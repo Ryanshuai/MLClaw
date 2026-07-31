@@ -235,7 +235,7 @@ For items inherited from someone else — a handed-over checkpoint, a paper's re
 | `claimed` | the author's / wandb's recorded number, not re-checked |
 | `asked` | told verbally, no artifact backs it |
 
-**`scope` and `confidence` are both required.** Without scope, the number can't be compared to anything (see CLAUDE.md "Metric comparability"). Without confidence, a `claimed` number gets treated as ground truth — and inherited unverified metrics are the most damaging fake metrics there are, because everything downstream is calibrated against them. Authors misremember, hand over the wrong file, or forget TTA was enabled.
+**`scope` and `confidence` are both required.** Without scope, the number can't be compared to anything (see `lifecycle/references/run-mechanics.md` "Metric comparability"). Without confidence, a `claimed` number gets treated as ground truth — and inherited unverified metrics are the most damaging fake metrics there are, because everything downstream is calibrated against them. Authors misremember, hand over the wrong file, or forget TTA was enabled.
 
 **Promote `claimed` → `verified` by re-running eval with this ckpt.** That single run validates the preprocessing chain, the data, the metric definition, and the environment simultaneously — it's the best acceptance test a handover has. Record the verifying run's ID in `source` when you do.
 

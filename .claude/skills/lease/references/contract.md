@@ -5,7 +5,7 @@ provider under `lifecycle/scripts/lease/provider_<name>.py`, plus one machine-ty
 `machines_<name>.json`.
 
 Everything else in MLClaw is provider-blind. Run skills already reach a machine with
-SSH + rsync + tmux (CLAUDE.md "Path Mapping", `/train-run` Execution Modes); this
+SSH + rsync + tmux (`lifecycle/references/run-mechanics.md` "Path Mapping (Cross-Machine Execution)", `/train-run` Execution Modes); this
 contract only answers **where that machine comes from and when it dies**. Nothing
 downstream of `addr` may branch on provider name.
 
@@ -152,7 +152,7 @@ agent disappears, the box expires on its own. This is strictly stronger than a t
 ledger row, which id-matching cannot do (one lease may hold many units). Project and run travel
 as separate metadata. `sweep` queries the cloud by tag prefix and must
 succeed with no local state at all. This is why the lease file is not a violation of
-MLClaw's "no separate index" doctrine (CLAUDE.md "Listing runs") — the cloud API is the
+MLClaw's "no separate index" doctrine (`lifecycle/references/run-mechanics.md` "Listing runs (no separate index)") — the cloud API is the
 source of truth, the file is a hint list.
 
 Rented boxes genuinely cannot be enumerated by scanning `run.json`: a box outlives its

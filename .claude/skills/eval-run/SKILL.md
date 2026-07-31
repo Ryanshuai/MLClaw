@@ -17,7 +17,7 @@ Execute an evaluation run: resolve sources (including ground truth), run the eva
 
 **One question at a time** — asking multiple questions at once is overwhelming. Ask one, record, ask next.
 
-**Workflow state, dependency checks, locate project, variable references** — follow CLAUDE.md (Workflow State Protocol, Skill Dependency Graph, Variable Reference Syntax). Stage = `evaluation`, upstream = `/eval-init` (check `config.json -> entry_command` non-empty).
+**Workflow state, dependency checks, locate project, variable references** — follow CLAUDE.md (Workflow State Protocol, Skill Dependency Graph) and `lifecycle/references/layout.md` (Variable Reference Syntax). Stage = `evaluation`, upstream = `/eval-init` (check `config.json -> entry_command` non-empty).
 
 ## Fork Check
 
@@ -29,11 +29,11 @@ If skip: fresh run, `fork_of = null`.
 
 ## Steps 1-3: Shared Run Mechanics
 
-Follow CLAUDE.md "Run Skill Internal Dependencies" for the shared step flow:
+Follow `lifecycle/references/run-mechanics.md` "Run Skill Internal Dependencies" for the shared step flow:
 
-1. **Resolve Assets** (step `check_sources`) — fill concrete paths in `artifacts.json`, `input.json` sources, AND `input.json -> ground_truth -> sources`. Ground truth sources are what makes eval different from inference — ask for those after regular input sources. For server matching, connectivity tests, and credential flows, see CLAUDE.md "Run Skill Internal Dependencies" Step 1. Scripts in `lifecycle/scripts/infer-run/` (test_connection.py, etc). If any script fails, do the same work manually with Bash.
-2. **Create Run** (step `create_run`) — create run dir, initialize run.json, code snapshot, env snapshot, dependency check. Scripts: `create_run.py`, `capture_env.py`, `check_deps.py` (all in `lifecycle/scripts/infer-run/`). For code source resolution and environment resolution, see CLAUDE.md conventions.
-3. **Build & Execute** (step `execute`) — resolve `${}` references, then build the command **per-param from `config.json -> param_injection.items`** (CLAUDE.md "Launch contract" rule 3), not by guessing from `config_format`. A `runtime_params` key with no entry, or one marked `overridable: false`, is an error — stop and ask. For eval this is the difference between a real threshold sweep and five runs that silently share one threshold. Set `run.json -> mode` and `scope` before launching. Save `config_snapshot.json` and `sources.json` (including GT sources), confirm with user.
+1. **Resolve Assets** (step `resolve_assets`) — fill concrete paths in `artifacts.json`, `input.json` sources, AND `input.json -> ground_truth -> sources`. Ground truth sources are what makes eval different from inference — ask for those after regular input sources. For server matching, connectivity tests, and credential flows, see `lifecycle/references/run-mechanics.md` "Run Skill Internal Dependencies" Step 1. Scripts in `lifecycle/scripts/shared/` (test_connection.py, etc). If any script fails, do the same work manually with Bash.
+2. **Create Run** (step `create_run`) — create run dir, initialize run.json, code snapshot, env snapshot, dependency check. Scripts: `create_run.py`, `capture_env.py`, `check_deps.py` (all in `lifecycle/scripts/shared/`). For code source resolution and environment resolution, see CLAUDE.md conventions.
+3. **Build & Execute** (step `execute`) — resolve `${}` references, then build the command **per-param from `config.json -> param_injection.items`** (`lifecycle/references/run-mechanics.md` "Launch contract (Step 3 detail)" rule 3), not by guessing from `config_format`. A `runtime_params` key with no entry, or one marked `overridable: false`, is an error — stop and ask. For eval this is the difference between a real threshold sweep and five runs that silently share one threshold. Set `run.json -> mode` and `scope` before launching. Save `config_snapshot.json` and `sources.json` (including GT sources), confirm with user.
 
 ### Execution Modes
 
@@ -48,7 +48,7 @@ Follow CLAUDE.md "Run Skill Internal Dependencies" for the shared step flow:
 - **Local**: run in background (`run_in_background`), log to `{RUN_DIR}/logs/`. Return immediately so the user can continue working. They can check back with `/eval-run` again, or `/loop 5m /eval-run` for auto-polling.
 - **Remote**: resolve server from resources.json, use `python_path` from server entry. SCP config + run.sh to server, launch in tmux. Return immediately.
 
-For local/remote execution details and path mapping, see CLAUDE.md "Run Skill Internal Dependencies" Step 3 and "Path Mapping".
+For local/remote execution details and path mapping, see `lifecycle/references/run-mechanics.md` "Run Skill Internal Dependencies" Step 3 and "Path Mapping".
 
 ### Status Check
 
@@ -85,7 +85,7 @@ After execution finishes:
        mAP_small: 0.289  (-0.003, -1.0%)  <- regression
      ```
 
-6. **Alias** — ask user for optional alias/description; write into `run.json -> alias` / `description`. No separate index file to update — `run.json` files are the source of truth, queried via `jq` on demand (see CLAUDE.md "Listing runs (no separate index)").
+6. **Alias** — ask user for optional alias/description; write into `run.json -> alias` / `description`. No separate index file to update — `run.json` files are the source of truth, queried on demand via `shared/list_runs.py` (see `lifecycle/references/run-mechanics.md` "Listing runs (no separate index)").
 
 7. **Offer baseline update** — "Set this run as the new baseline?" **Only offer this for `mode: "production"` runs at full `scope`.** A debug run must never become the baseline: every future comparison would silently inherit the error, and the person reading those diffs months later has no way to see why the numbers look off. If the current run is debug, skip this step and say why. If yes, update `output.json -> metrics.baseline` to this run's ID.
 

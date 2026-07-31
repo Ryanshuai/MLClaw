@@ -1,0 +1,257 @@
+# Run mechanics — shared by every run skill
+
+Loaded on demand, not at session start. `/train-run`, `/eval-run`, `/infer-run`,
+and `/refactor-run` must read this before Step 1; CLAUDE.md carries only the
+headline rules and a pointer here.
+
+Contract statements in this file are cited by checks in `contracts/` as
+`run-mechanics.md ->` followed by the section heading in double quotes. (Spelled out
+rather than shown, because the format example would otherwise be picked up as a
+citation to a section named after the placeholder — `contract_docs.py` scans the
+whole repo for exactly this pattern.)
+
+## Run Skill Internal Dependencies
+
+Run skills (infer-run, eval-run, train-run) share the same internal dependency chain. Each step depends on the previous step completing, and some steps have external dependencies that trigger other skills. Train-run adds a `monitor` step between `execute` and `collect_results` to handle long-running streaming state (heartbeat, last_step, latest_metrics).
+
+```
+Locate Project
+     │
+     │  [external: init done? ── no ──→ offer /{stage}-init]
+     ↓
+Fork check: "Base on a previous run?"
+     │  - no  → proceed normally (fresh run)
+     │  - yes → load base run's config_snapshot.json + sources.json + lineage.parents
+     │          set fork_of = base run ID
+     │          user modifies only what they want to change
+     │          skip Step 1 if sources unchanged
+     ↓
+Step 1: Resolve Assets                        depends on: init (items defined),
+     │  - fill concrete paths in                         resources (credentials)
+     │    artifacts.json/input.json sources
+     │  - ask user for each path (one at a time)
+     │  [external: credentials fail? ── invoke /resources ── resume]
+     │  - validate paths exist, test connectivity
+     ↓
+Step 2: Create Run                            depends on: assets resolved
+     │  - create run dir + run.json
+     │  - code snapshot — see "Code snapshot (Step 2 detail)" below
+     │  - env snapshot (packages from lifecycle/run.json template)
+     │  - dependency check (required vs installed)
+     │  - snapshot resolved assets → sources.json
+     │  - if fork_of is set: compute lineage.variation_summary
+     │    (diff runtime_params vs base run; null otherwise)
+     │  - if user provided hypothesis: store in run.json -> hypothesis
+     ↓
+Step 3: Build & Execute                       depends on: run created
+     │  - resolve ${} references (from assets)
+     │  - build command (argparse/yaml/hydra/hybrid)
+     │  - cwd + output_dir — see "Launch contract (Step 3 detail)" below
+     │  - debug mode (sync, limited data) or production mode (background/remote)
+     │  [if fail: diagnose → fix → retry loop]
+     ↓
+Step 4: Collect Results                       depends on: execution finished
+     │  - finalize run.json (status, duration, metrics) — this is the
+     │    only writeback; there is no separate index file to maintain
+     │  - extract metrics (from stdout/files)
+     │  eval-run extras: per-class metrics, baseline comparison, offer baseline update
+     │
+     │  [external: eval-run only ── offer /eval-report]
+     ↓
+  Done (pop from stack)
+```
+
+**Internal step recording**: each run skill writes step completion to `run.json → steps`. Each step has `status` (`null` / `completed` / `skipped` / `failed`) and `at` (timestamp). Used for debugging, reproducibility, and resume — on resume, the skill reads `run.json → steps` to skip completed steps.
+
+Steps correspond to headings in the skill's SKILL.md: `##` headings are major steps, `###` headings are sub-steps. All are recorded. Different stages may have different steps (e.g., training-run may add a `monitor` step).
+
+`steps.ad_hoc` is an array for unplanned actions that don't match any predefined step — e.g., fixing a file permission, patching a config typo, installing a missing package. Each entry: `{ "name": "...", "description": "...", "after_step": "...", "status": "...", "at": "..." }`. If the same ad_hoc action shows up across multiple runs, it's a signal to promote it into a formal step in the SKILL.md.
+
+### Code snapshot (Step 2 detail)
+
+Every run skill captures the exact code state at run-time so a completed run is self-contained for reproduction.
+
+- **`code_dir`** is resolved by the unified rule from "Code Source Resolution":
+  ```
+  code_dir = stages/<stage>/code/_source if exists else stages/<stage>/code
+  ```
+- **Helper**: `python <mlclaw_root>/lifecycle/scripts/shared/code_snapshot.py <code_dir> <RUN_DIR>` — outputs a JSON dict; merge it into `run.json -> code`.
+- **Git working tree** (typical): records `repo` (origin URL), `branch`, `origin_commit` (SHA). If the tree differs from that SHA, writes `<RUN_DIR>/code_dirty.patch` and fills `dirty_patch_path` + `dirty_files_count`. Reproduction contract: `git checkout <origin_commit> && git apply <run_dir>/code_dirty.patch`, run **from the code dir**.
+- **`code_dir` is often not the repo root.** `/project-init` puts `github` / `server` / `null` sources at `stages/<stage>/code/` — inside the *project's* git repo. The patch is then scoped to that subtree and `repo_subdir` records the offset, so the record describes the stage's code and not the whole project. Two consequences worth knowing: the patch still uses repo-relative paths (a `--relative` patch applies **nothing** from a subdirectory and exits 0 while doing it), and `origin_commit` is still repository-wide — editing `project.json` moves it, so it is not a stable identity for this stage's code alone. `list_runs.py --commit` inherits that limitation.
+- **Untracked files are part of the diff.** A new `model_v2.py` that was never `git add`ed is invisible to `git diff HEAD`; counting only tracked changes records a tree as clean that is not, and the run reproduces different code with nothing raised.
+- **Read `reproducible` before trusting the record.** False means a file that differed was not embedded, so `checkout + apply` will not rebuild the tree that ran. Surface it *before* launching, not at reproduction time.
+- **Non-git directory**: refused, cleanly (exit 1 — the script worked and the answer is no; one line, no traceback). A tree with no SHA cannot be reproduced. On this refusal `/train-run` should offer `git init` + an initial commit rather than stopping — a one-off script folder is a normal starting point, and refusing to train over it is friction, not safety. Same for a repo with no commits.
+
+Mechanism (index handling, size threshold, field breakdown) lives in the script's own docstring; the assertions live in `contracts/contract_code_snapshot.py`. Don't restate either here — a copy in this file is a copy that drifts.
+
+The same call applies to all run skills (`/train-run`, `/eval-run`, `/infer-run`, `/refactor-run`) — no per-skill variant.
+
+### Launch contract (Step 3 detail)
+
+Three rules, uniform across all run skills:
+
+1. **`cwd = <code_dir>`** (the same path used in Step 2). For module-style entry commands like `python -m pkg.train` this is mandatory — package imports won't resolve from anywhere else.
+2. **`output_dir` (or framework equivalent) must be overridden to an absolute path under `<RUN_DIR>/output/`**. The default config's relative `output_dir` would land artifacts back in the user's code repo, where MLClaw can't manage them and the next run would overwrite them. Override syntax depends on the framework:
+   - omegaconf / hydra: `--set output_dir=<abs>` or `+output_dir=<abs>`
+   - argparse: `--output-dir <abs>` / `--output_dir <abs>`
+   - HF Trainer: `--output_dir <abs>`
+   - accelerate: `--output_dir <abs>`
+   - env var: `OUTPUT_DIR=<abs>`
+   Which form a given codebase uses is recorded as a `param_injection` entry (rule 3), not re-derived per framework at launch time.
+
+3. **Every managed param needs a `config.json -> param_injection.items` entry, and `runtime_params` must hold the effective-at-runtime value.** A config file's declared value is not necessarily the one the code uses: a `--lr` flag is dead if the optimizer is built with a literal, a `warmup` value is discarded if it's recomputed from `epochs`, and `lr * world_size` means one config trains differently on 1 vs 8 GPUs. Passing a param the code ignores produces a **fake metric** — the run completes, records the value you asked for, and reports a number produced by a different value. Nothing errors.
+
+   ```json
+   "lr":   { "via": "cli", "flag": "--lr", "overridable": true, "evidence": "train.py:33" },
+   "seed": { "via": "hardcoded", "overridable": false, "evidence": "train.py:12",
+             "note": "torch.manual_seed(42) after arg parse — --seed is dead" }
+   ```
+
+   `via`: `cli` (+`flag`) | `yaml` (+`key`) | `env` (+`env`) | `hardcoded` | `derived` (+`derived_from`). The last two imply `overridable: false`.
+
+   - **`/{stage}-init`** fills this while selecting managed params, and must not put an `overridable: false` param into `runtime_params` — it isn't a knob. Keep it in `param_injection` as documentation of why, and surface it as a risk ("changing this needs a code edit at `<path:line>`").
+   - **`/{stage}-run`** builds the launch command per-param from these entries instead of guessing from `config_format`. A `runtime_params` key with no entry is an error — stop and ask; never fall back to trying `--key value`, because a silently-ignored flag yields a run whose recorded config lies about what ran.
+   - This applies to params **MLClaw sets on its own** too, not just user-supplied ones: debug-mode `epochs=1` / sample limits, OOM auto-retry `batch_size ÷ 2`, resume-from-checkpoint flags. Those are the dangerous ones — the user never typed them, so nobody is watching whether they took effect.
+
+Stage-specific extras (production mode launching, monitoring, ETA computation, finalize hooks) go in each run skill's SKILL.md — these three rules do not.
+
+### Preprocessing contract (cross-stage)
+
+`input.json -> preprocessing` records what happens to an input before the model sees it: normalization constants, resize mode, channel order, label index base, augmentation. Filled from code by the stage's init skill (`/train-init` Step 1b), never guessed — a framework default written into this field is worse than a blank, because a blank gets asked about.
+
+**`normalization`, `input_layout`, and `label_transform` must be identical between training and any eval/infer stage of the same model.** A mismatch raises nothing anywhere: training converges, evaluation reports plausible metrics, inference returns plausible outputs, and the deployed model is quietly degraded. An eval stage whose preprocessing differs from training doesn't measure the model you trained — its metrics are fake in exactly the sense of "Metric comparability" below. Recurring instances: BGR/RGB swap (cv2 vs PIL), ImageNet constants reused on X-ray / satellite / spectrogram data, COCO 91-vs-80 category id remapping, an off-by-one background class.
+
+**`augmentation` is training-only.** Non-empty in an eval or infer stage is a bug, not a variation.
+
+When initializing a stage while another stage of the same project already has `preprocessing` filled, diff the three shared blocks and surface any difference before proceeding. Deliberate differences exist — test-time augmentation, a different inference resolution — but they must be stated at that moment, not discovered from a confusing metric three weeks later.
+
+### Record integrity
+
+Rules for anything a run writes down now that somebody reads later. They share one property: **breaking them raises nothing.** The run completes, a number is recorded, and it is the wrong number — discovered months later, if ever. Each is enforced by a check in `contracts/`; the check cites the rule, this file states it.
+
+| Rule | Why it isn't obvious |
+|---|---|
+| An extracted metric is recorded only when it was actually read. Extraction failure and a metric the run never produced are **different**, and must not both become `null`. | A broken regex and an absent number read identically downstream, and both get silently skipped by comparisons. |
+| Run timestamps are UTC with an explicit offset. | The canonical query sorts with `sort_by(.created_at)`. On naive local strings from machines in different zones that sort is wrong and looks fine. |
+| A duration that could not be computed is reported as such, never left null in silence. | Null reads as "never started" — a real state — so a failed subtraction disguises itself as data. |
+| A `run_id` identifies exactly one run. | One-second resolution plus `makedirs(exist_ok=True)` let two same-second launches share a directory; the second `run.json` write destroys the first record. `/train-tune` with `max_concurrent > 1` does this routinely. |
+| The metric schema in `output.json` must describe the stream the code actually emits — right field, right split, right direction. | A schema naming `val_loss` against code that emits `train_loss` produces a complete run whose checkpoint was selected to fit the training set. Both numbers are real and both look plausible. |
+| The chosen checkpoint and the recorded metric describe the **same artifact**. | When the peak epoch was never saved, falling through to the next-best is correct — recording the stream's peak beside the surviving file is a fake metric. |
+| Retention plans and applies as two steps, never deletes what it cannot rank, and aborts wholly on drift. | It is the only irreversible operation here. "Confirm with the user" is not a safeguard: a list of filenames carries no evidence that the sort behind it was right. |
+| A skill writes only step keys the `run.json` template defines. | Resume skips completed steps by reading them back; an undefined key is never recognized as completed and re-runs forever. This is how `check_sources` vs `resolve_assets` survived unnoticed. |
+
+### Listing runs (no separate index)
+
+There is no `runs_index.json` cache. The source of truth is the `run.json` files themselves; "list all runs" / "find comparable runs" is a scan of the run tree, run on demand. This avoids cache drift after rsync, manual run deletion, schema evolution, and concurrent updates — none of which need any code to handle when there's no cache.
+
+**Go through `lifecycle/scripts/shared/list_runs.py`. Do not hand-write the jq.** The rule below about `mode` is a correctness rule, and a correctness rule implemented as a snippet everyone retypes gets forgotten exactly once, silently, in the query that mattered. The script's `mode` argument is keyword-only with no default, so forgetting it is a `TypeError` at the call site rather than a leaderboard with debug runs in it.
+
+```bash
+# All completed production runs in a stage
+python <mlclaw_root>/lifecycle/scripts/shared/list_runs.py <project_root> \
+    --stage training --mode production
+
+# Runs comparable for /train-tune (same code SHA, not part of a session, full-scale)
+python .../list_runs.py <project_root> --stage training --mode production \
+    --commit "$SHA" --no-session
+
+# Most recent N for a menu — no comparison, so mode mixing is allowed but must be named
+python .../list_runs.py <project_root> --all-modes-not-comparable --sort created_at --limit 10
+```
+
+From Python: `query_comparable_runs(root, *, mode, stage=None, status="completed", session="*", code_commit=None, sort_by="created_at", descending=True, limit=None)`, plus `tune_comparable_runs(root, code_commit, ...)` — kept as a named wrapper because its filter is four clauses long and dropping the fourth is invisible. Sentinels: `session="*"` doesn't filter, `session=None` means ad-hoc runs only.
+
+Results carry `matched`, `excluded` (runs whose `mode` is null — reported, never silently included *or* silently dropped), `filtered_out_count`, `distinct_scopes`, `comparable`, and `errors`; a malformed `run.json` becomes one error entry instead of killing the scan. **Read `comparable` before ranking anything** — false means the matched runs span more than one scope, so their metrics are not a series. At 10k runs the scan is ~200 ms.
+
+The escape hatch is named `list_all_modes_not_comparable()` on purpose: it marks its result `comparable: false` and tags every entry, so a mixed population cannot be mistaken downstream for a ranked one. Use it for menus, never for a delta.
+
+### Metric comparability
+
+`mode` is not cosmetic — filter on it in **every** query that compares, ranks, or aggregates metrics: leaderboards, baseline diffs, best-so-far curves, `/train-tune` observation, DAG renderings. A debug run's numbers are real but describe a different workload (20 images instead of 5000, 1 epoch instead of 100), so mixing them in produces a **fake comparison**: nothing errors, no data is missing, and a wrong conclusion gets drawn from correctly-recorded numbers. Two rules:
+
+- Compare only across runs with the same `mode` **and** equivalent `scope`. Two production runs over different sample counts aren't comparable either.
+- When you deliberately want debug runs ("did my last smoke test pass?"), select `mode == "debug"` explicitly rather than dropping the filter — an absent filter reads as a bug to the next person.
+
+A run that produced metrics with `mode: null` is unusable for comparison and should be reported as such, not silently included.
+
+Each run tracks two types of relationships in `run.json → lineage`:
+
+```
+lineage:
+  parents:             ["training/run_20260315_120000"]   ← I consume their output artifact
+  fork_of:             "evaluation/run_20260317_091500"   ← I copied their config to start
+  variation_summary:   "lr: 1e-4 → 2e-4; warmup: 0 → 0.03"  ← auto-derived diff vs fork_of
+  session:             "20260428_120000_lr_search"        ← optional, set by /train-tune
+```
+
+- **`parents`** (cross-stage, hard dependency): this run consumes artifacts produced by those runs (e.g., eval consumes train ckpt). Base's artifact must exist for this run to be reproducible. Drawn as solid arrow across stage columns.
+- **`fork_of`** (same-stage, metadata only): this run started from that run's config, with modifications. **No I/O dependency** — fork is reproducible even if base is deleted. Drawn as dashed arrow within the same stage column.
+- **`variation_summary`** (auto-derived, optional): short human-readable diff of `runtime_params` vs the `fork_of` base, e.g., `"lr: 1e-4 → 2e-4; warmup_ratio: 0 → 0.03"`. Filled by the run skill at create time. Null when `fork_of` is null. Saves `/train-compare` and DAG renderers from re-diffing snapshots.
+- **`session`** (optional): when this run is part of a `/train-tune` HPO session, this field holds the session ID (matches `tune_sessions/<id>/` directory). Null for ad-hoc runs. `/train-tune-report` filters runs by this field to render a single session's chain.md without scanning all project runs.
+
+```
+     training           evaluation
+     train_run_1  ──→   eval_run_1
+                  ──→   eval_run_2  (fork_of: eval_run_1, changed threshold)
+                  ──→   eval_run_3  (fork_of: eval_run_1, changed dataset)
+
+     train_run_2  ──→   eval_run_4  (fresh, not a fork)
+```
+
+**Fork behavior**: when `fork_of` is set, the run skill loads the base run's `config_snapshot.json`, `sources.json`, and `lineage.parents` as starting point. User only changes what they want. Assets that haven't changed are reused (Step 1 can be skipped). Fork inherits the base run's `lineage.parents` — if the user changes the model artifact (not just params), parents should be updated accordingly.
+
+**Continuing training / preempt recovery / fine-tuning**: there is no separate lineage field for "I extend prior training". Express it as a `fork_of` (config copy) plus loading the base's checkpoint as initial weights via `runtime_params` — and add the base to `parents` since the new run consumes its ckpt. The reasoning ("why continue") lives in the run's `description` / `hypothesis` field, or in `decisions.jsonl` when running `/train-tune`.
+
+## Optional narrative fields
+
+Two top-level run.json fields exist purely to enrich human-readable reports. **Both are optional, default null, and tools must not require them.**
+
+- **`hypothesis`** (set at run creation): a one-sentence expectation, e.g., `"Higher lr with warmup should reach lower val_loss faster."` Skills may prompt for it but should never block on it.
+- **`outcome`** (set at run completion): a free-text retrospective, e.g., `"Refuted. val_loss 0.234 → 0.241 (+3%), convergence epoch 87 → 92."` Agents fill this when finalizing; users may also write it manually.
+
+When both are present, `/train-compare` weaves them into the narrative ("hypothesis was X; outcome confirmed/refuted"). When absent, comparisons fall back to pure metric deltas — both should remain valid.
+
+## Environment Resolution
+
+All run skills (infer-run, eval-run, refactor-run, future train-run) need a Python environment to execute code.
+
+**One project, one env** — prefer a single shared environment per project. Different stages in the same project usually share the same codebase (or refactored version of it), so their dependencies overlap. Maintaining separate envs per stage is unnecessary overhead.
+
+Environment resolution:
+
+1. **Check `project.json → env_name`** (project-level). If set, use it for all stages.
+
+2. **If empty, look for an existing env**:
+   - Refactor stage has a verified env (`plan.json → env.env_name`)? → promote it to project-level: set `project.json → env_name`, reuse for all stages.
+   - No refactor env? → create a new one (see below).
+
+3. **Create project env**: use the env manager from `{WORKSPACE}/resources.json → local.env_manager`:
+   - Env name: `mlclaw_{project_name}` (e.g., `mlclaw_detection`)
+   - Install from: `requirements.txt` or `setup.py` in the stage's code directory
+   - Record in `project.json → env_name`
+   - If a later stage needs extra packages, install them into the same env — don't create a new one.
+
+4. **Stage-level override** (rare): if a stage truly has conflicting dependencies (e.g., inference needs TensorRT but training doesn't), set `project.json → stages.{stage}.env_name` to override. This is the exception, not the norm.
+
+5. **Remote execution**: server's `python_path` in `resources.json → servers.{key}` takes precedence. Local env resolution doesn't apply.
+
+**Env manager** is read from `{WORKSPACE}/resources.json → local.env_manager.tool` (mamba/conda/uv). If empty, invoke `/resources` to detect it.
+
+Run skills use `{run_in_env}` as shorthand for the activation command:
+- mamba/conda: `mamba run -n {env_name}` or `conda run -n {env_name}`
+- uv/venv: `source {venv_path}/bin/activate &&` (Linux) or `{venv_path}/Scripts/activate &&` (Windows)
+
+## Path Mapping (Cross-Machine Execution)
+
+When executing code on a remote server, local MLClaw paths must be mapped to remote paths. Each compute resource (server or local) in `{WORKSPACE}/resources.json` has:
+
+- `mlclaw_root`: the MLClaw workspace root on that machine (e.g., `/home/ubuntu/agent_space/mlclaw`)
+- `python_path`: the Python executable path on that machine (e.g., `/home/ubuntu/miniconda3/envs/ml/bin/python`)
+
+Path mapping rule:
+```
+local:  {local mlclaw_root}/projects/detection/stages/evaluation/...
+remote: {server mlclaw_root}/projects/detection/stages/evaluation/...
+```
+
+The project-relative path stays the same; only the root prefix changes. Run skills sync only necessary files to the remote `mlclaw_root` before execution.

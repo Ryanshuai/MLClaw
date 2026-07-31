@@ -39,7 +39,7 @@ python $S/lease.py renew   <lease_id> --ttl-s <n>
 python $S/lease.py release <lease_id>
 ```
 
-`up` returns a `reach://` handle; from there proceed exactly as CLAUDE.md "Path Mapping" and
+`up` returns a `reach://` handle; from there proceed exactly as `lifecycle/references/run-mechanics.md` "Path Mapping (Cross-Machine Execution)" and
 `/train-run` Execution Modes already specify. Nothing downstream may branch on provider name.
 
 **What L3 owns, and L2 deliberately does not:**

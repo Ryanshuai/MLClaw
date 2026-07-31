@@ -9,7 +9,7 @@
   },
   "pairing": "",
   "preprocessing": {
-    "_comment": "MUST MATCH the training stage's input.json -> preprocessing on normalization / input_layout / label_transform — see CLAUDE.md 'Preprocessing contract (cross-stage)'. A difference means this evaluation is not measuring the model that was actually trained, so its metrics are fake even though nothing errors. `augmentation` must stay empty here, or hold only explicitly-declared test-time augmentation. Same shape as the training template; every block carries `evidence` (path:line) since these values are read out of code.",
+    "_comment": "MUST MATCH the training stage's input.json -> preprocessing on normalization / input_layout / label_transform — see lifecycle/references/run-mechanics.md 'Preprocessing contract (cross-stage)'. A difference means this evaluation is not measuring the model that was actually trained, so its metrics are fake even though nothing errors. `augmentation` must stay empty here, or hold only explicitly-declared test-time augmentation. Same shape as the training template; every block carries `evidence` (path:line) since these values are read out of code.",
     "normalization": { "mean": [], "std": [], "source": "", "evidence": "" },
     "input_layout": { "size": [], "resize_mode": "", "channel_order": "", "evidence": "" },
     "label_transform": { "index_base": null, "class_mapping": "", "background_class": null, "evidence": "" },

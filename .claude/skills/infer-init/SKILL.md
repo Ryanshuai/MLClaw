@@ -94,7 +94,7 @@ For inference the casualty is the **performance number**: if `batch_size`, `prec
 
 Cheap checks: `grep -rn "batch_size\|half\|fp16\|device" --include=*.py <code_dir>` then read the use site; `python infer.py --help` confirms which flags actually exist.
 
-**3d. Record**: selected params -> `config.json -> runtime_params` (**effective values** — what the code runs with, not what the config declares) with `${artifact.xxx}` / `${input.xxx}` references where applicable. Each key also gets a `config.json -> param_injection.items` entry recording `via` / flag-or-key / `overridable` / `evidence` (`path:line`), per CLAUDE.md "Launch contract" rule 3. Params found `overridable: false` must **not** go into `runtime_params` — keep them in `param_injection` with a note and tell the user which line to edit. Unselected params stay in original config files untouched.
+**3d. Record**: selected params -> `config.json -> runtime_params` (**effective values** — what the code runs with, not what the config declares) with `${artifact.xxx}` / `${input.xxx}` references where applicable. Each key also gets a `config.json -> param_injection.items` entry recording `via` / flag-or-key / `overridable` / `evidence` (`path:line`), per `lifecycle/references/run-mechanics.md` "Launch contract (Step 3 detail)" rule 3. Params found `overridable: false` must **not** go into `runtime_params` — keep them in `param_injection` with a note and tell the user which line to edit. Unselected params stay in original config files untouched.
 
 ## Step 4: Present Each File for Review
 
