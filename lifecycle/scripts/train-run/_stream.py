@@ -48,6 +48,42 @@ HELD_OUT_PREFIXES = ("val", "valid", "validation", "eval", "test", "dev", "holdo
 TRAIN_PREFIXES = ("train", "training", "tr")
 
 
+# The normalized stream MLClaw owns, at `<run_dir>/`. A fixed convention rather
+# than a config field: a path that can be set is a path that can drift, and every
+# reader here needs to resolve it the same way without consulting anything.
+CANONICAL_STREAM = "stream.jsonl"
+
+# Names a record can carry as its index. One tuple, because two copies drifted
+# within a day of each other: `ingest.INDEX_KEYS` and `select_checkpoint._index_of`
+# held these five names in different orders, so a record carrying both `epoch` and
+# `step` was ranked by one and plotted against the other.
+#
+# The *order* is deliberately not shared — see `index_of` below and
+# `ingest.tb_points`. Ranking and plotting want different answers, and the honest
+# form of that is two named orders, not one constant with a comment claiming they
+# agree.
+INDEX_KEYS = ("epoch", "step", "global_step", "iteration", "iter")
+
+
+class Refusal(Exception):
+    """The script worked and the answer is no — exit 1, never 2.
+
+    Lives here beside `StreamError` because this module already owns both halves of
+    the 1-vs-2 split, and the risk this file's docstring names — three copies of the
+    rule, three chances for one to return 2 where it meant 1 — applies to the exit-1
+    half too. Scripts that express refusals as `fail` findings need no exception; use
+    this where the refusal is discovered deep in a call chain and threading findings
+    back out would be worse.
+
+    CLAUDE.md -> "Script Integration" makes exit 2 mean "the script broke, do the
+    work by hand", so a safety refusal reported as 2 reads as an instruction to go
+    around it.
+    """
+    def __init__(self, code, message):
+        super().__init__(message)
+        self.code = code
+
+
 class StreamError(Exception):
     """The stream cannot be read at all — no reconciliation is possible.
 
@@ -74,32 +110,90 @@ def verdict_of(findings):
     return "fail" if "fail" in levels else ("warn" if "warn" in levels else "ok")
 
 
-def stream_path(output, jsonl_path, run_dir=None):
-    """Where the metric stream lives: an explicit path, else `run_dir` joined with
-    `output.json -> metrics.log_path`. Raises StreamError when neither is given."""
+def resolve_stream(output, jsonl_path, run_dir=None):
+    """Where the metric stream lives. -> (path, kind).
+
+    `kind` is `explicit` | `stream` | `source`, and it is returned rather than
+    inferred because the three are not interchangeable: `source` means the records
+    were never grouped or tagged by `ingest.py`, so `_src` / `_group` are absent and
+    a reader must treat that as unknown rather than as a default. A caller that
+    cannot tell which file it got will report findings about a stream it did not
+    read — which is why `stream_path` below is only for callers that genuinely do
+    not care.
+
+    Resolution order: an explicit path, then the normalized stream MLClaw owns at
+    `<run_dir>/stream.jsonl`, then the source the training code wrote at
+    `<run_dir>/<output.json -> metrics.log_path>`. The vocabulary is fixed — see
+    run-mechanics.md -> "Metric stream".
+    """
     if jsonl_path:
-        return jsonl_path
+        return jsonl_path, "explicit"
+    if run_dir:
+        canonical = os.path.join(run_dir, CANONICAL_STREAM)
+        if os.path.isfile(canonical):
+            return canonical, "stream"
     log_path = ((output or {}).get("metrics") or {}).get("log_path") or ""
     if not run_dir or not log_path:
-        raise StreamError("give a jsonl path, or --run-dir with metrics.log_path "
-                          "set in output.json")
-    return os.path.join(run_dir, log_path)
+        raise StreamError(f"no stream to read: give an explicit path, or --run-dir "
+                          f"holding {CANONICAL_STREAM}, or --run-dir plus "
+                          f"metrics.log_path in output.json")
+    return os.path.join(run_dir, log_path), "source"
+
+
+def stream_path(output, jsonl_path, run_dir=None):
+    """`resolve_stream` without the kind, for callers that only need the path."""
+    return resolve_stream(output, jsonl_path, run_dir)[0]
+
+
+def refusal_report(exc, **extra):
+    """A `Refusal` -> the report shape `emit` expects, so exit 1 is uniform.
+
+    `extra` carries the keys a caller's other outcomes also set, because a consumer
+    must not have to know which branch produced a report to read it.
+    """
+    report = {"findings": [finding("fail", exc.code, str(exc))], "verdict": "fail"}
+    report.update(extra)
+    return report
+
+
+def unnormalized_finding(kind, path):
+    """-> a `warn` finding when records came straight from the source, else None.
+
+    Reading the source still works and is the right fallback for a run created
+    before there was a normalizer. Doing it *silently* is the problem: an
+    un-normalized read looks identical to a normalized one, so a stale or missing
+    `stream.jsonl` — including one that `ingest.py` deliberately refused to write —
+    is indistinguishable from a healthy run.
+    """
+    if kind != "source":
+        return None
+    return finding("warn", "stream_not_normalized",
+                   f"read the source directly ({path}) — no {CANONICAL_STREAM} in the "
+                   f"run dir, so these records carry no provenance and were never "
+                   f"grouped. Run ingest.py to normalize, then re-check",
+                   path=path)
 
 
 def load_inputs(output_json_path, jsonl_path, run_dir=None):
-    """-> (output, records, line_errors). Raises StreamError on anything unreadable.
+    """-> (output, records, line_errors, kind). Raises StreamError on anything
+    unreadable.
 
     The one preamble for all three scripts. Everything it raises is an exit-2
     condition; a caller that catches StreamError and returns 1 has told the agent
     to accept a refusal that was really a crash.
+
+    `kind` comes from `resolve_stream` and is part of the return rather than
+    something a caller re-derives, so that "which file did these records come from"
+    has exactly one answer per call. Pass it to `unnormalized_finding`.
     """
     try:
         with open(output_json_path) as f:
             output = json.load(f)
     except (OSError, json.JSONDecodeError) as e:
         raise StreamError(f"cannot read {output_json_path}: {e}")
-    records, line_errors = read_jsonl(stream_path(output, jsonl_path, run_dir))
-    return output, records, line_errors
+    path, kind = resolve_stream(output, jsonl_path, run_dir)
+    records, line_errors = read_jsonl(path)
+    return output, records, line_errors, kind
 
 
 def emit(report, prog, payload=None, fail_verdicts=("fail",)):
@@ -124,7 +218,7 @@ def read_jsonl(path):
     A half-written final line is normal for a stream tailed while the job runs.
     """
     if not os.path.isfile(path):
-        raise StreamError(f"metric stream not found: {path}")
+        raise StreamError(f"no metric records at: {path}")
     records, errors = [], []
     with open(path, encoding="utf-8", errors="replace") as f:
         for n, line in enumerate(f, 1):
@@ -233,11 +327,34 @@ def classify(records, declared_types, type_key):
     return by_type, unclassified
 
 
+def index_of(record):
+    """-> (kind, number) for whichever index the record carries. Ranking order.
+
+    `epoch` first, because this answers "which observation is this" for ranking and
+    retention, where an epoch-level record is the unit a checkpoint corresponds to.
+    Plotting wants the opposite preference and says so at its own call site.
+    """
+    for key in INDEX_KEYS:
+        v = record.get(key)
+        if isinstance(v, bool) or not isinstance(v, (int, float)):
+            continue
+        return ("epoch" if key == "epoch" else "step"), int(v)
+    return None, None
+
+
 def observed_fields(records):
-    """-> {field: count} across a list of records."""
+    """-> {field: count} across a list of records, provenance keys excluded.
+
+    `_`-prefixed keys are MLClaw's own (`_src`, `_group`), not fields the code
+    emitted. Counting them here would put them in `reconcile_metrics`' report of
+    what the stream emits and in the `did_you_mean` pool that `near_misses` draws
+    from — i.e. the tool would suggest its own bookkeeping as a candidate metric.
+    """
     counts = {}
     for r in records:
         for k in r:
+            if k.startswith("_"):
+                continue
             counts[k] = counts.get(k, 0) + 1
     return counts
 

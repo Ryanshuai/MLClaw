@@ -257,16 +257,24 @@ This step has no equivalent in infer-init / eval-init. Training emits metrics co
 
 **4a. Detect log format.** Check the code for one of:
 
-| Pattern | log_format |
-|---|---|
-| `f.write(json.dumps({...}))` to a `.jsonl` file | `jsonl` |
-| `print(json.dumps({...}))` only | `jsonl_stdout` |
-| `wandb.log({...})` | `wandb` |
-| `SummaryWriter().add_scalar(...)` | `tensorboard` |
-| Plain `print(f"epoch {e} loss {l}")` | `stdout_regex` (build extractor in 4b) |
-| Multiple of the above | pick the most structured one; record others as fallback |
+| Pattern | log_format | readable today? |
+|---|---|---|
+| `f.write(json.dumps({...}))` to a `.jsonl` file | `jsonl` | yes |
+| `print(json.dumps({...}))` only | `jsonl_stdout` | yes |
+| Plain `print(f"epoch {e} loss {l}")` | `stdout_regex` (build extractor in 4b) | yes |
+| `SummaryWriter().add_scalar(...)` | `tensorboard` | adapter written but **never executed** — needs `tensorboard` in the env running `ingest.py` |
+| `wandb.log({...})` | `wandb` | **no — no adapter** |
+| Multiple of the above | prefer a readable one; record the others as fallback | — |
 
-Record in `output.json -> metrics.log_format` and `metrics.log_path`.
+Record in `output.json -> metrics.log_format` and `metrics.log_path`. Both name
+**the source** — what the code writes. What `/train-run` reads is the normalized
+stream; see `lifecycle/references/run-mechanics.md` → "Metric stream".
+
+**Record what you found, then say what it costs.** `references/schemas.md` →
+`output.json -> metrics` owns the per-row detail (what "never executed" means for
+tensorboard, why `wandb` still gets recorded, what to offer instead); read it there
+rather than from a second copy here, which is how this table came to promise a
+reader that did not exist.
 
 **4b. If `stdout_regex`**: ask user to run training for 1 epoch / 50 steps and capture stdout. Build a regex extractor that parses each metric line into a record. Store as `metrics.stdout_extractor`. `/train-run` will pipe stdout through this at runtime.
 

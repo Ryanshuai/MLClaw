@@ -282,7 +282,17 @@ Pattern 3 (world-size scaling) deserves a note even when `overridable` is `true`
 | `transformers.Trainer` default | `wandb` if `report_to="wandb"`, else `tensorboard`, else CSV | HF Trainer auto-logs |
 | Plain `print(f"...")` only | `stdout_regex` | Build extractor in 4b |
 
-When multiple coexist (e.g., HF Trainer logs to both wandb and CSV), pick the **most structured** format MLClaw can read directly — usually jsonl > wandb-export > tensorboard > stdout regex.
+When multiple coexist (e.g., HF Trainer logs to both wandb and CSV), rank by **what
+has a normalizer**, then by structure: `jsonl` / `jsonl_stdout` > `stdout_regex` >
+(`tensorboard`, `wandb` — detected and recorded, but not readable yet).
+
+That ordering is not the same as "most structured". tfevents is better-structured
+than a print statement and still ranks below it, because its adapter has never
+executed while the stdout path is contract-covered — and because a repo that
+writes tfevents *and* prints its metrics needs no tfevents parsing at all: read
+stdout for the stream, and TensorBoard reads the code's own events for free.
+Record every format you found; pick the readable one as `log_format`. See
+`lifecycle/references/run-mechanics.md` → "Metric stream".
 
 ## Record-type detection (for Step 4c)
 

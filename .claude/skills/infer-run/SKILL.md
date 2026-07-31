@@ -62,7 +62,7 @@ After execution finishes:
 
 1. **Finalize run** — update `run.json` status, finished_at, duration_s. Script: `finalize_run.py`. Fallback: manual update.
 
-2. **Check outputs** — look in `{RUN_DIR}/outputs/` for expected files, search code dir for misplaced outputs.
+2. **Check outputs** — look in `{RUN_DIR}/output/` for expected files, search code dir for misplaced outputs.
 
 3. **Collect metrics** — extract from stdout/result files into `run.json -> metrics`. Script: `extract_metrics.py`. Fallback: parse logs manually.
 

@@ -39,7 +39,7 @@ Read from the eval run:
 - `sources.json` — artifacts and inputs used
 - Stage's `config.json -> dataset`, `output.json -> metrics.baseline` — compute deltas **only if the baseline is comparable** to this run (same `mode`, equivalent `scope`, same dataset + split). If it isn't, say so in place of the delta table rather than printing numbers whose difference means nothing. This report gets shared with the team, so a fake delta here travels further than anywhere else in the lifecycle.
 - `run.json -> mode` and `scope` — render them in the report header. A `mode: "debug"` run must carry a visible banner stating the metrics describe a truncated workload (e.g. "DEBUG RUN — 20 of 5000 images; not comparable to full evaluations"). Reports are read months later by people who weren't there.
-- `outputs/` — list files, note images for embedding
+- `output/` — list files, note images for embedding
 - `logs/stdout.log` — scan for summary tables
 
 ### Walk DAG upstream
@@ -75,7 +75,7 @@ Write a Python script on the fly based on the actual data bag and selected secti
 **Rules**:
 - Plotly for interactive charts (CDN). Offline: matplotlib + base64 PNG.
 - All data embedded inline (JSON, base64 images, inline CSS/JS).
-- Output: `{RUN_DIR}/outputs/report_{run_id}.html`
+- Output: `{RUN_DIR}/output/report_{run_id}.html`
 - Metrics with deltas: green = improvement, red = regression (direction-aware per metric).
 - Per-class: sortable table + horizontal bar chart.
 - Only render sections that have data.
@@ -87,6 +87,6 @@ Write a Python script on the fly based on the actual data bag and selected secti
 
 ## Step 5: Deliver
 
-1. Show report path: `{RUN_DIR}/outputs/report_{run_id}.html`
+1. Show report path: `{RUN_DIR}/output/report_{run_id}.html`
 2. Open in browser (if local)
 3. Ask "Anything to adjust?" — modify and regenerate if yes, done if no

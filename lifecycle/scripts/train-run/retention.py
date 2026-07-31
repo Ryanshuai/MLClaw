@@ -266,7 +266,10 @@ def main(argv=None):
 
     p = sub.add_parser("plan", help="compute keep/delete with justification; deletes nothing")
     p.add_argument("output_json")
-    p.add_argument("jsonl")
+    p.add_argument("jsonl", nargs="?", help="path to the metric stream; omit and pass "
+                                            "--run-dir to resolve it")
+    p.add_argument("--run-dir", help="resolve the stream from the run dir — prefers the "
+                                    "normalized stream.jsonl over the raw source")
     p.add_argument("--output-dir", required=True)
     p.add_argument("--plan", help="write the plan here (default: <output-dir>/retention_plan.json)")
 
@@ -278,7 +281,8 @@ def main(argv=None):
 
     if args.cmd == "plan":
         try:
-            output, records, _ = load_inputs(args.output_json, args.jsonl)
+            output, records, _, _kind = load_inputs(args.output_json, args.jsonl,
+                                                    args.run_dir)
         except StreamError as e:
             sys.stderr.write(f"retention: {e}\n")
             return 2

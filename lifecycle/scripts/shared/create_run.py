@@ -72,7 +72,10 @@ def main():
         sys.exit(3)
 
     try:
-        os.makedirs(os.path.join(run_dir, "outputs"), exist_ok=True)
+        # `output`, singular — the launch contract overrides the code's
+        # `output_dir` to point here, and `${output.xxx}` resolves against it.
+        # This line said `outputs` while both of those said `output`.
+        os.makedirs(os.path.join(run_dir, "output"), exist_ok=True)
         os.makedirs(os.path.join(run_dir, "logs"), exist_ok=True)
     except OSError as e:
         sys.stderr.write(f"create_run: cannot create {run_dir}: {e}\n")

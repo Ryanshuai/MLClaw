@@ -33,7 +33,8 @@ import sys
 
 from _stream import (StreamError, classify, emit, expected_direction, finding,
                      find_type_key, load_inputs, near_misses, normalize_direction,
-                     numeric_series, observed_fields, split_of, stream_path, verdict_of)
+                     numeric_series, observed_fields, resolve_stream, split_of,
+                     unnormalized_finding, verdict_of)
 
 
 def reconcile(output, records, line_errors):
@@ -208,13 +209,19 @@ def main(argv=None):
     args = ap.parse_args(argv)
 
     try:
-        output, records, line_errors = load_inputs(args.output_json, args.jsonl, args.run_dir)
+        output, records, line_errors, kind = load_inputs(args.output_json, args.jsonl,
+                                                         args.run_dir)
     except StreamError as e:
         sys.stderr.write(f"reconcile_metrics: {e}\n")
         return 2
 
     report = reconcile(output, records, line_errors)
-    report["stream"] = stream_path(output, args.jsonl, args.run_dir)
+    path, _ = resolve_stream(output, args.jsonl, args.run_dir)
+    report["stream"] = {"path": path, "kind": kind}
+    unnormalized = unnormalized_finding(kind, path)
+    if unnormalized:
+        report["findings"].append(unnormalized)
+        report["verdict"] = verdict_of(report["findings"])
     return emit(report, "reconcile_metrics")
 
 

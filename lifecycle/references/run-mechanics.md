@@ -115,6 +115,150 @@ Three rules, uniform across all run skills:
 
 Stage-specific extras (production mode launching, monitoring, ETA computation, finalize hooks) go in each run skill's SKILL.md — these three rules do not.
 
+### Metric stream
+
+Three words with fixed meanings. They were interchangeable while the stream was
+just whatever the code happened to write; they no longer are, and a skill that
+mixes them up reads the wrong file.
+
+| Word | What it is | Where |
+|---|---|---|
+| **source** | what the training code itself wrote — tfevents, its own jsonl, stdout | `output.json -> metrics.log_path`, relative to `<RUN_DIR>` |
+| **stream** | the normalized record layer MLClaw owns | `<RUN_DIR>/stream.jsonl` — a convention, not a config value |
+| **record** | one line of the stream | — |
+
+One script owns this: `python <mlclaw_root>/lifecycle/scripts/train-run/ingest.py
+<stage>/output.json --run-dir <RUN_DIR>`. It holds a thin adapter per source
+format, one shared records layer, and the sinks. The three scripts that read metric
+records — `reconcile_metrics.py`, `select_checkpoint.py`, `retention.py` — all
+resolve through `resolve_stream()` and so read the stream; pass them `--run-dir`
+rather than a path, or they rank whatever file you named. (`list_runs.py` and
+`/train-tune` read `run.json`, not the stream.) Adding a source format is one
+adapter and no change to any of them.
+
+**A read that fell back to the source says so.** `resolve_stream` returns a `kind`
+alongside the path, and `unnormalized_finding` turns `kind == "source"` into a
+`warn`. Reading the source is the right fallback for a run created before there was
+a normalizer — doing it silently is not, because then a missing `stream.jsonl`, a
+stale one, and one that `ingest.py` deliberately refused to write all look like a
+healthy normalized read.
+`output.json -> metrics.log_format` names the **source** format and says nothing
+about the stream's shape.
+
+Not a per-format converter. A `tb_to_stream.py` beside a `wandb_to_stream.py`
+would each re-implement grouping, provenance stamping and the write discipline,
+and the third one written would disagree with the first two about something
+nobody notices.
+
+**Run ingest in the environment that produced the source.** The tfevents adapter
+needs `tensorboard` importable, and the environment that wrote the events has it,
+at the version that wrote them. On a remote run that means over ssh on the
+training host, not locally.
+
+**The stream is re-derived whole, never appended to** — temp file, then
+`os.replace`, because monitor and the user may be reading it. A restart writes a
+second tfevents whose step range overlaps the first with *different values for
+the same steps*, so an incremental writer bakes in a resolution that later events
+invalidate. It is a derived file; rebuilding costs nothing. Same reasoning as "no
+`runs_index.json`" below: no incremental cache, no drift to handle. The cost is a
+whole-source parse per monitor tick — seconds at worst, but do not call it
+per-run inside a `/train-tune` loop.
+
+**A normalizer groups and tags. It never renames a field.** `train/loss` stays
+`train/loss`; no sanitizing to `train_loss`. The declared-schema-vs-actual-stream
+comparison in `reconcile_metrics.py` is the only place the
+`val_loss`-declared-but-`train_loss`-emitted bug gets caught, and a renaming
+layer between the two launders exactly that mismatch — silently, because
+renaming looks like tidying.
+
+**A normalizer never invents a record type.** tfevents carries no equivalent of
+`train_step` / `val_epoch`: `add_scalar` takes one tag at a time, so the grouping
+was destroyed at write time. Stamping `type: "scalars"` on every record would
+make `find_type_key` report *full coverage* for a classification that never
+happened — worse than no key at all, which `classify()` already handles by
+falling back to field-set matching. Omit the key and record why in
+`stream_meta.json -> inferred`.
+
+Record shape — metric fields stay at the **top level** (`select_checkpoint.py`
+reads `r.get(best_by)`, `observed_fields` scans keys), and provenance keys are
+`_`-prefixed so they cannot be mistaken for metrics:
+
+```json
+{"step": 5000, "wall_time": 1753900000.123,
+ "train/loss": 0.312, "lr": 0.0003,
+ "_src": "tfevents", "_group": "step"}
+```
+
+**Grouping is a recorded decision, not a constant.** Which `(tag, step, value)`
+triples become one record has no universally correct answer: `step` merges train
+and val into a co-occurrence that never happened, `step+namespace` breaks on
+inverted hierarchies (`Loss/train` vs `train/loss`), `step+wall_time±ε` needs an
+ε nobody can set. So `/train-init` shows the user the observed tag list, picks
+one, and writes it to `output.json -> metrics.normalize.group_by`; the normalizer
+stamps it on every record as `_group`. Default `step`.
+
+Worth knowing before spending care here: **grouping affects `record_types`
+reconciliation, not ranking.** Ranking needs `(metric value, index)`, and that
+pair survives every grouping — checkpoint selection does not ride on this choice.
+
+`<RUN_DIR>/stream_meta.json` is the sidecar answering "why is a derived file
+trustworthy": source file list with mtime/size, `group_by`, `inferred` (what was
+guessed and on what basis), any reader setting that could silently drop data, and
+the count of overlapping steps discarded. It is a sidecar rather than a header
+line in the stream because `observed_fields` would scan a header's keys as metric
+names.
+
+**What a source holds beyond metrics is recorded, not silently skipped.** A
+tfevents directory routinely carries images, histograms, hparams, and a graph.
+None of it belongs in the stream — nothing ranks a checkpoint by a segmentation
+mask — but an unmentioned omission is indistinguishable from a run that logged
+none, and the user who logged them will go looking. The kinds present land in
+`stream_meta.json -> not_ingested` with a warning naming the `--logdir` that shows
+them. Never load their payloads: in `EventAccumulator`'s `size_guidance`, `0`
+means *unbounded*, so `{'images': 0}` pulls every sample image a run ever wrote
+into memory. Override `scalars` only.
+
+**No synthetic `ckpt_saved` records.** Reconstructing them from a `path_pattern`
+glob is tempting, but `inventory()` in `select_checkpoint.py` already pairs files
+against records using that same pattern. Two sources for one fact disagree
+eventually.
+
+#### Viewing (`<RUN_DIR>/tb/`)
+
+**On by default** — `ingest.py` renders it on every call, which means *whenever it
+is possible and useful*. `--no-tb` opts out, for a batch re-derive over many runs
+where nobody is looking. Two conditions make it a no-op, and neither is an error:
+
+- **The source already is tfevents.** Nothing is written. `--logdir <RUN_DIR>`
+  overlays every subdirectory as a separate run, so rendering the same scalars
+  again would draw every curve twice under two names — and the code's own file
+  already carries the images and histograms a render never could.
+- **No writer package is importable** (`torch.utils.tensorboard`, then
+  `tensorboardX`). Reported as a `warn`; the stream still lands. A viewer that
+  cannot be built must never break a run's monitoring.
+
+Status: the selection layer (`tb_points` — which fields become which tags at which
+step) is contract-covered, and so are both no-op paths. The `add_scalar` write path
+itself has **never executed** — no environment on hand has a writer package.
+Verify on first real use: open the render and check the tag list against the
+stream's field names.
+
+TensorBoard is a leaf consumer and never reads the stream. When the source
+already *is* tfevents, point the user at the code's own file and write nothing.
+Rendering at all is permitted for the same reason `chain.md` is: no decision path
+reads it back.
+
+**The render target is append-only** — the opposite discipline from the stream,
+because TB tails its files and a rewritten one reads as steps going backwards. It
+keeps a watermark, and losing that watermark duplicates a curve in a picture,
+which is acceptable for something no decision reads. That asymmetry is why these
+are two files and not one.
+
+**Nothing may ingest the render target.** Write it with
+`filename_suffix=".mlclaw"` so the filename self-identifies, resolve sources only
+from `metrics.log_path` (never a recursive glob for `events.out.tfevents.*`), and
+refuse any source path under `<RUN_DIR>/tb/`.
+
 ### Preprocessing contract (cross-stage)
 
 `input.json -> preprocessing` records what happens to an input before the model sees it: normalization constants, resize mode, channel order, label index base, augmentation. Filled from code by the stage's init skill (`/train-init` Step 1b), never guessed — a framework default written into this field is worse than a blank, because a blank gets asked about.

@@ -29,20 +29,11 @@ import os
 import sys
 
 from _stream import (StreamError, emit, expected_direction, finding, find_type_key,
-                     load_inputs, near_misses, normalize_direction, observed_fields,
-                     resolve_pattern, split_of, verdict_of)
+                     index_of, load_inputs, near_misses, normalize_direction,
+                     observed_fields, resolve_pattern, split_of, unnormalized_finding,
+                     verdict_of)
 
 SCRIPT_SAVED_NAMES = ("best.pt", "best.pth", "best.ckpt", "best_model.pt", "model_best.pth.tar")
-
-
-def _index_of(record):
-    """-> (kind, number) for whichever of epoch/step the record carries."""
-    for key in ("epoch", "step", "global_step", "iteration", "iter"):
-        v = record.get(key)
-        if isinstance(v, bool) or not isinstance(v, (int, float)):
-            continue
-        return ("epoch" if key == "epoch" else "step"), int(v)
-    return None, None
 
 
 def _check_selection(output, records, best_by, direction, raw_direction):
@@ -99,7 +90,7 @@ def _rank(records, best_by, direction):
         v = r.get(best_by)
         if isinstance(v, bool) or not isinstance(v, (int, float)):
             continue
-        kind, num = _index_of(r)
+        kind, num = index_of(r)
         # Four keys, deliberately: a fifth pushes every one of these dicts into
         # the next size class, which at 50k ranked records is megabytes spent so
         # that five of them can carry a display label.
@@ -321,18 +312,28 @@ def select(output, records, output_dir, top=5):
 def main(argv=None):
     ap = argparse.ArgumentParser(description="Pick the best checkpoint and show the evidence.")
     ap.add_argument("output_json")
-    ap.add_argument("jsonl")
+    ap.add_argument("jsonl", nargs="?", help="path to the metric stream; omit and pass "
+                                             "--run-dir to resolve it")
+    ap.add_argument("--run-dir", help="resolve the stream from the run dir — prefers the "
+                                     "normalized stream.jsonl over the raw source")
     ap.add_argument("--output-dir", required=True, help="where checkpoint files live")
     ap.add_argument("--top", type=int, default=5)
     args = ap.parse_args(argv)
 
     try:
-        output, records, _ = load_inputs(args.output_json, args.jsonl)
+        output, records, _, kind = load_inputs(args.output_json, args.jsonl, args.run_dir)
     except StreamError as e:
         sys.stderr.write(f"select_checkpoint: {e}\n")
         return 2
 
-    return emit(select(output, records, args.output_dir, args.top), "select_checkpoint")
+    report = select(output, records, args.output_dir, args.top)
+    # Ranking off an un-normalized source is the case that matters most: for a
+    # tfevents source there is nothing readable at metrics.log_path at all.
+    unnormalized = unnormalized_finding(kind, args.jsonl or args.run_dir)
+    if unnormalized:
+        report["findings"].append(unnormalized)
+        report["verdict"] = verdict_of(report["findings"])
+    return emit(report, "select_checkpoint")
 
 
 if __name__ == "__main__":

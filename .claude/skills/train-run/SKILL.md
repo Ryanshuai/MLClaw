@@ -126,12 +126,36 @@ Re-entrant, so `steps.monitor.status` stays null while the job runs; set it `com
 
 ### 4a. Update streaming state in run.json (sub-step `stream_state`)
 
-Read the jsonl at `{RUN_DIR}/<output.json -> metrics.log_path>` and `{RUN_DIR}/logs/stdout.log`:
+Two different files, for two different jobs — see `lifecycle/references/run-mechanics.md` "Metric stream" for the vocabulary:
 
-- `liveness_probe` ← `{observed_at, jsonl_mtime, jsonl_size, stdout_mtime}` as observed right now.
+- **Probe the source** — `{RUN_DIR}/<output.json -> metrics.log_path>` and `{RUN_DIR}/logs/stdout.log`. Liveness must read what the training process itself touches. Probing the derived stream instead makes "training stalled" and "our ingest failed" look identical, and the second one would be reported as the first.
+- **Read records from the stream** — resolve it through `stream_path()` (explicit path → `{RUN_DIR}/stream.jsonl` → source fallback) rather than opening `log_path` directly, so this step reads the same records `select_checkpoint` will later rank.
+
+Re-derive the stream first, then read it:
+
+```bash
+{run_in_env} python <mlclaw_root>/lifecycle/scripts/train-run/ingest.py \
+    <stage>/output.json --run-dir <RUN_DIR>
+```
+
+Pull-based and idempotent for the stream, safe to call on every check, and it cannot affect the training process. On a remote run it goes over ssh on the training host, whose env has the packages the source needs.
+
+Exit codes decide what you do next, and the two failure modes are not interchangeable:
+
+| Exit | Meaning | What the skill does |
+|---|---|---|
+| 0 | stream written (a `warn` still exits 0) | continue; surface any finding |
+| 1 | ingest **refused** — bad `group_by`, no adapter for this source, or the source path is our own render target | stop and report. Do **not** read the source by hand: that is the check being overridden |
+| 2 | ingest broke — missing package, unreadable file | fall back to reading the source directly, and say in the report that the stream is stale |
+
+Ingest also renders `{RUN_DIR}/tb/` by default. When `meta.tb.rendered` is true, give the user the command with the run's own path filled in — local `tensorboard --logdir {RUN_DIR}`, or for a remote run TB on the training host plus `ssh -N -L 6006:localhost:6006 {alias}`. Don't manage that process; it's theirs to close. When `rendered` is false, `meta.tb.why` says whether that is because the code already writes tfevents (point them at `output/` instead) or because no writer package exists.
+
+- `liveness_probe` ← `{observed_at, jsonl_mtime, jsonl_size, stdout_mtime}` as observed right now, all four off the **source**.
 - `last_heartbeat` ← `observed_at`, but **only if at least one of those three counters advanced past the stored `liveness_probe`**. If none did, leave the previous `last_heartbeat` in place — the widening gap is exactly what 4b reads as a hang.
 - `last_step` ← step from the most recent record matching `record_types` with a `step` field.
 - `latest_metrics` ← key fields from the most recent epoch-level record (e.g., last `val_epoch`'s primary_metric and watch_epoch fields).
+
+Take both from ingest's own `report.tail` when it is present — it is the last record, already parsed. Re-opening the stream to find it costs a full parse of a file that reaches tens of MB on a long run, and on a remote run a second ssh round trip for data that already crossed once.
 
 Write all four to `run.json` atomically. Liveness needs a *previous* observation to compare against, which is why `liveness_probe` is persisted rather than recomputed; on the first check of a run there is nothing to diff, so store the probe, set `last_heartbeat = started_at`, and classify healthy.
 
@@ -203,7 +227,7 @@ The verdict this catches most often: `primary_metric` names a field the code nev
 
 ```bash
 python <mlclaw_root>/lifecycle/scripts/train-run/select_checkpoint.py \
-    <stage>/output.json <RUN_DIR>/<log_path> --output-dir <RUN_DIR>/output
+    <stage>/output.json --run-dir <RUN_DIR> --output-dir <RUN_DIR>/output
 ```
 
 Returns the chosen file **plus the ranking with the values as they literally appear in the jsonl, and the raw record behind the winner**. Show the ranking to the user, not just the path — a path alone carries no evidence that the sort was right.
@@ -226,7 +250,7 @@ Record `chosen.path` in `run.json -> outputs.best_checkpoint`. Cases it surfaces
 ```bash
 # 1. plan — deletes nothing, ever. Prints each file with the metric value that decided its fate.
 python <mlclaw_root>/lifecycle/scripts/train-run/retention.py plan \
-    <stage>/output.json <RUN_DIR>/<log_path> --output-dir <RUN_DIR>/output \
+    <stage>/output.json --run-dir <RUN_DIR> --output-dir <RUN_DIR>/output \
     --plan <RUN_DIR>/retention_plan.json
 
 # 2. show the table to the user, then apply with the token from the plan file
