@@ -1,1 +1,10 @@
+# Credentials — real values live in the workspace-level resources.json,
+# never in this tool repo. lifecycle/resources.json is the empty template
+# and is the only copy allowed through.
+secrets.json
+resources.json
+!lifecycle/resources.json
+
+# Python bytecode
+__pycache__/
 *.pyc
