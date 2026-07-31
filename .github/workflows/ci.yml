@@ -1,0 +1,98 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# One job, not four. The template-parse and credential gates take ~3 s each; as
+# separate jobs they cost a runner spin-up and a checkout apiece, which GitHub
+# bills rounded up to the minute. They run as steps here, guarded so the matrix
+# doesn't execute them twice.
+jobs:
+  contracts:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Floor and current. The suite is standard-library only on purpose —
+        # this repo has no dependencies and no virtualenv, so there is nothing
+        # to install and nothing to pin.
+        python-version: ["3.8", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: git identity
+        # code_snapshot checks build real git working trees and commit to them.
+        run: |
+          git config --global user.email "ci@mlclaw.local"
+          git config --global user.name "MLClaw CI"
+          git config --global init.defaultBranch main
+
+      - name: Byte-compile every script
+        # Catches syntax errors in scripts no check happens to import.
+        run: python -m compileall -q lifecycle/scripts contracts
+
+      - name: Contract checks
+        # -p is required: the default pattern is test*.py and would find nothing,
+        # reporting a green run over zero checks.
+        run: python -m unittest discover -s contracts -t contracts -p 'contract_*.py' -v
+
+      - name: Every lifecycle/**.json parses
+        # The JSON templates are the schema every skill fills in. A trailing
+        # comma in one breaks project creation at the worst possible moment,
+        # and nothing else in the repo would catch it.
+        if: matrix.python-version == '3.12'
+        run: |
+          python - <<'PY'
+          import json, pathlib, sys
+          bad = []
+          for p in sorted(pathlib.Path("lifecycle").rglob("*.json")):
+              try:
+                  json.loads(p.read_text())
+              except json.JSONDecodeError as e:
+                  bad.append(f"{p}: {e}")
+          for b in bad:
+              print(b, file=sys.stderr)
+          sys.exit(1 if bad else 0)
+          PY
+
+      - name: No credential files tracked
+        # lifecycle/secrets.json was committed for months while its own first
+        # line read "NEVER COMMIT THIS FILE". Make that class of mistake fail
+        # the build.
+        if: matrix.python-version == '3.12'
+        run: |
+          tracked=$(git ls-files | grep -E '(^|/)(secrets|resources)\.json$' \
+                    | grep -v '^lifecycle/resources\.json$' || true)
+          if [ -n "$tracked" ]; then
+            echo "Credential-shaped files are tracked:" >&2
+            echo "$tracked" >&2
+            echo "Only lifecycle/resources.json (the empty template) may be committed." >&2
+            exit 1
+          fi
+
+      - name: Template carries no plaintext password field
+        if: matrix.python-version == '3.12'
+        run: |
+          if python -c "
+          import json,sys
+          d=json.load(open('lifecycle/resources.json'))
+          def walk(o):
+              if isinstance(o,dict):
+                  if 'password' in o: sys.exit(0)
+                  for v in o.values(): walk(v)
+              elif isinstance(o,list):
+                  for v in o: walk(v)
+          walk(d); sys.exit(1)
+          "; then
+            echo "lifecycle/resources.json declares a 'password' field." >&2
+            echo "Key-based auth only — use ssh_key_path." >&2
+            exit 1
+          fi
