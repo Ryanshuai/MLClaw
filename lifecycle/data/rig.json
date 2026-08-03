@@ -1,0 +1,41 @@
+{
+  "_comment": "What physically produced this data. The capture-side counterpart of the code+env snapshot a run takes: MLClaw records code, packages and driver versions per run because the same code on a different torch produces different numbers — the same is true, and less visible, of the same procedure on a different rig. Filled in dialogue by /data-collect, one file per rig, stamped into the capture tree per session. Lives at {PROJECT}/rigs/{rig_id}/rig.json.",
+
+  "rig_id": "",
+  "project": "",
+  "description": null,
+
+  "_comment_host": "How to REACH the machine, by reference — never by value. A capture box is an SSH-reachable host with a data root, which is exactly `resources.json -> servers.<key>`, so it is named here and described there. Same shape as `dataset.json -> locations[].server`.\n\nThe split is not tidiness. This file is git-tracked, because a rig's facts are the data's provenance and belong with the project; `resources.json` is the one file that is never committed. An ssh alias, a tailnet IP or a username written here is committed to the repo — the exact class of leak the CI credential gate and `scrub-leaked-secrets-from-git-history` exist for. Reach info lives there, facts live here, and nothing is duplicated.\n\n`via: local` means the capture machine is this machine; `server` is then null.",
+  "host": {
+    "via": "local",
+    "server": null,
+    "data_root": ""
+  },
+
+  "_comment_facts": "A FACT is a value with exactly one correct answer for this rig. If an operator legitimately changes it between sessions it is a parameter and does not belong here — it belongs in the capture code's own CLI. The distinction is what keeps a rig from dissolving into a dozen argparse defaults where any number can be overridden on a whim and nobody can say what the machine actually is.\n\nEvery fact carries how it was established. `evidence` is prose: measured on which box, read from which SDK, on what date. A fact with no evidence is a guess wearing a number, and the whole file is worthless the moment one of those is in it.",
+  "facts": {
+    "_example_serial": {
+      "value": "",
+      "evidence": "",
+      "probe": null,
+      "on_change": "shifts",
+      "runtime_only": false,
+      "note": null
+    }
+  },
+
+  "_comment_on_change": "The field that decides whether a fact needs watching, and the reason this file exists at all. Changes to capture hardware are NOT symmetric:\n\n  breaks  — a change makes the capture fail. A camera that is not there does not connect; a missing mic records silence. Loud, self-reporting, found in seconds. Recorded for completeness, needs no tripwire.\n\n  shifts  — a change leaves the capture working perfectly and alters what the data MEANS. A swapped stereo camera has a different factory baseline, so every measurement is off by a fixed ratio and nothing anywhere errors. A relabelled lens, a recalibrated IMU, a different mic gain, a firmware bump that changes the timestamp epoch: all of them keep producing clean-looking data that is quietly a different quantity.\n\n`shifts` facts are the ones a tripwire is for. A `shifts` fact with no `probe` cannot be watched, and /data-collect says so rather than letting the absence pass as safety.",
+
+  "_comment_probe": "A command that re-reads this fact from the hardware right now, printing the value on stdout and nothing else. This is how a tripwire fires: the recorded value is compared against what the probe returns. Named rather than built in, for the same reason `dataset.json -> completeness.marker` names a marker instead of hardcoding one — MLClaw cannot talk to a vendor SDK and must not pretend to. Null means unwatchable; for a `shifts` fact that is a stated risk, not a default.",
+
+  "_comment_runtime_only": "True for a fact that must be read at capture time and must NEVER be stored as a value here — a stereo baseline is the canonical case. Storing it turns the anchor of every downstream measurement into a config value that drifts from the hardware silently, which is the fake-metric bug one layer below the model. `value` must stay null; /data-collect refuses a runtime_only fact that carries one. The tripwire watches the cheap proxy (a serial number); the expensive truth is read live, every session, into the capture tree.",
+
+  "_comment_stamp": "Where a per-session reading is written, relative to the capture root. It goes INTO the data tree rather than beside this file, because the rig has to remain readable from the data alone after an rsync to a machine that has never heard of this project. Declare it as a layer in the dataset's `dataset.json -> layers` and the census reports its absence as a GAP for free.",
+  "stamp": {
+    "path": "_rig",
+    "filename": "rig_stamp.json"
+  },
+
+  "created_at": "",
+  "updated_at": ""
+}

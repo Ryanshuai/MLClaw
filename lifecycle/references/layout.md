@@ -86,6 +86,8 @@ README.md                           ← what MLClaw is, and which stages are bui
     data-label/SKILL.md             ← /data-label
     ask-human/SKILL.md              ← /ask-human
     data-collect/SKILL.md           ← /data-collect
+    data-check/SKILL.md             ← /data-check
+    data-freeze/SKILL.md            ← /data-freeze
     data-discover/SKILL.md          ← /data-discover
   settings.json
 contracts/                          ← executable form of this file's contracts; stdlib only
@@ -143,6 +145,8 @@ lifecycle/
     data-collect/
       collect.py                    ← plan / pull / status; ingest only, records what arrived
       rig.py                        ← optional provenance: rig facts + silent-change tripwires
+    data-check/
+      census.py                     ← scan / show / snapshot / resolve / status; three states, never two
     data-discover/
       discover.py                   ← sources / record / probe / report; `gone` ≠ `unreachable`
     resources/
@@ -183,6 +187,10 @@ lifecycle/
     ask.json                        ← the answer's `kind` is the load-bearing field, not its text
   data-label/                       ← exchange record template (project-level, not a stage)
     handoff.json                    ← one exchange: frozen manifest ref, spec, rounds, coverage
+  data/                             ← data-stage record templates (project-level, not a stage)
+    dataset.json                    ← identity glob, layers + kind, locations + role, completeness
+    rig.json                        ← the rig's facts, each with evidence and a breaks/shifts class
+    online_window.json              ← one live-stream reading: window, uniform draw, denominator
   refactor/                         ← refactor stage JSON templates
     plan.json                       ← repo analysis, module classification, paper benchmarks
     config.json                     ← benchmark entry command + params

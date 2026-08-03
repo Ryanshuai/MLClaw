@@ -1,0 +1,59 @@
+{
+  "_comment": "One dataset's LAYOUT CONTRACT — what a unit of this data is, what layers it can carry, what proves a unit finished, and every place it is supposed to live. Written by the user through /data-check dialogue; this template documents the shape and is what a manual fallback must reproduce. Lives at {PROJECT}/datasets/{dataset_id}/dataset.json. It is machine-independent on purpose: `locations` names the machines, everything else describes the data, so moving a disk edits one block.",
+
+  "dataset_id": "",
+  "project": "",
+  "description": null,
+
+  "_comment_identity": "PATH IS IDENTITY. A unit's id is its path relative to a location's root, which is what makes a union across machines a set union rather than a merge — the same unit at two locations has the same id by construction, with nothing to key on and nothing to reconcile. `unit_glob` is the shape of that path (`*/*/*` for date/seq/scene, `*/*` for date/scene); its DEPTH is load-bearing, so a rig that writes one level shallower is a different glob and not a variation. `exclude` drops basenames that sit at unit depth without being units (`_rig`, `_align`, `.tmp*`) — matched against the final component only.",
+  "identity": {
+    "unit_glob": "",
+    "unit_label": "unit",
+    "exclude": []
+  },
+
+  "_comment_layers": "The stages a unit can carry, in lifecycle order, each identified by a MARKER path relative to the unit dir. A marker is a file or a directory whose mere existence means that layer was produced — never a content check, which is the boundary this whole config sits on (see SKILL.md 'The judging rule').\n\n`kind` is the field that decides what a missing copy MEANS. `source` cannot be recomputed: it came from the world, or a human, or a machine that has moved on, so a single copy is a standing loss risk and a sync collision must refuse rather than pick a winner. `derived` can be recomputed from upstream layers, so one copy is an inconvenience and newest-wins is safe. `human_locked` is derived by machinery but decided by a person — recomputable in form, not in fact; it never auto-overwrites in either direction.\n\n`produced_by` names what makes this layer, for reading a GAP as an action. Free text, or `run:<stage>` when an MLClaw stage makes it.",
+  "layers": [
+    {
+      "label": "",
+      "marker": "",
+      "kind": "source",
+      "produced_by": null,
+      "note": null
+    }
+  ],
+
+  "_comment_completeness": "WHAT PROVES A UNIT FINISHED, and it is never 'the directory exists'. A capture process that creates its output directory up front — the right choice when a human with no screen has to see the number they are shooting into — makes directory existence meaningless as a completion signal, and a half-finished unit that looks whole is the one failure mode that survives all the way into ground truth. So this names an explicit marker written at the END.\n\nnull is allowed and is NOT a default: it means this dataset genuinely has no completion signal, and the census then reports `completeness: unverifiable` for every unit rather than reporting them complete. Leaving it null silently is the thing this comment exists to prevent — `/data-check` asks, and records the answer either way.\n\n`partial_marker_field` is optional: when the marker is JSON carrying a key that distinguishes a clean end from an interrupted one (`ended: interrupted`), name the key here and the census reads THAT ONE FIELD. It is the single exception to 'never read content', and it is only permitted because the field is the completion claim itself, not a judgement about the data.",
+  "completeness": {
+    "marker": null,
+    "partial_marker_field": null,
+    "note": null
+  },
+
+  "_comment_locations": "Every place this data is supposed to be. `role` decides what the census expects, not just where it looks:\n  authority  — holds every layer; the target a DRIFT is resolved toward. Exactly one.\n  working    — a subset being worked on; a missing layer here is normal, not a gap\n  backup     — a second copy of SOURCE layers; written to, never read from for compute\n  origin     — where data enters the world (a capture box). Layers here are the FOSSIL record: never written to by anything downstream, and often rolled away to make room, which is precisely why its replication count matters more than anywhere else.\n\n`has_layers: null` means all of them. A list means only these exist here by design, so their absence is not a gap — a capture box holding only raw frames should not report every downstream layer as missing.\n\n`via`: `local` (a path on this machine) or `server` (an entry key in {WORKSPACE}/resources.json -> servers, reached over ssh). Credentials never live here — the key is resolved live, same rule as /data-label and /lease.",
+  "locations": [
+    {
+      "key": "",
+      "role": "authority",
+      "via": "local",
+      "server": null,
+      "root": "",
+      "has_layers": null,
+      "note": null
+    }
+  ],
+
+  "_comment_replication": "How many copies of a SOURCE layer must exist before that layer is not flagged. Default 2, because 1 means one disk failure is total loss and the machine holding it usually cannot tell — a capture box deleting its oldest day to make room for the next shot has no way to know whether that day was ever copied off. This number is what turns 'is it safe to delete' into a question with an evidenced answer instead of a checkbox.",
+  "replication": {
+    "min_source_copies": 2
+  },
+
+  "_comment_consumers": "Stages that read this dataset, advisory only. The authoritative direction is the consuming run's own run.json -> lineage.parents, which cites a FROZEN SNAPSHOT as `datasets/{dataset_id}@{snapshot_id}` — never the dataset id alone. A dataset grows; a run trained on what it was that day, and a citation that cannot say which is not lineage.",
+  "consumers": [],
+
+  "_comment_derived_from": "WHAT THIS DATASET IS MADE OF, written by `/data-curate register` and by nothing else. `null` means captured — the data entered the world here — and that is a real claim, not a blank: a converted, deduped or 30%-sampled set looks exactly like a captured one on disk, and once it does, nothing can tell them apart again.\n\n`provenance` is the same claim/verified split as /ask-human. `run` means a COMPLETED run cited these parents in its own run.json -> lineage.parents; the edge was checked against a record. `claimed` means somebody said so and `because` says why no run exists. Both are legitimate; spelling them the same way is not.\n\n`parents` are frozen citations (`datasets/{id}@{snapshot_id}`), never bare dataset ids — a parent edge that cannot say which afternoon is not lineage. `/data-curate trace` walks them back to the captured roots and reports any link that is claimed or unresolvable rather than quietly ending the chain.",
+  "derived_from": null,
+
+  "created_at": "",
+  "updated_at": ""
+}

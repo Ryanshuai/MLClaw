@@ -1,0 +1,55 @@
+{
+  "_comment": "One dated reading of the live input stream: what production was seeing between two instants, and a uniform draw from it. Written by lifecycle/scripts/data-online-sample/online.py; this template documents the shape and is what a manual fallback must reproduce. Lives at {PROJECT}/datasets/<id>/online/window_{YYYYMMDD}_{HHmmss}.json — under the dataset whose snapshot the reading will be compared against, because that comparison is the only reason it exists.\n\nIt is a dated observation like a census, not an execution to resume, and unlike a census it can NEVER be retaken: the traffic has rolled off, and the model that was answering has been replaced. A census re-scanned next month gives a different answer and both are true of their date; a window re-read next month gives nothing at all.",
+
+  "window_id": "window_{YYYYMMDD}_{HHmmss}",
+  "project": "",
+  "dataset": "",
+  "taken_at": "",
+
+  "_comment_window": "The interval this reading covers, both ends REQUIRED to carry a UTC offset. A timestamp without one is not an instant — it is an instant in an unnamed zone, and two windows written in different zones cannot be ordered, which is the `staleness_undetermined` mistake one domain over. `to` must be strictly in the past: sampling up to `now` makes the enumeration a moving target, so the same window re-read an hour later covers more and the draw is not reproducible.",
+  "window": { "from": "", "to": "" },
+
+  "_comment_taken_under": "The `dataset.json -> online` contract in force when this reading was taken, copied in whole. Same reason `census.py` records it: without it a later comparison cannot tell a change in production from a change in how production was counted, and those look identical in a trend line. `identity` is copied for the same reason and is REUSED from the dataset rather than restated — the online and offline sides must count the same unit or the comparison is between two different questions.",
+  "taken_under": {},
+  "identity": {},
+
+  "_comment_source": "Where production inputs land, as a resources.json key plus whatever the declared partition expands to. `kind` is server | s3 | local. `enumerated_by` says whether this script listed it or an external tool did (`--units-from`) — with an external enumeration nothing here looked, so reachability is somebody else's claim and the record says so. This is not the serving stack and need not be one MLClaw deployed: a fleet writing to a bucket is the normal case, and all this needs is somebody to say where.",
+  "source": { "resource": "", "kind": "", "pattern": "", "expanded": [], "enumerated_by": "" },
+
+  "_comment_policy": "Always `uniform`. There is deliberately no other value: a reading whose selection was biased measures the filter rather than the world, so drift computed against it is undefined. When a biased sample is what you want — low-confidence frames, rule-flagged events, anything worth paying to annotate — that is `/data-collect`, which pulls bytes and cites THIS record as its denominator. Two chains, opposite policies, and they must not share a mechanism.",
+  "policy": "uniform",
+
+  "_comment_draw": "How the sample was picked, recorded so it can be re-derived rather than trusted. Selection is `sha256(seed:unit_id)` ascending over the sorted enumeration — stable under insertion, so a unit's membership does not change because another unit appeared. `enumeration_digest` is a hash of the sorted enumerated ids: a re-run that produces the same digest proves it saw the same window, and one that does not says the source changed underneath.",
+  "draw": { "n_requested": 0, "n_selected": 0, "seed": "", "enumeration_digest": null },
+
+  "_comment_enumerated": "How many units the listing actually found. Always recorded, and NOT the population — see below.",
+  "enumerated": 0,
+
+  "_comment_population": "How many inputs production actually handled in this window, which is usually UNKNOWABLE and must then be null. Request logging is itself sampled, rotated and lossy; the listing sees what survived to a bucket, not what happened. `population_basis` says which it is: `declared` when a number came from somewhere that counts (a metrics backend, a request log with known retention) — record where in `population_source` — or `enumeration_only` when nothing did.\n\nWhen it is null, `sample_rate` is null too and every rate derived from this window is a LOWER BOUND that must be stated as one. This is the same rule as a partial census: `enumerated` and `population` are different facts, and collapsing them turns 'what reached the bucket' into 'what happened', which is how a logging outage reads as a quiet day.",
+  "population": null,
+  "population_basis": "enumeration_only",
+  "population_source": null,
+  "sample_rate": null,
+  "rates_are": "lower bound",
+
+  "_comment_complete": "False when any expanded prefix did not answer. Three outcomes are kept apart exactly as `census.py scan` keeps them: the source did not answer / it answered and the prefix is not there / it answered and this is what it holds. Only the third means the window was quiet, and an incomplete reading may be reported but never compared — a drift verdict against a window with a missing day is a verdict about the outage.",
+  "complete": true,
+  "unreachable": [],
+  "missing_prefixes": [],
+
+  "_comment_units": "The selected unit ids, in full. This is the sample — small by construction (a few hundred), so it is recorded here rather than pointed at. `paths` carries the source-side path per unit when the listing produced one, because a unit id on the production side may be nothing like a dataset unit id and whoever pulls bytes later needs the path, not the id.",
+  "units": [],
+  "paths": {},
+
+  "_comment_scored_by": "The artifact that was serving when this window happened, if known. Currently a path or a free-text note, because a checkpoint has no citable identity yet — that is the model-identity layer, and until it exists this field cannot be verified against anything. Left null rather than guessed. Input drift does not need it; PREDICTION drift is uninterpretable without it, since 'the output distribution moved' says nothing when nobody recorded which model produced the outputs.",
+  "scored_by": null,
+
+  "_comment_retain_until": "When these units must be deleted, if a limit applies. Production data is somebody's data, and 'may we keep it' and 'may we send it to an annotation vendor' are decisions, not defaults — `/ask-human` kind `decision`. Recorded here so the constraint travels with the reading; nothing in this script enforces it, and that gap is deliberate rather than overlooked.",
+  "retain_until": null,
+
+  "_comment_overlaps": "Other windows on record for this dataset whose interval intersects this one. A warning, never a refusal: overlapping readings double-count in any trend line, and two readings of the same afternoon are a legitimate thing to take on purpose.",
+  "overlaps": [],
+
+  "_comment_note": "Free text. What this reading was taken for.",
+  "note": null
+}

@@ -208,6 +208,8 @@ claude
 - [x] Human exchange — `/ask-human` (a question to a person, answered as claim / verified / decision; refuses `verified` when nothing checked it)
 - [x] Data archaeology — `/data-discover` (inherit a project and find out what data exists: sweep code, git history, tracking, S3, docs, people; `gone` and `unreachable` are never the same answer). Called by the `-init` skills
 - [x] Data ingest — `/data-collect` (pull from a named resource, record what arrived; optional rig-provenance stamp with tripwires on hardware that changes silently)
+- [x] Data census — `/data-check` (where every unit is across machines, what layers it carries, what claims it finished; citable snapshots for lineage, resolved into openable paths for the training side)
+- [x] Data freeze — `/data-freeze` (pin membership as `datasets/<id>@<snapshot>`, the citation the model lifecycle records; refuses a partial census, unverified-complete units, a reused id)
 - [x] Skill dependency system (inter-skill graph + internal dependency chain + cross-session resume)
 - [x] Remote execution + path mapping
 - [ ] Run comparison — `/train-compare` (side-by-side metrics/params/env diff)

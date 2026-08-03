@@ -98,6 +98,8 @@ what, what is deliberately *not* a phase (Archive, Train), and how `/data` compo
 | `/ask-human` | Put a question to a person and record the answer as what it is — `claim` / `verified` / `decision`. Sibling of `/data-label`: that one exchanges artifacts, this one exchanges answers |
 | `/data-discover` | Find out what data exists when nobody can tell you — the taking-over case. Sweeps code, git history, tracking, S3, servers, docs, people and probes each lead: `claim` / `verified` / **`gone`** (looked, not there) / **`unreachable`** (could not look). Never declares a dataset — that is `/data-check` |
 | `/data-collect` | Name a resource, name a path on it, pull — and record what arrived. Ingest only, one direction. Never waits for a human — that is `/data-label` |
+| `/data-check` | Declare a dataset's layout contract, then census it across every machine: GAP / DRIFT / UNREPLICATED / UNARCHIVED / INCOMPLETE. Reports; moves no byte. **Freezing is `/data-freeze`'s** — same script, different skill |
+| `/data-freeze` | Freeze a citable snapshot so a run can record exactly which units it consumed — `datasets/<id>@<snapshot>`, the boundary the model lifecycle cites |
 | `/refactor-init` | Clone research repo, analyze codebase, classify modules (core/support/dead), extract paper benchmark targets |
 | `/refactor-run` | Execute one refactoring round: make changes → run benchmark → compare with paper → commit or revert |
 | `/refactor-report` | Generate refactoring audit report: round changelog, rollback points, verification results, reproduction instructions |
