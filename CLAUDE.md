@@ -20,37 +20,64 @@ MLClaw replaces MLflow/W&B/TensorBoard with conversation-driven ML lifecycle man
 - **Zero code invasion**: never ask users to add logging/tracking calls to their code. Extract everything from outside (stdout parsing, file scanning, env capture).
 - **One question at a time**: never dump multiple questions on the user. Ask one, record answer, ask next.
 - **Scripts are fallback-safe**: if any Python script fails, do the same work manually with Bash/Read/Write tools. Never let a script bug block the workflow.
-- **JSON configs are the source of truth**: fixed keys, you fill values. Templates in `lifecycle/`, filled instances in user projects.
+- **JSON configs are the source of truth**: fixed keys, you fill values. Templates at `lifecycle/` top level and `lifecycle/<stage>/`, filled instances in user projects. `lifecycle/scripts/` and `lifecycle/references/` are the tool's own machinery and docs — they live under `lifecycle/` because they define the same model, but nothing copies them into a project.
 - **Confirm before saving**: always show what you're about to write, wait for user confirmation. Never auto-overwrite existing values.
 
 ## Never silently
 
-Six rules that outrank convenience. They are here, in the always-loaded file, because the moment they matter most is when no skill is running — a user says "clean up the old checkpoints", "which run was best", or "标注回来了导进去吧", nothing loads, and an obliging agent does the wrong thing without anything raising. Mechanism and rationale: `lifecycle/references/run-mechanics.md -> "Record integrity"`.
+Ten rules that outrank convenience. They are here, in the always-loaded file, because the moment they matter most is when no skill is running — a user says "clean up the old checkpoints", "which run was best", or "the labels came back, load them in", nothing loads, and an obliging agent does the wrong thing without anything raising. Mechanism and rationale: `lifecycle/references/run-mechanics.md -> "Record integrity"`.
 
 - **Never delete a checkpoint outside `retention.py plan` → `apply`.** Showing the user a list of filenames is not confirmation — the list carries no evidence the ranking behind it was right. Never delete a file you cannot rank.
 - **Never record a metric you did not read.** Extraction failure and "the run never produced it" are different facts and must not both become `null`.
 - **Never compare metrics across different `mode` or non-equivalent `scope`.** Query through `lifecycle/scripts/shared/list_runs.py`; do not hand-write the filter.
 - **Never pass a param the code ignores.** Check `config.json -> param_injection` first; a silently-dropped flag produces a run whose recorded config lies about what trained.
 - **Never treat an untracked file as clean.** `git diff HEAD` cannot see it, and the run will reproduce different code.
-- **Never accept a claimed return as a verified one.** "标好了" is a claim; completeness is `handoff.py receive` computing it against the frozen manifest. Copying the files in because someone said they were done records a partial batch as a whole one, and every downstream number inherits that.
+- **Never let somebody's word become a checked fact.** An answer is a `claim` until something other than the person confirms it; `/ask-human` refuses `verified` when nothing did. "The operator says it finished" and "the census counted 52 finished units" stop being distinguishable the moment either is written down as "done".
+- **Never accept a claimed return as a verified one.** "It's labeled" is a claim; completeness is `handoff.py receive` computing it against the frozen manifest. Copying the files in because someone said they were done records a partial batch as a whole one, and every downstream number inherits that.
+- **Never report data you could not look at.** A machine that did not answer, a path that is not there, and a directory that is genuinely empty are three facts, and only the last one means the data is gone. `census.py scan` keeps them apart and marks the census `complete: false`; a count from a partial census is a lower bound and must be said as one. Presenting it as an inventory is how a backup nobody can reach passes for a backup.
+- **Never say a unit is complete because its directory exists.** Completion is the marker named in `dataset.json -> completeness`, written when the work ended. Directory-up-front is a normal and often correct capture design, which is exactly why its existence proves nothing — and a half-finished unit that reads as whole is the one defect that survives all the way into a trained model. No marker declared means every unit is `unverifiable`, never `complete`.
+- **Never delete data a frozen snapshot still names.** The bytes go; the citation stays. `datasets/boxes@260731` goes on resolving, the manifest goes on listing the unit, and every run that cited it goes on reading as reproducible while it no longer is — nothing anywhere raises. `retire.py plan` is what knows, because it is the only thing that reads the manifests and the census together; a delete outside it cannot know. When it has to happen anyway, `--waive cited_by_snapshot` stamps the loss into the snapshot: a citation that resolves to nothing must at least say so.
 
 ## Reading order
 
-This file is routing and constraint only. Detail is loaded when it applies, so that what stays here actually gets read.
+**This file carries only what is needed before a skill is chosen**: the rules that
+fire when nothing is loaded, the inventory you route from, and what to check when a
+session opens. Everything else is one hop away, and the hop is cheap because by then
+you know which one you need.
+
+That split is the whole reason the rules below get read at all. A file that also
+carried every requirement check and record layout would be skimmed, and the ten
+rules would be skimmed with it.
 
 | Before you… | Read |
 |---|---|
-| execute or finalize any run (`/train-run`, `/eval-run`, `/infer-run`, `/refactor-run`) | `lifecycle/references/run-mechanics.md` — step chain, launch contract, code snapshot, record integrity, checkpoint selection, retention, listing runs, env resolution, remote path mapping |
-| find code/data on disk, resolve a `${}` reference, or create a project | `lifecycle/references/layout.md` — workspace and tool-repo location, code-source resolution, full file layout, `${}` syntax |
+| **run any skill** — check its requirements, offer the next one, push/pop state, or write any record | `lifecycle/references/skill-graph.md` — node hierarchy, the requires/suggests table, requirement checks, workflow state protocol |
+| execute or finalize a run (`/train-run`, `/eval-run`, `/infer-run`, `/refactor-run`) | `lifecycle/references/run-mechanics.md` — step chain, launch contract, asset resolution, code snapshot, record integrity, checkpoint selection, retention, listing runs, path mapping |
+| find code/data on disk, resolve a `${}` reference, or create a project | `lifecycle/references/layout.md` — workspace and tool-repo location, code-source resolution, full file layout, dataset identity and census records, `${}` syntax |
+| work the data line — freeze, curate, retire, or route a dataset | `lifecycle/references/data-line.md` — what each phase owns, what is not a phase, how `/data` composes them |
+| pick up something designed but not built | `lifecycle/references/roadmap.md` — and note that nothing in it has a script to call |
 | change a script, a template, or a contract | `contracts/` and "Contracts" below |
 
 ## Status
 
-**Implemented**: inference (init + run), evaluation (init + run + report), refactor (init + run + report), training (init + run + tune + tune-report), project init, resources, lease, handoff.
+**Implemented**: inference (init + run), evaluation (init + run + report + triage), refactor (init + run + report), training (init + run + tune + tune-report), project init, resources, lease, handoff, reproduction, and the whole data line (collect + label + curate + freeze + retire, plus check / route / report / online-sample).
 
-**Next**: data stage, deployment stage, exploration stage (architecture search), `/train-compare`.
+**Next**, in dependency order: `models/<id>@<release>` (the model-identity primitive three things wait on), then deployment (`/deploy-init` + `/deploy-run`) and model curate, plus `/data-drift`'s comparison half — its online half is built. Then exploration and `/train-compare`. **Designed, not built: there is no script to call.** Reasoning, and the traps that make the obvious implementation wrong: `lifecycle/references/roadmap.md`.
 
-**Enforced by `contracts/`**: the record layer only — see `lifecycle/references/run-mechanics.md` "Record integrity". Everything else in this file is a contract nothing checks; when you touch one of those, you are the check.
+**The data lifecycle**, one skill per phase — including the small ones, because a phase whose skill is "part of another skill" is a phase nobody can name, and an unnamed box reads as a box that does not exist:
+
+```
+   Collect   →   Label    →   Curate    →   Freeze    →   Retire
+/data-collect  /data-label  /data-curate  /data-freeze  /data-retire
+
+        /data  composes them · /data-check censuses · /data-report renders
+   /data-online-sample reads the live stream the frozen side gets compared against
+```
+
+It is a **record** layer end to end, with one exception: `/data-retire apply` deletes,
+earned by `plan → apply` against evidence plus the containment rule. Which phase owns
+what, what is deliberately *not* a phase (Archive, Train), and how `/data` composes it:
+`lifecycle/references/data-line.md`. Every rule there is cited by a check.
 
 ## Skills & Dependencies
 
@@ -59,135 +86,18 @@ This file is routing and constraint only. Detail is loaded when it applies, so t
 | `/project-init` | Create a new project: directory structure, project.json, git init |
 | `/infer-init` | Analyze inference code → fill 4 JSON configs (config, artifacts, input, output) |
 | `/infer-run` | Run inference: check sources → debug mode → production mode (local/remote) → collect results |
-| `/eval-init` | Analyze evaluation code → fill 4 JSON configs (config with dataset info, artifacts, input with ground truth, output with baseline) |
+| `/eval-init` | Analyze evaluation code → 4 JSON configs + **`candidates`**. Calls `/data-discover` for the data; finds checkpoints itself from this project's production training runs. Gate: **`samples` ≠ `dataset.num_samples` is `mismatch`** — a subset is a different measurement |
 | `/eval-run` | Run evaluation: check sources + GT → debug mode → production mode → collect metrics → baseline comparison |
-| `/eval-report` | Generate self-contained HTML report from a completed eval run (metrics, baseline diff, per-class, bad cases) |
-| `/train-init` | Analyze training code → sweep every reachable source (repo, git history, company docs, S3, tracking backend, compute) → fill 4 JSON configs (resources + param injection + hazards + env snapshot; data/weight candidates + preprocessing contract; streaming-metric schema + checkpoint selection + done signal + tracking locator) + `provenance.json` (sources checked, evidence, what's guessed) + `recipe.md` (handover doc) |
+| `/eval-report` | Self-contained HTML report from a completed eval run. **Not bad cases** — rendering the worst 40 images is not analysis; that is `/eval-triage`'s |
+| `/train-init` | Analyze training code → sweep every reachable source (repo, git history, docs, S3, tracking, compute) → 4 JSON configs + `provenance.json` (what was checked, what's guessed) + `recipe.md` (handover doc) |
 | `/train-run` | Run training: validate resources → resolve sources → background launch → monitor stream (heartbeat, last_step, latest_metrics) → detect done/crash → finalize (best ckpt + retention) |
-| `/train-tune` | Adaptive HPO loop: agent observes prior runs → identifies coverage gaps → hypothesizes next config → launches trials via /train-run → iterates until budget or convergence. Auto-invokes /train-tune-report at close. |
-| `/train-tune-report` | Render a tune session as markdown chain.md: headline, best-so-far curve, coverage map, decision timeline (with [fill_grid|refine_best|add_axis|verify] tags), confirmed/refuted distillation, recipe. |
-| `/lease` | Acquire, renew, and release a rented compute host, with a dead-man switch so nothing is left running. Called by a run skill that needs a machine it doesn't have; also answers the user's own "what am I paying for right now" |
-| `/handoff` | Send work to a party MLClaw doesn't control (annotation vendor, data owner, reviewer, customer) and verify the return against a manifest frozen at send time: freeze + spec snapshot → track what's outstanding → reconcile (coverage, named gaps, source drift) → accept/reject/rework. The only skill whose loop is closed by someone else |
+| `/train-tune` | Adaptive HPO loop: observe prior runs → find coverage gaps → hypothesize the next config → launch trials via `/train-run` → iterate until budget or convergence |
+| `/train-tune-report` | Render a tune session as `chain.md`: headline, best-so-far curve, coverage map, decision timeline, confirmed/refuted distillation, recipe |
+| `/lease` | Acquire, renew and release a rented compute host, with a dead-man switch so nothing is left running. Also answers "what am I paying for right now" |
 | `/refactor-init` | Clone research repo, analyze codebase, classify modules (core/support/dead), extract paper benchmark targets |
 | `/refactor-run` | Execute one refactoring round: make changes → run benchmark → compare with paper → commit or revert |
 | `/refactor-report` | Generate refactoring audit report: round changelog, rollback points, verification results, reproduction instructions |
 | `/resources` | Discover local credentials, models, data. Auto-populate workspace-level resources.json |
-
-### Node hierarchy
-
-```
-project
-  └── stage (evaluation, inference, training, ...)
-       └── skill (init, run, report — operations on a stage)
-            └── execution (run_20260317_... — one instantiation of a skill execution)
-                 └── steps (resource_validation, resolve_assets, create_run, execute,
-                            monitor, collect_results)
-```
-
-- **Stage** is a lifecycle phase. **Skill** is an operation on that stage. **Execution** is one instantiation of running a skill.
-- `/project-init` is project-level, not tied to a stage. `/resources` is workspace-level — `resources.json` lives at the workspace root and is shared across all projects.
-- `/handoff` is project-level and **cross-stage on purpose**: it is an edge, not a node. Annotation hangs off data, human eval off evaluation, acceptance off delivery — one primitive, many stages, so its records live at `{PROJECT}/handoffs/` rather than under any one `stages/`. Its executions are tracked (`handoffs/handoff_20260731_.../handoff.json` + per-round reconciliations) but have no step chain: the state is `status`, because the work happens outside any process MLClaw can step through.
-- **Run skill** executions are fully tracked: `runs/run_20260317_.../` with run.json, steps, outputs, logs.
-- **Init skill** executions are currently not tracked separately — completion is defined by output files (4 JSON configs). Can be added later.
-- **Report skill** executions are stored as output files within a run's `outputs/` directory.
-- On disk, `runs/` directory = executions of the run skill. The naming is kept for simplicity.
-
-### Skill Dependency Graph
-
-Every skill knows its position in this graph. Two types of edges:
-
-- **requires** (↑ upstream): must be done before this skill can run. If missing, pause and prompt user to do the upstream skill first.
-- **suggests** (↓ downstream): after completing, offer the user the next logical step.
-
-```
-Skill              Requires (check on entry)              Suggests (offer on exit)
-─────────────────  ─────────────────────────────────────  ──────────────────────────────
-/project-init      (none — root)                          /resources, /infer-init, /eval-init, /train-init, /refactor-init
-/resources         (none — workspace-level)                (return to caller, or suggest /infer-init, /eval-init, /train-init)
-/infer-init        project.json exists, code available    /infer-run
-/eval-init         project.json exists, code available    /eval-run
-/train-init        project.json exists, code available    /train-run
-/train-run         train-init done (config non-empty),    /eval-run, /train-tune
-                   resources.json for credentials
-/train-tune        train-init done, ≥1 prior train-run    /train-tune-report (auto at close)
-                   completed
-/train-tune-report tune session exists with ≥1 run        (done)
-/refactor-init     project.json exists                    /refactor-run
-/infer-run         infer-init done (config non-empty),    (done)
-                   resources.json for credentials
-/eval-run          eval-init done (config non-empty),     /eval-report
-                   resources.json for credentials
-/refactor-run      refactor-init done (plan.json exists), /refactor-run (next round),
-                   resources.json for credentials       /refactor-report (when complete)
-/refactor-report   refactor-run completed (run.json)    (done)
-/eval-report       eval-run completed (run.json exists)   (done)
-/lease             (none — utility, called on demand)     (return to caller)
-/handoff           project.json exists                    on accept: the consuming stage's
-                                                          -init or -run; on reject: rework round
-```
-
-`/data-check` and `/data-report` are **not built** — the data stage is in "Next" above. They are named here only so nobody re-invents the edge: they would sit between `project.json` and any `/{stage}-run`.
-
-#### How skills use this graph
-
-**On entry** — check `requires` column. If a requirement is not met, offer to run the upstream skill. If user agrees, invoke it as a sub-skill (see Workflow State Protocol below). If user declines, stop.
-
-**On exit** — check `suggests` column. Offer the next skill. If user accepts, invoke it as a sub-skill.
-
-**`/resources`** and **`/lease`** are utility skills — called on-demand by any run skill, `/resources` when credentials are missing, `/lease` when the run needs a machine that isn't already available. Both can be invoked standalone. Neither appears in a stage's dependency chain; they interrupt one and return.
-
-**`/handoff`** is a utility skill too, but the asymmetric kind: it is entered from a stage and returns *weeks later*, so it must not hold the workflow stack while it waits. Its `suggests` edge fires at `close --accept`, not at `send`. A run that consumes an accepted handoff cites it in `lineage.parents` as `handoffs/<handoff_id>` — that citation, not the stack, is what connects the two.
-
-#### Requirement checks
-
-| Requirement | How to check |
-|-------------|-------------|
-| project.json exists | file exists at `{PROJECT}/project.json` |
-| code available | `code_source` is configured AND code directory has files |
-| infer-init done | `{PROJECT}/stages/inference/config.json → entry_command` is non-empty |
-| eval-init done | `{PROJECT}/stages/evaluation/config.json → entry_command` is non-empty |
-| train-init done | `{PROJECT}/stages/training/config.json → entry_command` is non-empty |
-| ≥1 prior train-run completed | `{PROJECT}/stages/training/runs/*/run.json` with `status: "completed"` exists |
-| tune session exists with ≥1 run | `{PROJECT}/stages/training/tune_sessions/*/state.json` exists AND ≥1 run with `lineage.session = <id>` |
-| resources.json for credentials | checked lazily — `{WORKSPACE}/resources.json`, only when a source needs non-local credentials |
-| eval-run completed | `{PROJECT}/stages/evaluation/runs/*/run.json` with `status: "completed"` exists |
-| refactor-init done | `{PROJECT}/stages/refactor/plan.json` exists with non-empty `modules` |
-| refactor-run completed | `{PROJECT}/stages/refactor/runs/*/run.json` with `status: "completed"` exists |
-| env_manager available | `{WORKSPACE}/resources.json → local.env_manager.tool` is non-empty |
-### Workflow State Protocol
-
-The dependency graph is persisted across sessions via `history.json`.
-
-**Two levels of state tracking**:
-- **Inter-skill** (dependency graph): completion is defined by **output artifacts**, not by history records. Skills check upstream dependencies by examining whether the expected outputs exist (see Requirement Checks table). A skill that ran but didn't produce its outputs is treated as not completed.
-- **Intra-skill** (execution steps): progress is tracked in `run.json → steps`. On resume, the stack entry points to the exact execution and step, and `run.json → steps` shows which steps completed — so the skill can skip finished steps and continue from where it stopped.
-
-Stack entries follow the node hierarchy — they locate the exact position in the tree:
-
-```json
-{
-  "skill": "eval-run",
-  "stage": "evaluation",
-  "execution": "run_20260317_091500",
-  "step": "execute",
-  "project": "~/agent_space/mlclaw/projects/detection"
-}
-```
-
-- `skill` + `stage`: which skill on which stage
-- `execution`: which specific execution instance (null for init skills that don't create executions yet)
-- `step`: which step within the execution (matches a key in `run.json → steps`)
-
-On resume, read the execution's `run.json → steps` to see exactly which steps completed and which didn't.
-
-Every skill MUST:
-1. **On entry**: push to `stack` with `project`, `skill`, `stage`, and `step` fields. For run skills, also set `execution` once the run dir is created. Append to `history` with status `started`
-2. **On calling sub-skill** (upstream dependency or downstream suggestion): update own status to `paused` in history, push sub-skill to stack (inherit `project` from parent)
-3. **On sub-skill return**: pop sub-skill from stack, append `resumed` to history, continue
-4. **On completion**: pop self from stack, append `completed` to history
-5. **On error/interruption**: leave stack as-is (so next conversation can detect and resume)
-
-Write `history.json` after every state change.
 
 ### On Conversation Start
 
@@ -204,6 +114,18 @@ Restore the dependency chain state from the previous session:
      - Resume → continue from where stack says
      - Start fresh → clear stack (but keep history), proceed with new request
    - If `stack` is empty → no pending work, proceed normally.
+
+3. **Check what is out with someone else**: `handoff.py status --project {PROJECT} --open-only` **and** `ask.py status --project {PROJECT} --open-only` (stale at 7 days, not 14 — a question someone could answer in a minute going unanswered for a week is a worse signal than a labeling batch taking three weeks). Report anything `overdue`, or `stale` (open ≥ 14 days). Skip silently when there are none, and when the project has no `handoffs/` at all.
+   - This is the only one of the three that gets *worse* by being missed. A stalled run wastes a GPU; a batch nobody chased is three weeks of calendar time that never comes back, and by construction there is no process to notice — the work is happening on somebody else's desk.
+   - Report and offer to draft a chase message. Never send anything to an external party unprompted.
+
+4. **Check how stale the data picture is**: `python lifecycle/scripts/data-check/census.py status --project {PROJECT}`. Records only — this verb never touches the network, which is what makes it safe here. Skip silently when the project has no `datasets/`.
+   - Report the census **age** and any standing `unarchived` / `unreplicated` / `incomplete` counts, then offer to re-scan. Do not re-scan unprompted: `scan` goes out and asks every machine, and four ssh timeouts before the user's first sentence is not a greeting.
+   - **State the age before quoting any count.** A three-week-old census is a description of a disk that has since been written to, rolled, and possibly filled — quoting its numbers as current is the same error as reading a stale metric off an old run.
+   - `unarchived` is the entry that gets worse by being missed, and worse than a stalled handoff: a capture machine reclaiming space to keep shooting cannot know whether the day it is about to delete was ever copied off. Nothing on that machine can compute it. This check is the only thing standing there.
+   - **In the same pass, if `{PROJECT}/discovery/` exists**: `discover.py report --project {PROJECT}` (records only, no network). Report `unprobed_leads` and anything `unreachable` — **not the findings.** `/data-discover`'s entire premise is that access arrives weeks after responsibility does, and that only helps if something re-opens the file. Without this line `leads.json` becomes the Confluence page it was written to replace: accurate the day it was made, never looked at again. A lead that has been `unreachable` for three weeks usually means a credential arrived and nobody re-probed — offer that, don't do it unprompted.
+
+Steps 1, 3 and 4 all scan the project; do them in one pass. `lease.py reap` belongs here as a fifth (cloud-side orphan check, gated on a provider being registered) and is **still not wired** — see `/lease` "The human's window".
 
 ---
 
@@ -223,6 +145,8 @@ Scripts are an optimization, not a dependency.
 **The fallback rule has one exception, and it is the important one.** A script that *refuses* is not a script that *failed*. When `code_snapshot.py` refuses a non-git tree, `retention.py` refuses a plan because a deletion target has no metric, or `reconcile_metrics.py` returns `fail` because the declared metric is absent from the stream — that is the answer, arrived at correctly. Redoing the work by hand there means overriding a safety check, which is the opposite of a fallback. Distinguish the two by exit code: **2 = the script broke, fall back and do it manually; 1 = the script worked and the answer is no.**
 
 ### Contracts
+
+**What is enforced**: the record layer only — `lifecycle/references/run-mechanics.md` "Record integrity". Everything else in this file is a contract nothing checks; when you touch one of those, you are the check.
 
 `contracts/` holds the executable form of the contracts stated in this file. Not unit tests — the distinction is load-bearing, so keep the vocabulary:
 

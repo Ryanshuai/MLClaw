@@ -37,7 +37,10 @@ DOC_FILES = {
     "CLAUDE.md": CLAUDE_MD,
     "run-mechanics.md": os.path.join(REPO_ROOT, "lifecycle", "references", "run-mechanics.md"),
     "layout.md": os.path.join(REPO_ROOT, "lifecycle", "references", "layout.md"),
+    "skill-graph.md": os.path.join(REPO_ROOT, "lifecycle", "references", "skill-graph.md"),
+    "data-line.md": os.path.join(REPO_ROOT, "lifecycle", "references", "data-line.md"),
 }
+LAYOUT_MD = DOC_FILES["layout.md"]
 CONTRACTS_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
@@ -75,11 +78,78 @@ def claude_md_sections(text):
             for m in re.finditer(r"^(#{2,4}) (.+)$", text, re.M)}
 
 
+def repo_tree_block(text):
+    """The fenced tree under "### MLClaw repo" — the tool repo only. The workspace
+    and user-project trees further down layout.md describe someone else's disk."""
+    return text.split("### MLClaw repo", 1)[1].split("```")[1]
+
+
+def declared_dirs(block):
+    """-> repo-relative directories the tree names, including those implied by a
+    file entry (`skills/eval-run/SKILL.md` declares `.claude/skills/eval-run`) and
+    every ancestor (`.github/workflows/ci.yml` declares `.github` too)."""
+    dirs, parents = set(), {}
+    for line in block.splitlines():
+        entry = line.split("←")[0].rstrip()
+        name = entry.strip()
+        if not name:
+            continue
+        indent = len(entry) - len(entry.lstrip())
+        parents[indent] = name.rstrip("/")
+        chain = [parents[i] for i in sorted(parents) if i < indent] + [name.rstrip("/")]
+        path = "/".join(chain) if name.endswith("/") else os.path.dirname("/".join(chain))
+        while path:
+            dirs.add(path)
+            path = os.path.dirname(path)
+    return dirs
+
+
+def actual_dirs(root):
+    """Everything on disk except build junk. `.git` is excluded by name rather
+    than by a dotfile rule — `.claude` and `.github` are both real entries."""
+    junk = {".git", "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache",
+            ".venv", "node_modules", ".egg-info"}
+    found = set()
+    for dirpath, dirnames, _ in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d not in junk]
+        rel = os.path.relpath(dirpath, root).replace(os.sep, "/")
+        if rel != ".":
+            found.add(rel)
+    return found
+
+
+def owned_by_a_skill(path):
+    """Anything strictly below `.claude/skills/<name>/` is that skill's internal
+    structure. The tree declares the skill dir; SKILL.md routes a reader inside."""
+    parts = path.split("/")
+    return parts[:2] == [".claude", "skills"] and len(parts) > 3
+
+
 def citations_in(text):
     """-> [(doc, section)] cited by one file. `[^"\\n]` so the pattern cannot span
     lines and match the regex literal in this module's own source."""
     alt = "|".join(re.escape(d) for d in DOC_FILES)
     return re.findall(r'(%s) -> "([^"\n]+)"' % alt, text)
+
+
+def pointers_in(text):
+    """-> [(doc, quoted)] for the ARROW-LESS form: `CLAUDE.md "Script Integration"`.
+
+    Skills overwhelmingly write it this way (`Per CLAUDE.md "Workflow State
+    Protocol", push on entry`), and for a long time nothing checked it. Moving
+    five sections into `skill-graph.md` left **twenty-six** skills pointing at
+    headings CLAUDE.md no longer had, and the suite stayed green: `citations_in`
+    only matches the ` -> ` form, which is a convention of `contracts/` and not
+    of the skills.
+
+    The quoted string is not required to be a heading here. Skills legitimately
+    quote a single bullet — "Never record a metric you did not read" is a line in
+    "Never silently", not a section of its own — so what gets checked is that the
+    text still appears in that document at all, which is the property a reader
+    actually depends on.
+    """
+    alt = "|".join(re.escape(d) for d in DOC_FILES)
+    return re.findall(r'(%s)\s*"([^"\n]{3,70})"' % alt, text)
 
 
 def citations():
@@ -137,6 +207,34 @@ class ReadmeStatusMatchesDisk(unittest.TestCase):
                          "README marks these unbuilt but they exist on disk")
 
 
+class LayoutTreeMatchesDisk(unittest.TestCase):
+    """layout.md -> "File Layout": the tree is the map an agent reads instead of
+    running `ls`, which is why a stale branch does not self-correct — whoever
+    trusts it never looks. Three drifts were sitting in it at once: the six
+    scripts under `scripts/infer-run/` had moved wholesale into `shared/` and
+    the old path was still the one written down, the entire `lifecycle/training/`
+    template dir was absent, and the root entry called CLAUDE.md "this file".
+
+    Directory granularity, deliberately. Per-file alignment would turn every new
+    script into a CI failure until the tree was edited, and a map maintained
+    under duress stops being read as a map. A directory that moved, vanished, or
+    appeared is the drift that actually sends a reader somewhere wrong.
+    """
+
+    def setUp(self):
+        declared = declared_dirs(repo_tree_block(read(LAYOUT_MD)))
+        self.declared = {d for d in declared if not owned_by_a_skill(d)}
+        self.actual = {d for d in actual_dirs(REPO_ROOT) if not owned_by_a_skill(d)}
+
+    def test_every_declared_directory_exists(self):
+        self.assertEqual(sorted(self.declared - self.actual), [],
+                         "layout.md's tree names directories that are not on disk")
+
+    def test_every_directory_on_disk_is_declared(self):
+        self.assertEqual(sorted(self.actual - self.declared), [],
+                         "these directories exist but layout.md's tree never names them")
+
+
 class CitationsResolve(unittest.TestCase):
     """CLAUDE.md -> "Contracts": every check cites the section it enforces, and
     the citation is the admission rule. A citation naming a heading that does not
@@ -192,6 +290,33 @@ class CitationsResolve(unittest.TestCase):
                     if sec not in self.sections.get(doc, {}):
                         dangling.append(f"{os.path.relpath(path, REPO_ROOT)}: {doc} -> {sec!r}")
         self.assertEqual(sorted(dangling), [], "references to sections that do not exist")
+
+    def test_an_arrowless_pointer_still_names_something_that_exists(self):
+        """`CLAUDE.md "Script Integration"` — the form skills actually use, and the
+        one that was invisible here. See `pointers_in`: the target need not be a
+        heading, but it has to still be in that file.
+        """
+        bodies = {doc: read(path) for doc, path in DOC_FILES.items()}
+        dangling = []
+        skip = (".git", "__pycache__", "node_modules")
+        for dp, dirs, fs in os.walk(REPO_ROOT):
+            dirs[:] = [d for d in dirs if d not in skip]
+            for f in fs:
+                if not f.endswith((".md", ".py", ".json", ".yml")):
+                    continue
+                path = os.path.join(dp, f)
+                if os.path.basename(path) == os.path.basename(__file__):
+                    continue  # this module quotes the form in order to describe it
+                try:
+                    text = read(path)
+                except (OSError, UnicodeDecodeError):
+                    continue
+                for doc, quoted in pointers_in(text):
+                    if quoted not in bodies.get(doc, ""):
+                        dangling.append(
+                            f"{os.path.relpath(path, REPO_ROOT)}: {doc} {quoted!r}")
+        self.assertEqual(sorted(set(dangling)), [],
+                         "pointers at text that is no longer in that document")
 
     def test_no_skill_hand_writes_a_run_tree_query(self):
         """run-mechanics.md -> "Listing runs (no separate index)": go through

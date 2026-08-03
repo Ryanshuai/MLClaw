@@ -29,7 +29,9 @@ The user brings training code (`train.py`, `pretrain.py`, `accelerate launch ...
 
 These files are **mostly schema** — WHAT the code needs and produces. Two deliberate exceptions, both specific to training:
 
-- **`candidates`** (in `input.json` / `artifacts.json`) — init locates the usable data and weights and describes how well each fits. Training data is a project-level asset that rarely changes, so finding it here is what makes "init is done" a real state rather than one that collapses the first time you try to launch. It also locks the dataset for `/train-tune`, whose whole comparability premise is that every trial saw the same data. `/infer-init` keeps the original rule, since inference inputs genuinely do change every run. `/eval-init` has the same case for candidates as training does (a fixed val set, a fixed checkpoint) and should follow — it just hasn't yet; training goes first so the shape can be validated on a real project before it's copied.
+- **`candidates`** (in `input.json` / `artifacts.json`) — init records which of the located data and weights actually fit, and how well. Training data is a project-level asset that rarely changes, so settling it here is what makes "init is done" a real state rather than one that collapses the first time you try to launch. It also locks the dataset for `/train-tune`, whose whole comparability premise is that every trial saw the same data. `/infer-init` keeps the original rule, since inference inputs genuinely do change every run — it calls `/data-discover` per run instead, if at all.
+
+  **`/eval-init` has the same case for candidates and reaches them differently**: the locating half is `/data-discover`, which it calls rather than growing a second copy of the sweep. What is genuinely eval-specific is the `match` judgment against its own `items` + ground-truth `pairing`.
 - **`preprocessing`** (in `input.json`) — the transform chain, read out of the code. It's a cross-stage contract, not a per-run choice.
 
 Which candidate a given run actually used stays per-run (the run's `sources.json` snapshot).
@@ -42,7 +44,7 @@ Ask one question at a time. Training has more knobs than infer/eval (lr, bs, epo
 
 ## On entry
 
-Follow the standard Workflow State Protocol from CLAUDE.md: push to stack, check dependencies (project.json exists, code available), locate project, resolve code directory.
+Follow `lifecycle/references/skill-graph.md` -> "Workflow State Protocol": push to stack, check dependencies (project.json exists, code available), locate project, resolve code directory.
 
 **Settle `provenance.json -> source_mode` first** — it decides whether the steps below ask or excavate. Infer a default and confirm in one line rather than asking cold:
 
@@ -53,6 +55,8 @@ Follow the standard Workflow State Protocol from CLAUDE.md: push to stack, check
 | local source, git authored by the user | `authored` |
 
 `authored` → the user knows the answers, so ask instead of inferring. `inherited` → dig (code, git history, tracking backend) and record evidence, because nobody can confirm it for you. `explored` → read the upstream output first; most of it is already structured.
+
+**You may have been called from the data line.** Both `/data-freeze` and `/data-check` suggest this skill, so the user may arrive having *just* frozen a snapshot — in which case that snapshot is the training input, and re-deriving it from directory listings in Step 1c throws away the one thing they came here having done. Look at `{PROJECT}/datasets/` before asking anyone where the data is; Step 0 has the row that does it.
 
 ## Output: 4 JSON files + provenance sidecar + recipe
 
@@ -71,9 +75,12 @@ For item/source schemas and type classification, read `references/schemas.md`. T
 
 Before analyzing anything, find out **what you can see** — the way a person taking over a project starts by checking which systems they have access to. Organize by source, not by element: each backend gets contacted once here, and every credential gap surfaces together rather than ambushing you at Step 4. Results → `provenance.json -> sources_checked`.
 
+**The data half of this sweep is not this skill's.** Finding out what data exists is `/data-discover`, and it is invoked here as a sub-skill (utility pattern, like `/resources`). Two reasons it does not live here: `/eval-init` and `/infer-init` need exactly the same excavation and would otherwise each grow their own copy; and a lead is *longer-lived than an init* — access arrives weeks later, and `discovery/leads.json` is what carries the unresolved ones forward, where a `provenance.json` written once does not. This sweep keeps the model-side sources: weights, params, tracking backend, compute, hazards.
+
 | Source | What to look for | How | Default? |
 |---|---|---|---|
 | **Code + git history** | the repo, `git log` (commit messages carry intent: `revert aug, hurts mAP 2pt`) | local | yes |
+| **This project's own data line** | frozen snapshots this training could cite; batches still out with somebody | `phase.py phase --project {PROJECT}` + `handoff.py status --project {PROJECT} --open-only` — **records only, no network** | yes |
 | **Local disk** | data, weights | `resources.json -> local.base_paths` | yes |
 | **Local tracking leftovers** | `wandb/`, `mlruns/`, `lightning_logs/` — past runs cached on disk, **no credentials needed** | `ls` in the repo | yes |
 | **GitHub** | repo reachable? issues / PRs / releases carrying context or weights | `gh` CLI | yes, cheap |
@@ -94,7 +101,7 @@ Record each source's `status` honestly — the difference decides whether an age
 
 - `reachable` — connected, content extracted
 - `needs_auth` — exists but credentials or authorization are missing. **A todo, not a dead end.** Name what's missing in `needs` and say where to fix it; never let this decay into `absent`, because "couldn't check" and "doesn't exist" are different facts and only the second one lets you stop wondering.
-- `absent` — confirmed not to exist (no wandb call anywhere in the code; the bucket 404s). **A conclusion — stop searching.**
+- `absent` — confirmed not to exist (no wandb call anywhere in the code; the bucket 404s; no `datasets/` in the project, so nothing here was ever censused). **A conclusion — stop searching.**
 - `skipped` — the user declined.
 
 Later steps consume this block instead of redoing the work: Step 1c reads the local/S3/server findings rather than re-scanning, and Steps 1d and 4d reuse the tracking connection rather than opening a second one.
@@ -143,27 +150,55 @@ If a value can't be determined, leave it empty rather than filling in the framew
 
 Fill `input.json -> candidates` and `artifacts.json -> candidates` — the list `/train-run` will pick from.
 
-**Reachability was already settled in Step 0 — don't re-ask and don't reconnect.** Read `provenance.json -> sources_checked`: a source marked `needs_auth` or `skipped` simply produces no candidates (note it, don't retry), and one marked `reachable` already has its listing. Two candidate sources are specific to this sub-step, because Step 0 doesn't go looking for them:
+**The data candidates are `/data-discover`'s output — read `discovery/leads.json`, don't re-excavate.** A `verified` lead becomes a candidate with `match: "ok"`; a `gone` one becomes `match: "absent"`; a lead that was never probed or came back `unreachable` becomes **`match: "unreachable"`**, which is the value that must not be skipped.
+
+**An unreachable source produces a candidate, not silence.** Dropping it yields an `input.json` in which that data does not appear at all, and every later reader concludes it does not exist — the claim is real, only the check is missing. Record it with its evidence and let `/train-run` refuse rather than guess.
+
+**Weight reachability was already settled in Step 0 — don't re-ask and don't reconnect.** Read `provenance.json -> sources_checked`. Two candidate sources are specific to this sub-step, because neither Step 0 nor `/data-discover` goes looking for them:
 
 | Source | Where from |
 |---|---|
 | `code_default` | config defaults, code constants, README example invocations |
 | `downloadable` | inferred from the dataset / model name in `items` — COCO, ImageNet, an HF hub id, a torchvision weights enum, the paper's release URL |
 
+**Two more locations come out of Step 0's data-line row, and the first of them outranks every path in the list.**
+
+`dataset:<id>@<snapshot>` **is a citation, not a path** — a frozen membership set rather than a directory as it is today, so **prefer it whenever it exists**. `path` stays empty and the entry carries a `resolve` block; `census.py resolve` turns that into openable paths **per run, into the run dir**, never into this config, because a resolved path embeds one machine's root and `input.json` outlives that machine. Fill `resolve.layers` from what the `Dataset` actually opens (1a/1b) and `resolve.at` from where training will run. The consuming run cites the snapshot in `lineage.parents`, which is the edge that makes data and models one graph. Full schema: `references/schemas.md` → `candidates`.
+
+Before writing one down as `match: "ok"`, gate it:
+
+```bash
+python lifecycle/scripts/data/phase.py gate --project {PROJECT} --dataset <id> --to consume
+```
+
+Exit 1 is the answer, not a broken script — pass it through. It catches two things invisible from the filesystem: `snapshot_stale` (frozen from a census predating accepted inflow — reads as current and is not) and `census_incomplete` (every count under it is a lower bound). Record such a snapshot as `mismatch` with the blocker verbatim in `notes` and route to `/data-freeze`. **Never `--acknowledge` here**: it would stamp a stale citation into a config permanently, and that is not this skill's call. `/train-run` gates again at launch; this pass exists so a broken citation never becomes an `ok`.
+
+`handoff:<handoff_id>` **is the one location nothing you can run will resolve** — every other resolves by doing something, this one by somebody else finishing. Hence **`pending` is not `absent`**: "the labels aren't here" and "the labels are with vendor-a, spec v3, due 2026-08-14" are different facts, and only the second tells the reader to wait instead of going hunting.
+
 **Always list the code-declared path, even when it doesn't exist here** (`match: "absent"`). It's the original author's layout — the reference for where your data should go and the yardstick for judging every other candidate. Absent is a conclusion, not a gap.
 
 What this sub-step contributes is the **match judgment**: compare each candidate against `items` + `pairing` and say *why* in `notes`. That comparison is the part that required reading the code, and it's what actually saves the user time:
 
 ```
-1. code_default  /data/coco2017          absent    original author's path; layout reference: images/ + annotations/instances_train2017.json
-2. local         ~/data/coco             ok        118k imgs, annotations consistent with pairing=coco_json
-3. server:4090   /data/coco2017          ok        sits on the 4090 box — prefer training there over pulling 19GB back
-4. local         ~/my_labels             mismatch  YOLO txt, code wants COCO json — needs conversion
+1. dataset:coco@0728                 —                ok        118k units frozen 2026-07-28 from census_20260728, 0 unverified;
+                                                                resolve --at nas --layer images,annotations
+2. code_default                      /data/coco2017   absent    original author's path; layout reference: images/ + annotations/instances_train2017.json
+3. local                             ~/data/coco      ok        same bytes as (1) — but a directory listing, not a pinned set
+4. server:4090                       /data/coco2017   ok        sits on the 4090 box — prefer training there over pulling 19GB back
+5. handoff:handoff_20260731_025626   —                pending   5000 extra imgs out with vendor-a, spec v3, due 2026-08-14
+6. local                             ~/my_labels      mismatch  YOLO txt, code wants COCO json — needs conversion
 ```
 
-`location` is not a label — it decides how `/train-run` proceeds: use directly, download first, **or run on that machine instead**. Surface that last case explicitly; data living on the GPU box is a reason to train there.
+Entry 3 is why the citation ranks first: it may well be the same files, but a directory can be written to between init and launch and a frozen set cannot.
 
-If no candidate has `match: "ok"`, say so plainly and stop before Step 7 rather than presenting a complete-looking config. Training can't start, and that's the finding.
+`location` is not a label — it decides how `/train-run` proceeds: use directly, download first, resolve a snapshot into the run dir, wait for somebody else, **or run on that machine instead**. Surface that last case explicitly; data living on the GPU box is a reason to train there.
+
+If no candidate has `match: "ok"`, stop before Step 7 rather than presenting a complete-looking config — and say *which* kind of no it is, because they don't route to the same place:
+
+| Best you have | What it means | What you do |
+|---|---|---|
+| `absent` / `mismatch` only | the data isn't here and nothing is bringing it | training can't start, and that's the finding. `/data-collect` if it sits on a machine you can reach; conversion if `mismatch` |
+| `pending` | it's with a named party, due on a date | **name the party and the date; do not go looking for a path.** `handoff.py status --project {PROJECT} --open-only`, report, stop. Falling through to "so where is your data?" is how a half-labeled directory gets picked instead |
 
 **Inherited checkpoints get an `origin` block.** When a weight file came from someone else (handover, paper release) rather than being a standard pretrained backbone, record what's known about it in `artifacts.json -> items.<name>.origin` — see `references/schemas.md` → "artifacts.json -> items.<name>.origin". Fill what you can automatically by querying the backend Step 0 reached for this checkpoint's own run (`config` and final `metrics` come for free); Step 4d later does the same at project scope for the whole history. Then ask the user only for what's missing — above all `why` (what experiment this was, why it was kept).
 
@@ -358,6 +393,7 @@ Confirm the schema is internally consistent:
 - no `param_injection.items` entry with `overridable: false` appears in `runtime_params` (**hard failure**, not a warning — this is the case that silently corrupts `/train-tune` conclusions)
 - every `param_injection.items` entry has non-empty `evidence`; `via: derived` entries also have `derived_from`
 - every `hazards` entry has non-empty `evidence` and an `impact`; every `blocks` entry has already been surfaced to the user (**hard failure** — a completed init that conceals a blocker is worse than an incomplete one)
+- every `dataset:` candidate marked `ok` has an empty `path`, a `resolve` block with all four keys non-empty, and passed `gate --to consume`; every `pending` candidate names a `handoff_id` that exists under `{PROJECT}/handoffs/` and is still open (**hard failure** on the `pending` half — a candidate pointing at a handoff that already closed is either an `ok` nobody promoted or a fiction, and both send `/train-run` to wait for something that already came back)
 - `provenance.json`: `source_mode` is set; every `unresolved` entry has a `key` resolving to a real path in one of the four files, an enumerated `status`, and a non-empty `why`; no `status: "guessed"` entry remains unreviewed after Step 7
 
 If any check fails, surface it to the user and ask to fix or override.

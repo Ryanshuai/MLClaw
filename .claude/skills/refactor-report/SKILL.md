@@ -9,7 +9,7 @@ Generate a self-contained HTML report documenting the entire refactoring process
 
 Ask one question at a time — multiple questions at once overwhelms users.
 
-Follow the Workflow State Protocol from CLAUDE.md: push on entry, update step as you progress, pop on completion.
+Follow `lifecycle/references/skill-graph.md` -> "Workflow State Protocol": push on entry, update step as you progress, pop on completion.
 
 **Requires**: at least one `{PROJECT}/stages/refactor/runs/*/run.json`. If none, offer `/refactor-run`.
 

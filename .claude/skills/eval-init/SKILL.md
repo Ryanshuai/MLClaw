@@ -24,18 +24,34 @@ Ask one question at a time. Users find it overwhelming when asked to fill multip
 
 ## On entry
 
-Follow the standard Workflow State Protocol from CLAUDE.md: push to stack, check dependencies (project.json exists, code available), locate project, resolve code directory. These are all documented in CLAUDE.md — follow them, don't duplicate them here.
+Follow `lifecycle/references/skill-graph.md` -> "Workflow State Protocol": push to stack, check dependencies (project.json exists, code available), locate project, resolve code directory. These are all documented in CLAUDE.md — follow them, don't duplicate them here.
 
 ## Output: 4 JSON files
 
 | File | What it captures |
 |------|-----------------|
 | `config.json` | Entry command, config format, framework, dataset info, managed params |
-| `artifacts.json` | Static inputs — model weights, evaluator configs (items only, no paths) |
-| `input.json` | Dynamic inputs — test data + ground truth annotations (items only) |
+| `artifacts.json` | Static inputs — model weights, evaluator configs + **`candidates`** (where each can actually be obtained) |
+| `input.json` | Dynamic inputs — test data + ground truth annotations + **`candidates`** |
 | `output.json` | What the code produces — metrics definitions and watch list |
 
 For item/source schemas and type classification rules, read `references/schemas.md`.
+
+**`candidates` here, not "schema only".** The rest of these files describe what the code needs; `candidates` records what is actually available and how well each option fits. Evaluation earns the exception for the same reason training does — a fixed val set and a fixed checkpoint are settled once, not per run — and for one reason training does not have, which is Step 1b's whole subject: in eval, **a candidate that holds fewer samples is not a smaller copy of the same thing, it is a different measurement.**
+
+## Step 0: Locate the checkpoint and the data
+
+**The data half is not this skill's job.** Invoke **`/data-discover`** as a sub-skill (utility pattern, like `/resources`) and read `discovery/leads.json`. Do not grow a sweep here: `/train-init` has one, this skill would have made two, and two implementations of "where is the data" is how they start disagreeing. A lead also outlives an init — access arrives weeks after a handover, and the leads file carries the unresolved ones forward where these four JSON files cannot.
+
+What this skill *does* look for itself, because `/data-discover` has no reason to:
+
+| Source | What to look for | How |
+|---|---|---|
+| **This project's own training runs** | checkpoints this eval exists to measure | `list_runs.py --stage training --mode production`, then `output/` per run |
+| **This project's data line** | a frozen val snapshot; batches still out | `phase.py phase --project {PROJECT}` — records only, no network |
+| **Registry** | released weights | `resources.json -> registry` |
+
+**The first row is the one that matters, and it is unique to evaluation.** A checkpoint from `stages/training/runs/<run_id>/output/` is not a file somebody put on a disk — it is the output of a run whose `run.json` records the data it trained on, its env, and its own metrics. Cite it as `run:training/<run_id>` and the eval becomes an edge in the lineage graph rather than a number about an anonymous `.pt`. **Only `mode: "production"` runs qualify** — the same rule Step 4's baseline already enforces, for the same reason.
 
 ## Step 1: Analyze Code
 
@@ -54,9 +70,60 @@ Determine:
 - **Ground truth** → annotation/label data, with pairing mode
 - **Outputs** → result files, visualizations
 - **Metrics** → numerical values the code reports, with extraction patterns
+- **Per-sample records** → the one-record-per-sample file, if the code writes one → `output.json → per_sample`. See Step 1c
 - **Required packages**: run `python lifecycle/scripts/infer-init/scan_requirements.py <code_dir>`. If it fails, check requirements.txt manually.
 
 For metrics: after identifying them, ask the user which ones to track across runs. Their selection goes into `output.json → metrics.watch`. If the code produces per-class breakdowns, set `output.json → metrics.per_class` to `true` (confirm with user).
+
+## Step 1b: Candidates, and the match judgment
+
+Fill `input.json -> candidates` and `artifacts.json -> candidates` — the list `/eval-run` picks from. **The schema is `/train-init` `references/schemas.md` → `candidates`; read it there.** Two deltas are documented in this skill's `references/schemas.md`, and nothing else is repeated — a second copy of that table is a copy that drifts, which is the whole reason the sweep moved to `/data-discover` in the first place.
+
+Translate leads mechanically, then judge:
+
+| lead status | `match` |
+|---|---|
+| `verified` | `ok` — *unless* one of the two gates below fires |
+| `gone` | `absent` — looked, not there. A conclusion |
+| `unreachable`, or never probed | **`unreachable`** — carry the `evidence` across, never drop the candidate |
+
+**An unreachable source produces a candidate, not silence.** A bucket you have no key for must still appear, or `input.json` reads as proof the data does not exist. Let `/eval-run` refuse rather than guess.
+
+### The two gates that are specific to evaluation
+
+**1. Sample count is part of the metric, not a property of the copy.** Record `samples` on every candidate and compare it against `config.json -> dataset.num_samples`. A count that differs is **`mismatch`**, not `ok`, however healthy the files look.
+
+This is the gate training does not need. Train on a subset and the damage shows up in the metrics; *evaluate* on a subset and the metric is simply a different number wearing the same name — mAP on 500 images against a paper's 5000-image baseline yields a delta made of sampling noise, and nothing anywhere errors. Step 4 already refuses an unqualified baseline for exactly this reason; this is the same rule one file earlier, where it can still be prevented instead of caveated.
+
+`dataset:<id>@<snapshot>` is therefore worth more here than in training: it pins the count against a dated census, so "the val set" stops being whatever is in a directory today.
+
+**2. Ground truth has to pair, or the candidate is not a candidate.** Images present with annotations missing is `mismatch`, not `ok`. Check the winning candidate against `pairing` before writing `ok` — a val directory that satisfies `items` and fails `ground_truth.items` produces a run that starts, loads, and reports nothing.
+
+Before writing a `dataset:` candidate as `ok`, gate it:
+
+```bash
+python lifecycle/scripts/data/phase.py gate --project {PROJECT} --dataset <id> --to consume
+```
+
+Exit 1 is the answer, not a broken script (CLAUDE.md → "Script Integration", the fallback-rule exception). Record the blocker verbatim in `notes`, mark the candidate `mismatch`, and route to `/data-freeze`.
+
+**Always list the code-declared path**, even absent — it is the layout reference and the yardstick for every other candidate.
+
+If nothing reaches `ok`, stop before Step 4 rather than presenting a complete-looking config, and say which kind of no it is: `absent`/`mismatch` → `/data-collect` or a conversion; `pending` → name the party and the due date and **stop**, don't fall through to asking for a path; `unreachable` → `/resources`.
+
+## Step 1c: Per-sample records — the file nobody used to ask about
+
+Fill `output.json -> per_sample`. **Aggregate metrics say the model got worse; only per-sample records say where**, and until this block exists `/eval-triage` has nothing to rank — it refuses rather than inventing a pile.
+
+Most eval code already writes one and nothing in MLClaw ever asked, so it goes unrecorded: a `--save-json` results file, a per-image detections dump, a predictions csv, a `results.pkl`. Look for a write inside the per-batch loop, an accumulating list dumped after it, or a `--save-*` flag. Record `evidence` as `path:line` — the same standard as `param_injection`, and for the same reason: until it points at a line, this block is a claim about somebody else's code.
+
+Three fields carry the weight, and each has a failure that looks like success:
+
+- **`score.direction`** — REQUIRED, never inferred from the field name. Rank the wrong end and the pile is the model's *best* predictions, reviewed as if they were its worst. Nothing errors and the review reads normally.
+- **`unit_key` + `resolves_to`** — a finding has to be addressable by whoever will act on it. If the eval writes `image_id: 12345` while the dataset's units are `site_a/20260731/frame_0012`, the finding names something no manifest can look up and no annotator can be sent. Work out the mapping now, while the code is open in front of you; `resolves_to: null` is honest and makes `/eval-triage route` refuse, which is the correct outcome of not knowing.
+- **`fields`** — what a reviewer needs to judge *without re-running anything*. Prediction, ground truth, class, and any rendered overlay the code already writes. This is what decides whether triage is a look at 40 images or 40 re-runs.
+
+`per_sample: null` is a legitimate answer — say so plainly and tell the user what it costs (no bad-case triage until the eval code writes one), rather than half-filling the block.
 
 ## Step 2: Discover Real Config
 
@@ -130,8 +197,23 @@ Exit codes, per CLAUDE.md "Script Integration": `1` means the script worked and 
 - config_path file exists (if specified)
 - dataset.name is filled (warn if empty — it helps when comparing runs later)
 
+Candidate checks, added with Step 1b. The first is a **hard failure**, not a warning:
+
+- **every candidate marked `ok` has a `samples` count equal to `config.json -> dataset.num_samples`.** A subset recorded as `ok` is the failure this whole stage's numbers rest on: the run completes, the metric is real, and it answers a different question than the baseline it will be diffed against. Mark it `mismatch` and say the count in `notes`.
+- every `ok` candidate's ground truth pairs — `items` satisfied and `ground_truth.items` satisfied, per `pairing`
+- every `run:` candidate names a run that exists under `stages/<stage>/runs/` with `mode: "production"` (**hard failure** — a debug checkpoint's number is comparable to nothing)
+- every `dataset:` candidate marked `ok` has an empty `path`, a complete `resolve` block, and passed `gate --to consume`
+- every `pending` candidate names a handoff under `{PROJECT}/handoffs/` that is **still open** (hard failure otherwise — it is either an `ok` nobody promoted or a fiction, and both send `/eval-run` to wait for something that already came back)
+- at least one candidate per item is `ok`, or Step 1b already stopped and said which kind of no it was
+
+Per-sample checks, added with Step 1c. All are warnings, not failures — an eval with no per-sample file is a working eval:
+
+- if `per_sample.path` is set, `score.field` and `score.direction` are both non-null. A declared file with no stated bad end is worse than no file: `/eval-triage` would have to guess which way to sort, and guessing wrong yields a pile of the model's best predictions reviewed as its worst
+- if `per_sample.path` is set, `unit_key` is non-null, and `resolves_to` is either set or explicitly recorded as unknown in `evidence`. Silence here becomes an unroutable finding weeks later
+- `per_sample.evidence` names a real `path:line` in the code dir
+
 Don't save if there are broken references — the user needs to fix those first, otherwise `/eval-run` will fail downstream.
 
 ## Step 6: Save
 
-Write all 4 JSON files to `{project.root}/stages/evaluation/`. Create `stages/evaluation/assets/` if needed. Update workflow state per CLAUDE.md protocol. Offer `/eval-run` as next step.
+Write all 4 JSON files to `{project.root}/stages/evaluation/`. Create `stages/evaluation/assets/` if needed. Update workflow state per `lifecycle/references/skill-graph.md`. Offer `/eval-run` as next step.

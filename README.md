@@ -121,6 +121,38 @@ structurally can't.
 exact same metric, the session refuses to name a winner: status `no_signal`, no recipe, and
 a diagnosis pointing at the likeliest cause — a swept flag that never reached the code.
 
+## When Someone Else Has Your Data
+
+```
+You:     "These 5000 images need labeling. Send them out."
+
+MLClaw:   Frozen: 5000 items, sha256 each, spec v3 snapshotted, due 8/14, to vendor-a.
+          Manifest is the record — you move the bytes however you like.
+
+          ... 11 days later, new session, nothing else asked ...
+
+MLClaw:   One handoff is out: 5000 images to vendor-a, 11 days, due in 3.
+
+          ... they say it's done ...
+
+You:      "They say it's done. Pull it back."
+
+MLClaw:   sent 5000 · matched 4712 · missing 288 · unexpected 3 · coverage 0.9424
+          And 12 source images changed since you sent them — those labels point at
+          bytes that aren't on disk anymore.
+          Not accepted. Reject and rework the 288, or accept at 0.9424 explicitly?
+```
+
+"It's done" is a claim, not evidence. Every other MLClaw skill closes its own loop — it starts the
+process, watches it, reads the result. This is the one where somebody else closes it, so the
+manifest frozen at send time is the only authority there is; nothing can go ask the vendor what
+they actually did. Accepting is a separate step from reconciling, and accepting a partial batch
+means typing the coverage you're accepting.
+
+The reason it matters three months later: the accepted batch becomes `lineage.parents` on every
+run that trains on it, carrying its spec version and its 0.9424. Without that, *"why did the
+model get worse after we added the new data"* has no answer — with it, it's a DAG walk.
+
 **Where MLClaw is not the tool**: there is no live dashboard, nothing streams to a browser,
 and runs are a directory tree on your disk sized for one user and ≲10k runs per project.
 If you want a real-time UI or team-scale run storage, keep W&B or TensorBoard — MLClaw
@@ -174,10 +206,13 @@ claude
 - [x] Refactor — `/refactor-init`, `/refactor-run`, `/refactor-report`
 - [x] Skill dependency system (inter-skill graph + internal dependency chain + cross-session resume)
 - [x] Remote execution + path mapping
-- [ ] Run comparison (side-by-side metrics/params/env diff)
+- [ ] Run comparison — `/train-compare` (side-by-side metrics/params/env diff)
+- [ ] Drift — `/data-drift`. Only the comparison is missing; the online half that takes the reading already shipped (see the checked entry above)
+- [ ] Model identity — `models/<id>@<release>`, the primitive the next two need. Not a skill: data gets a citable frozen id and a deletion that respects citations, models get a file path and a `retention.py` that ranks by metric and does not know who cited them
+- [ ] Deployment (edge + cloud) — `/deploy-init` + `/deploy-run`. "Better", "approved" and "serving" are three records, and conflating the first with the last is how a leaderboard's winner is believed to be live while something else is
+- [ ] Model curate — export/quantization as a recorded derivation, whose one refusal is that an exported model never inherits the source model's metrics
 - [ ] Exploration (architecture search)
-- [ ] Data (quality checks + auto-format conversion)
-- [ ] Deployment (edge + cloud)
+- [ ] Data quality checks + auto-format conversion — the curate stage *records* a conversion and the census reads no file content; neither performs one
 
 ## License
 

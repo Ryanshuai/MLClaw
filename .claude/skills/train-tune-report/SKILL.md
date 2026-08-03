@@ -31,7 +31,7 @@ do reasoning, but humans read this to understand what happened.
 
 ## On entry
 
-Follow CLAUDE.md Workflow State Protocol. Stage = `training`. Upstream check:
+Follow `lifecycle/references/skill-graph.md` -> "Workflow State Protocol". Stage = `training`. Upstream check:
 at least one run with `lineage.session = <id>` must exist.
 
 ## Step 1: Resolve Session

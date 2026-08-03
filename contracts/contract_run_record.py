@@ -161,7 +161,7 @@ class Finalize(TempDirCase):
 
 
 class Template(unittest.TestCase):
-    """CLAUDE.md -> "Workflow State Protocol": resume reads `run.json -> steps` to
+    """skill-graph.md -> "Workflow State Protocol": resume reads `run.json -> steps` to
     skip completed steps, so a skill must write exactly the keys the template defines.
     A key the template lacks is never recognized as completed and the step re-runs
     forever — this is how `check_sources` vs `resolve_assets` went unnoticed.

@@ -25,7 +25,7 @@ Ask one question at a time. Users find it overwhelming when asked to fill multip
 
 ## On entry
 
-Follow the standard Workflow State Protocol from CLAUDE.md: push to stack, check dependencies (project.json exists, code available), locate project, resolve code directory. These are all documented in CLAUDE.md — follow them, don't duplicate them here.
+Follow `lifecycle/references/skill-graph.md` -> "Workflow State Protocol": push to stack, check dependencies (project.json exists, code available), locate project, resolve code directory. These are all documented in CLAUDE.md — follow them, don't duplicate them here.
 
 ## Output: 4 JSON files
 
@@ -37,6 +37,19 @@ Follow the standard Workflow State Protocol from CLAUDE.md: push to stack, check
 | `output.json` | What the code produces — result files, visualizations, metrics definitions |
 
 For item/source schemas and type classification rules, read `references/schemas.md`.
+
+## On finding the data
+
+**This skill has no `candidates` block, and that is deliberate.** `/train-init` and `/eval-init` both
+settle their data once because a training set and a val set are fixed assets; inference inputs
+genuinely change every run, so locating them at init would pin something that is meant to move.
+Concrete paths come from `/infer-run` Step 1.
+
+What that does *not* mean is that you are on your own when nobody knows where anything is. If the
+user cannot say what data exists — an inherited project, a wiki page nobody trusts — invoke
+**`/data-discover`** as a sub-skill and let `discovery/leads.json` hold the answer. It is a utility,
+callable from anywhere, and its leads outlive this init. Do not grow a source sweep here; there is
+one, and two would start disagreeing.
 
 ## Step 1: Analyze Code
 
@@ -116,4 +129,4 @@ Don't save if there are broken references — the user needs to fix those first,
 
 ## Step 6: Save
 
-Write all 4 JSON files to `{project.root}/stages/inference/`. Update workflow state per CLAUDE.md protocol. Offer `/infer-run` as next step.
+Write all 4 JSON files to `{project.root}/stages/inference/`. Update workflow state per `lifecycle/references/skill-graph.md`. Offer `/infer-run` as next step.

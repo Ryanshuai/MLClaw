@@ -9,7 +9,7 @@ One-time project setup. Creates directory structure, `project.json`, and stage c
 
 Ask one question at a time — multiple questions at once overwhelms users.
 
-Follow the Workflow State Protocol from CLAUDE.md: push on entry, update step as you progress, pop on completion.
+Follow `lifecycle/references/skill-graph.md` -> "Workflow State Protocol": push on entry, update step as you progress, pop on completion.
 
 ## Conversation flow
 

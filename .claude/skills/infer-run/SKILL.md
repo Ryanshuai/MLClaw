@@ -15,7 +15,7 @@ Execute an inference run: resolve sources, run the model, collect outputs.
 
 **One question at a time** — asking multiple questions at once is overwhelming. Ask one, record, ask next.
 
-**Workflow state, dependency checks, locate project, variable references** — follow CLAUDE.md (Workflow State Protocol, Skill Dependency Graph) and `lifecycle/references/layout.md` (Variable Reference Syntax). Stage = `inference`, upstream = `/infer-init` (check `config.json -> entry_command` non-empty).
+**Workflow state, dependency checks, locate project, variable references** — follow `lifecycle/references/skill-graph.md` (state protocol + the requires/suggests table) and `lifecycle/references/layout.md` (Variable Reference Syntax). Stage = `inference`, upstream = `/infer-init` (check `config.json -> entry_command` non-empty).
 
 ## Fork Check
 

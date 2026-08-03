@@ -14,7 +14,7 @@ description: >
 
 Execute one round of refactoring on `stages/refactor/code/`. Each invocation = one round.
 
-One question at a time. Push/pop `history.json` stack per Workflow State Protocol in CLAUDE.md.
+One question at a time. Push/pop `history.json` stack per "Workflow State Protocol" in `lifecycle/references/skill-graph.md`.
 
 **Requires**: `plan.json` exists with non-empty `modules` (otherwise offer `/refactor-init`). Credentials checked lazily.
 

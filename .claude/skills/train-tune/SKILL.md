@@ -38,7 +38,7 @@ When invoked again, route by `--session <id>` arg (or auto-detect latest):
 
 ## On entry
 
-Follow CLAUDE.md Workflow State Protocol. Stage = `training`. Upstream:
+Follow `lifecycle/references/skill-graph.md` -> "Workflow State Protocol". Stage = `training`. Upstream:
 - `/train-init` done (`stages/training/config.json -> entry_command` non-empty)
 - At least one prior `/train-run` completed (so we have a baseline configuration to fork from). If none, suggest user run a baseline first.
 

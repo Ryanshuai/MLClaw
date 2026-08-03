@@ -9,7 +9,7 @@ Clone a research code repository, analyze its structure, classify modules, extra
 
 Ask one question at a time — multiple questions at once overwhelms users.
 
-Follow the Workflow State Protocol from CLAUDE.md: push on entry, update step as you progress, pop on completion.
+Follow `lifecycle/references/skill-graph.md` -> "Workflow State Protocol": push on entry, update step as you progress, pop on completion.
 
 **Requires**: `project.json` exists (offer `/project-init` if not).
 

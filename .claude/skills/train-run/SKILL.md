@@ -16,7 +16,7 @@ Execute a training run: validate resources, resolve sources, launch in backgroun
 
 **One question at a time** — training has many knobs (lr, bs, epochs, seed, optimizer, scheduler, mixed precision, save policy …). Asking them all at once overwhelms; ask one, record, ask next.
 
-**Workflow state, dependency checks, locate project, variable references** — follow CLAUDE.md (Workflow State Protocol, Skill Dependency Graph) and `lifecycle/references/layout.md` (Variable Reference Syntax). Stage = `training`, upstream = `/train-init` (check `config.json -> entry_command` non-empty).
+**Workflow state, dependency checks, locate project, variable references** — follow `lifecycle/references/skill-graph.md` (state protocol + the requires/suggests table) and `lifecycle/references/layout.md` (Variable Reference Syntax). Stage = `training`, upstream = `/train-init` (check `config.json -> entry_command` non-empty).
 
 **Re-entry behavior** — when this skill is invoked again on an existing run, do NOT re-launch. Read `run.json -> status` and route:
 
@@ -62,7 +62,7 @@ For remote servers, query the server's `nvidia-smi` over SSH first; resolve via 
 
 Follow `lifecycle/references/run-mechanics.md` "Run Skill Internal Dependencies" — that section owns the cross-skill rules. The shared parts in plain words:
 
-1. **Resolve Assets** (step `resolve_assets`) — **pick from `candidates`; don't ask for paths.** `/train-init` Step 1c already located the options for every item in `artifacts.json` and `input.json` (plus `ground_truth` for both splits). Present each item's `match: "ok"` candidates and let the user choose; when there's exactly one, default to it and just confirm. Verify the chosen path still resolves — candidates are machine-specific and go stale after an rsync to a different host, so if they all dangle, re-run `/train-init` Step 1c here rather than falling back to interrogating the user path by path. Record the choice in the run's `sources.json`.
+1. **Resolve Assets** (step `resolve_assets`) — **pick from `candidates`; don't ask for paths.** `/train-init` Step 1c already located the options for every item in `artifacts.json` and `input.json` (plus `ground_truth` for both splits). Full rules: `lifecycle/references/run-mechanics.md` → "Asset resolution (Step 1 detail)" — read them there, not from a summary here. **Every `match` value routes somewhere and filtering to `ok` is a bug**: a `pending` candidate has a party and a due date, an `unreachable` one has a missing credential, and reporting either as "no options" conflates *not here* with *could not look*. Record the choice in the run's `sources.json`.
 
    The chosen `location` changes what happens next: `local` → use directly; `s3` / `downloadable` → fetch before launch and record where it landed; **`server:<key>` → this is the signal to run on that machine** instead of copying the data to this one. Raise that as an option rather than silently starting a 19GB transfer.
 
@@ -293,7 +293,7 @@ Then fill the rest by hand:
 
 ### 5e. Downstream suggestion
 
-Offer `/eval-run` (per Skill Dependency Graph) — pre-fill the new ckpt as the eval input artifact. If user accepts, invoke as sub-skill per Workflow State Protocol.
+Offer `/eval-run` (per `lifecycle/references/skill-graph.md` -> "Skill Dependency Graph") — pre-fill the new ckpt as the eval input artifact. If user accepts, invoke as sub-skill per Workflow State Protocol.
 
 For sweeps and continued chains: also surface "Fork to try a variant?" or "Continue training (more epochs)?" offers, depending on training trajectory. (`/train-compare`, when available, will be offered for comparing multiple completed runs.)
 

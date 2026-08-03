@@ -9,7 +9,7 @@ Search the local machine for credentials, models, and data in common default loc
 
 Ask one question at a time — multiple questions at once overwhelms users.
 
-Follow the Workflow State Protocol from CLAUDE.md: push on entry, update step as you progress, pop on completion.
+Follow `lifecycle/references/skill-graph.md` -> "Workflow State Protocol": push on entry, update step as you progress, pop on completion.
 
 ## Prerequisites
 
@@ -56,6 +56,31 @@ If none found, warn that `/refactor-init` needs mamba or conda.
 ### Data
 
 Common dirs: `~/data/`, `~/datasets/`, `D:\data\`, `D:\datasets\`, `{PROJECT}/stages/*/data/`.
+
+### Outsourcing parties
+
+The one category with **nothing to scan for** — an annotation vendor leaves no trace on the
+filesystem. It is here because `resources.json -> outsourcing` is where they belong, for the
+same reason `servers` is: a route to a capability the user doesn't own, registered once and reused
+by every batch, workspace-level because a vendor is not project-specific.
+
+So this category is asked, not discovered, and only ever on demand: `/data-label` sends the user here
+when they name a party for the second time. Never volunteer a "let's register your vendors" pass —
+there is no list to enumerate and the questions would be pure interrogation.
+
+Fields worth asking for, in this order: `name`, `kind` (annotation / data_owner / reviewer /
+customer), contact (person + one reachable channel — email or an IM handle is usually enough; do not
+collect a phone number just because the field exists), `channel` + `channel_ref` (how batches
+actually travel), `turnaround_days`, `spec_default`, `rate`. Only `name` is required; the rest earn
+their place by being reused.
+
+`turnaround_days` is the one that pays for itself immediately — it is what lets `/data-label` propose
+a real `--due` instead of asking the user to invent one.
+
+**This is personal data in the never-committed file.** That is deliberate and it is the reason
+handoff records store only the `outsourcing` key: `{PROJECT}/handoffs/` is git-tracked, so a contact
+copied into a handoff record is a contact committed to the project repo. Resolve contact details
+live when reporting; never write them into a project file.
 
 ## Flow
 
