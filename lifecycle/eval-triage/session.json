@@ -1,0 +1,43 @@
+{
+  "_comment": "One triage of one eval run's bad cases: what was ranked, who looked, what each case turned out to be, and where it was sent. Written by lifecycle/scripts/eval-triage/triage.py; this template documents the shape and is what a manual fallback must reproduce. Lives at {PROJECT}/stages/evaluation/runs/{run_id}/triage/{session_id}/session.json — under the run, because a bad case is a property of one model measured on one set, unlike a repro session which spans two stages. Like a handoff it has no `steps` block: the work is somebody looking at images, and there is no process MLClaw can step through.",
+
+  "session_id": "triage_{YYYYMMDD}_{HHmmss}",
+  "project": "",
+  "run": "evaluation/run_{YYYYMMDD}_{HHmmss}",
+  "opened_at": "",
+  "closed_at": null,
+
+  "_comment_status": "open | routed. A session with unreviewed cases stays OPEN — it is not stalled machinery, it is waiting on a person to look at images, and closing it would put an unreviewed pile on record as a triaged one.",
+  "status": "open",
+
+  "_comment_mode": "Copied from the run at rank time, not read live. A triage over a debug run is a triage of 20 images and its piles are not the project's bad cases; whoever reads these findings months later has no other way to see that.",
+  "mode": null,
+  "scope": {},
+
+  "_comment_ranked_by": "The per-sample field the pile was sorted on and which end meant bad, copied from output.json -> per_sample.score. Recorded because the declaration can change afterwards, and a pile sorted by the old field is not a pile sorted by the new one.",
+  "ranked_by": { "field": null, "direction": null, "worst_first": true },
+
+  "_comment_cited_snapshot": "The `datasets/<id>@<snapshot>` this eval run cited, whose manifest unit ids are what `resolution` was checked against. Null when the run cited none, which makes every case `unverifiable` rather than resolved.",
+  "cited_snapshot": null,
+  "unit_resolution": "",
+
+  "_comment_population": "records_in_file / ranked / unscorable. The third is the honest one: records the score could not be read from are counted, never dropped silently, because a systematic parse failure on one class looks exactly like that class having no bad cases.",
+  "population": { "records_in_file": 0, "ranked": 0, "unscorable": 0 },
+
+  "_comment_the_ranking_is": "Stated in the record and not just in the docs, because a pile of worst-scoring samples reads as a list of hard examples and is not one: a wrong label is a target the model cannot satisfy, so mislabeled samples sit at the top of a loss ranking permanently. Reflowing the pile unreviewed adds more of the noise that produced it.",
+  "the_ranking_is": "",
+
+  "_comment_lower_bound": "Always true. The ranking covers the eval set only, and `limit` cut it further.",
+  "lower_bound": true,
+
+  "_comment_blind_to": "Distribution shift. The eval set was cut from the training distribution, so no sample from an uncovered region can appear in this ranking however deep it goes — that is /data-drift's, and the two skills are complements: neither can serve as the other's alarm.",
+  "blind_to": "",
+
+  "_comment_cases": "One entry per ranked candidate. Entry: {rank, unit, resolved_unit, resolution, score, fields{}, judgments[], verdict, provenance, caveats[]}.\n\n`unit` is the sample id exactly as the eval code wrote it; `resolved_unit` is the dataset unit id it maps to. `resolution` is resolved | unresolved | unverifiable — the third means no snapshot was cited so nothing could confirm the mapping either way, and it must not read as resolved: an unroutable finding caught at routing time is recoverable, one caught by a vendor who received ids that mean nothing on their side is not.\n\n`verdict` is label_wrong | sample_hard | model_wrong | unclear, and each has a different owner. `provenance` is unreviewed | claim | verified | disputed and is DERIVED by triage.py from the judgements — never passed in, because a verb that accepted `--verified` would let one look assert two.",
+  "cases": [],
+
+  "_comment_judgments": "Inside each case: {verdict, by, basis, at, confirming?}. `by` is agent | human | gold. `verified` requires two judgements from two DIFFERENT KINDS agreeing — two agent passes over the same image are one source sampled twice, and their agreement measures the model's consistency rather than the label, so they stay a `claim` and say so in `caveats`. Overruled judgements are kept, not resolved away: whether the agent can be trusted on this dataset is answerable only from how often a person overruled it.",
+
+  "_comment_routed": "Filled by `route`. Three piles with three owners — label_wrong to /data-label as a rework round, sample_hard to the data line as a genuine data request, model_wrong to param_injection and the training config where it never leaves the model line — plus `not_hard_examples`, which names the label_wrong units explicitly so that whoever comes looking for data to add can see which list is not it.",
+  "routed": null
+}

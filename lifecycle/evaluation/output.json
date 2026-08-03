@@ -1,13 +1,36 @@
 {
-  "_comment": "Evaluation outputs \u2014 primarily metrics.",
+  "_comment": "Evaluation outputs — metrics, plus the per-sample records without which no bad case can be named.",
   "items": {},
   "metrics": {
     "_comment": "Metrics to track. Discovered from code by /eval-init, confirmed by user.",
-    "_comment_definitions": "Per-metric shape: unit, description, direction (max|min), source (stdout|file), plus pattern for stdout or path+key for file. `direction` is REQUIRED for any metric that will be compared against a baseline \u2014 compare_baseline.py reads it and reports `unknown_direction` rather than guessing from the name, because whether a drop is an improvement is not decidable from the word `loss` appearing in a metric someone called `focal_loss_weight`. Aliases (maximize / lower_is_better / \u2026) normalize via shared/compare.py.",
+    "_comment_definitions": "Per-metric shape: unit, description, direction (max|min), source (stdout|file), plus pattern for stdout or path+key for file. `direction` is REQUIRED for any metric that will be compared against a baseline — compare_baseline.py reads it and reports `unknown_direction` rather than guessing from the name, because whether a drop is an improvement is not decidable from the word `loss` appearing in a metric someone called `focal_loss_weight`. Aliases (maximize / lower_is_better / …) normalize via shared/compare.py.",
     "definitions": {},
     "watch": [],
     "per_class": false,
-    "_comment_baseline": "Reference for comparison. Either a run ID string (which must point at a mode:\"production\" run) or an object {source, scope, metrics}. `scope` is REQUIRED \u2014 it records what the numbers were measured on (dataset + split + sample count). /eval-run refuses to compute deltas when this run's scope differs from the baseline's, so a baseline stored without scope makes every delta against it unverifiable.",
+    "_comment_baseline": "Reference for comparison. Either a run ID string (which must point at a mode:\"production\" run) or an object {source, scope, metrics}. `scope` is REQUIRED — it records what the numbers were measured on (dataset + split + sample count). /eval-run refuses to compute deltas when this run's scope differs from the baseline's, so a baseline stored without scope makes every delta against it unverifiable.",
     "baseline": null
+  },
+
+  "_comment_per_sample": "Where the eval code writes ONE RECORD PER SAMPLE, and how to read it. Aggregate metrics say a model is worse; only these say where. Left null when the code writes none — that is a legitimate and common answer, and it means /eval-triage refuses rather than ranking something it invented. Discovered by /eval-init Step 1c: most eval scripts already write this (a per-image detections dump, a predictions csv, a `--save-json` result file) and nothing in MLClaw used to ask, so it went unrecorded.",
+  "per_sample": {
+    "_comment_path": "Path to the per-sample file, relative to the run's output/ dir, as the code writes it. Null means the code produces none.",
+    "path": null,
+
+    "_comment_format": "jsonl | json | csv. For `json`, `records_at` names the key holding the array (e.g. `results`); a bare array is `records_at: null`.",
+    "format": null,
+    "records_at": null,
+
+    "_comment_unit_key": "The field naming which sample a record is about, and THE FIELD THAT DECIDES whether triage can route anything. A finding has to be addressable by the party that will act on it: if the eval writes `image_id: 12345` while the dataset's units are `site_a/20260731/frame_0012`, the finding names something no manifest can look up and no annotator can be sent. `resolves_to` says how to get from one to the other — `unit_id` when the field already IS the dataset's unit id, `basename` when it is the filename of a unit's file, `null` when nobody has worked it out yet. triage.py marks unresolved cases and route refuses them.",
+    "unit_key": null,
+    "resolves_to": null,
+
+    "_comment_score": "The per-sample number bad cases get ranked by, with the end that means BAD stated outright. `direction: min` means low is bad (IoU, confidence, per-sample AP); `max` means high is bad (loss, error, distance). REQUIRED and never inferred from the field name — the same rule metrics.definitions.direction follows, and here it is worse to guess: rank the wrong end and the pile is the model's best predictions, reviewed as if they were its worst.",
+    "score": { "field": null, "direction": null },
+
+    "_comment_fields": "Other per-sample fields worth carrying into a triage record so a reviewer can judge without re-running anything — prediction, ground truth, class, a rendered overlay path. Names as the code writes them.",
+    "fields": [],
+
+    "_comment_evidence": "path:line in the eval code where this file gets written. Same standard as param_injection.items[].evidence: the schema is a claim about somebody else's code until it points at the line.",
+    "evidence": null
   }
 }

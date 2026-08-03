@@ -74,6 +74,7 @@ README.md                           ← what MLClaw is, and which stages are bui
     eval-init/SKILL.md              ← /eval-init
     eval-run/SKILL.md               ← /eval-run
     eval-report/SKILL.md            ← /eval-report
+    eval-triage/SKILL.md            ← /eval-triage (+ references/verdicts.md)
     train-init/SKILL.md             ← /train-init
     train-run/SKILL.md              ← /train-run
     train-tune/SKILL.md             ← /train-tune
@@ -134,6 +135,8 @@ lifecycle/
       validate_ground_truth.py      ← validate GT config consistency
     eval-run/
       compare_baseline.py           ← compare metrics against baseline
+    eval-triage/
+      triage.py                     ← rank/judge/confirm/route; label_wrong never becomes a hard example
     train-run/
       ingest.py                     ← source → records → stream.jsonl + tb/; all adapters
       _stream.py                    ← shared stream reader; infers the record-type key
@@ -207,6 +210,8 @@ lifecycle/
     handoff.json                    ← one exchange: frozen manifest ref, spec, rounds, coverage
   repro/                            ← reproduction-session template (project-level, not a stage)
     session.json                    ← target run, five-axis audit, band, trials, attribution
+  eval-triage/                      ← bad-case triage template (hangs off one eval run)
+    session.json                    ← ranked units, per-unit verdict + provenance, routed piles
   data/                             ← data-stage record templates (project-level, not a stage)
     dataset.json                    ← identity glob, layers + kind, locations + role, completeness
     rig.json                        ← the rig's facts, each with evidence and a breaks/shifts class
