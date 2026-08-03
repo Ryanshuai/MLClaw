@@ -210,6 +210,8 @@ claude
 - [x] Data ingest — `/data-collect` (pull from a named resource, record what arrived; optional rig-provenance stamp with tripwires on hardware that changes silently)
 - [x] Data census — `/data-check` (where every unit is across machines, what layers it carries, what claims it finished; citable snapshots for lineage, resolved into openable paths for the training side)
 - [x] Data freeze — `/data-freeze` (pin membership as `datasets/<id>@<snapshot>`, the citation the model lifecycle records; refuses a partial census, unverified-complete units, a reused id)
+- [x] Data curate — `/data-curate` (derive a dataset and record what it was made of, checked against the run's own lineage; refuses an output root inside its own input)
+- [x] Data retire — `/data-retire` (rank by what survives the deletion, exclude cited/unreplicated/unarchived units, `plan → apply`, and a log that outlives what it deleted)
 - [x] Data lifecycle routing — `/data` (phase across Collect/Label/Curate/Freeze, snapshot staleness against accepted inflow, transition gates)
 - [x] Data board — `/data-report` (every dataset on the line in one self-contained HTML page)
 - [x] Skill dependency system (inter-skill graph + internal dependency chain + cross-session resume)

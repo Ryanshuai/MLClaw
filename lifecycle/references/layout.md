@@ -90,6 +90,8 @@ README.md                           ← what MLClaw is, and which stages are bui
     data-report/SKILL.md            ← /data-report
     data-check/SKILL.md             ← /data-check
     data-freeze/SKILL.md            ← /data-freeze
+    data-curate/SKILL.md            ← /data-curate
+    data-retire/SKILL.md            ← /data-retire
     data-discover/SKILL.md          ← /data-discover
   settings.json
 contracts/                          ← executable form of this file's contracts; stdlib only
@@ -149,6 +151,10 @@ lifecycle/
       rig.py                        ← optional provenance: rig facts + silent-change tripwires
     data-check/
       census.py                     ← scan / show / snapshot / resolve / status; three states, never two
+    data-curate/
+      curate.py                     ← plan / register / trace; derived_from, checked against the run
+    data-retire/
+      retire.py                     ← plan / apply / log; the only delete on the data line
     data-discover/
       discover.py                   ← sources / record / probe / report; `gone` ≠ `unreachable`
     data-report/
