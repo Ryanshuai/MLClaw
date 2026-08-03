@@ -105,6 +105,7 @@ what, what is deliberately *not* a phase (Archive, Train), and how `/data` compo
 | `/data-report` | The whole line as one self-contained HTML board, Airflow-grid shaped: datasets × censuses, each column that census **replayed**. Computes nothing; no auto-refresh on purpose |
 | `/data-retire` | Delete data against evidence, and leave a record that outlives it. `plan` ranks by what would **survive**; `apply` deletes only paths a census listing enumerated. The only delete on the data line |
 | `/data` | Where a dataset sits on the line, what blocks it, what is next — a join across census + handoffs + snapshots + runs that no single skill can perform. Refuses transitions whose preconditions fail |
+| `/repro` | Can a past run still be reproduced, and when its number moves, which axis moved it. Five axes of rot → `intact` / `drifted` / `gone` / `unverifiable`, then a loop judging each re-measurement against a band this pipeline measured **on itself**. Executes nothing itself |
 | `/refactor-init` | Clone research repo, analyze codebase, classify modules (core/support/dead), extract paper benchmark targets |
 | `/refactor-run` | Execute one refactoring round: make changes → run benchmark → compare with paper → commit or revert |
 | `/refactor-report` | Generate refactoring audit report: round changelog, rollback points, verification results, reproduction instructions |

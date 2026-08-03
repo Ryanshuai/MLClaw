@@ -94,6 +94,7 @@ README.md                           ← what MLClaw is, and which stages are bui
     data-curate/SKILL.md            ← /data-curate
     data-retire/SKILL.md            ← /data-retire
     data-discover/SKILL.md          ← /data-discover
+    repro/SKILL.md                  ← /repro (+ references/axes.md, verdicts.md)
   settings.json
 contracts/                          ← executable form of this file's contracts; stdlib only
   helpers.py                        ← temp dirs, real git repos, script loading by path
@@ -160,6 +161,8 @@ lifecycle/
       retire.py                     ← plan / apply / log; the only delete on the data line
     data-discover/
       discover.py                   ← sources / record / probe / report; `gone` ≠ `unreachable`
+    repro/
+      repro.py                      ← check/open/trial/band/attribute/close; five axes of rot
     data-report/
       board.py                      ← the whole line as one self-contained HTML page
     data/
@@ -202,6 +205,8 @@ lifecycle/
     ask.json                        ← the answer's `kind` is the load-bearing field, not its text
   data-label/                       ← exchange record template (project-level, not a stage)
     handoff.json                    ← one exchange: frozen manifest ref, spec, rounds, coverage
+  repro/                            ← reproduction-session template (project-level, not a stage)
+    session.json                    ← target run, five-axis audit, band, trials, attribution
   data/                             ← data-stage record templates (project-level, not a stage)
     dataset.json                    ← identity glob, layers + kind, locations + role, completeness
     rig.json                        ← the rig's facts, each with evidence and a breaks/shifts class

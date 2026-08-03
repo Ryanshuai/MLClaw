@@ -139,6 +139,8 @@
     "variation_summary": null,
     "_comment_session": "Optional. Set by /train-tune when this run is part of an adaptive HPO session. Format: '<YYYYMMDD>_<HHMMSS>_<slug>', matches the session directory name under stages/training/tune_sessions/. Null for ad-hoc runs (manual /train-run invocations not part of any tune session).",
     "session": null,
+    "_comment_repro_of": "Optional. Set by /repro on a trial run: '<stage>/<run_id>' of the run this one is attempting to reproduce. Deliberately NOT `fork_of` — a fork intends to differ and carries a `variation_summary` of what it changed, whereas a repro trial intends to be identical and its empty diff is the whole point. Conflating them would make every reproduction read as an experiment. Also not a `parents` edge: a trial consumes no artifact of the target, it re-measures the same quantity. Null on every ordinary run.",
+    "repro_of": null,
     "local_tags": [],
     "pipeline_tags": []
   },

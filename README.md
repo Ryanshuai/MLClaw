@@ -214,6 +214,7 @@ claude
 - [x] Data retire — `/data-retire` (rank by what survives the deletion, exclude cited/unreplicated/unarchived units, `plan → apply`, and a log that outlives what it deleted)
 - [x] Data lifecycle routing — `/data` (phase across Collect/Label/Curate/Freeze, snapshot staleness against accepted inflow, transition gates)
 - [x] Data board — `/data-report` (every dataset on the line in one self-contained HTML page)
+- [x] Reproduction — `/repro` (five axes of rot audited per run; a noise band measured on the pipeline instead of a guessed tolerance; a frozen probe set through both artifacts, because two runs can share a metric and not a prediction; one axis pinned per iteration until the divergence is attributed)
 - [x] Online sampling — `/data-online-sample` (a dated, uniform reading of the live input stream, so what production sees can be compared against the snapshot a model trained on. Records the denominator when something can count it and says every rate is a lower bound when nothing can)
 - [x] Skill dependency system (inter-skill graph + internal dependency chain + cross-session resume)
 - [x] Remote execution + path mapping

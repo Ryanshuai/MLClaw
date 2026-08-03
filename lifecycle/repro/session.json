@@ -1,0 +1,56 @@
+{
+  "_comment": "One attempt to reproduce one run's number, and everything the verdict rests on. Written by lifecycle/scripts/repro/repro.py; this template documents the shape and is what a manual fallback must reproduce. Lives at {PROJECT}/repro/{session_id}/session.json — project-level rather than under a stage, because a session routinely spans two: reproducing a TRAINING number is normally done by re-running EVAL against the surviving checkpoint, so its trials are eval runs and its target is a training run. Like a handoff it has no `steps` block; unlike a census it is not a dated observation you can retake, because its trials cost GPU hours and are its evidence.",
+
+  "session_id": "repro_{YYYYMMDD}_{HHmmss}[_{slug}]",
+  "opened_at": "",
+  "closed_at": null,
+
+  "_comment_status": "open | closed. A session that ran out of budget while still `inconclusive` stays OPEN with what it has. Closing it would freeze a non-answer into the record as if it were an answer.",
+  "status": "open",
+
+  "_comment_target": "The run being reproduced and the number being reproduced. `mode` and `scope` are copied here at open, not read live, because they are what every trial gets checked against — run-mechanics 'Metric comparability'. A target with mode: null is refused at open: metrics are comparable only within the same mode and an equivalent scope, so nothing could be shown to be the same quantity.",
+  "target": {
+    "run": "",
+    "metric": "",
+    "value": null,
+    "direction": "max",
+    "mode": null,
+    "scope": {}
+  },
+
+  "_comment_measure_via": "eval | retrain. How the number gets re-measured, and `eval` is the default even when the target is a training run. Retraining to verify a number costs what the original cost and answers a fuzzier question, because nondeterminism means the best available answer is a band rather than a match; re-measuring the surviving checkpoint through eval answers 'is the recorded number real' for the price of one eval. `retrain` answers a different and rarer question — 'does this recipe still produce a model this good' — and open refuses it without --i-accept-the-cost.",
+  "measure_via": "eval",
+
+  "_comment_probe": "Fixed inputs run through BOTH the original artifact and each reproduction, rendered side by side for a person. Declared at open and never afterwards: a probe set chosen once the result is known is a test written to its own answer. Ideally a citation (datasets/<id>@<snapshot>) so membership is pinned too. 20-50 units is plenty — this is a look, not an eval. Null when no probe was declared, in which case the prediction half of the verdict is simply absent rather than assumed.",
+  "probe": null,
+
+  "_comment_declared_tolerance": "The expectation, recorded before any trial runs. It does NOT decide the verdict — `band` does. It is kept so the two can be compared: a declared tolerance wider than the measured spread would have accepted a divergence larger than real noise, and one tighter than the spread would have called the pipeline's own noise a divergence. Either finding lands in `caveats`.",
+  "declared_tolerance": { "relative_pct": 0.5, "absolute": null },
+
+  "band_target_trials": 3,
+
+  "_comment_axes_at_open": "The five-axis verdict at the moment the session opened, one word each: intact | drifted | gone | unverifiable. Snapshotted rather than re-read at close, because close's refusals are about the conditions the trials actually ran under. `axes_detail_at_open` holds the full probe output behind them.",
+  "axes_at_open": {},
+  "axes_detail_at_open": {},
+
+  "_comment_trials": "One entry per completed run registered as a trial. Entry: {n, run, stage, pinned[], value, delta, delta_pct, probe_run, predictions_agree, at}. `pinned` empty = a band trial (nothing changed); a named axis = an attribution trial with that axis pinned back to what the original recorded. Every trial is an ORDINARY run in stages/<stage>/runs/, visible to list_runs.py and build_dag.py, and carries lineage.repro_of pointing at the target — deliberately not fork_of, since a fork intends to differ and a trial intends to be identical.",
+  "trials": [],
+
+  "_comment_band": "The interval the unpinned repeats actually produced: {n, min, max, mean, spread, target, target_inside, nearest_edge_gap, measured_at, from_trials[]}. Null until at least 3 unpinned trials exist — two points are a range, not a band. No distribution is assumed and none is needed: 'would this pipeline have produced that number again' is answered by whether it did.",
+  "band": null,
+
+  "_comment_metric_verdict": "reproduced (target inside the interval) | inconclusive (outside, but within one spread of the edge — run more repeats) | diverged (further out than the whole spread). `inconclusive` is not a hedge, it is the loop's engine.",
+  "metric_verdict": null,
+
+  "_comment_predictions_agree": "Whether the probe outputs agree, judged by a PERSON from the side-by-side — not by an epsilon. 'The boxes moved 0.3px' and 'the small objects vanished' are both numeric differences and no threshold on a prediction file separates them, which is the entire reason this is a look. Per /ask-human's rule the judgement is a claim; record on what basis it was made in `caveats`. Null means no probe was run, which is a third state and must not read as true.",
+  "predictions_agree": null,
+
+  "_comment_attributed_to": "data | code | env | params | artifacts — the axis whose pinning brought the number back into range while the others did not. Null on every verdict except `diverged`, which refuses to close without it.",
+  "attributed_to": null,
+
+  "_comment_verdict": "reproduced | reproduced_with_drift | metric_ok_predictions_diverged | diverged | diverged_unattributed | not_reproducible. `reproduced` requires a band, every axis intact, and agreeing predictions; anything less is reproduced_with_drift, which is a weaker fact that has to keep saying so every time it is read. There is deliberately no verdict for `inconclusive`.",
+  "verdict": null,
+
+  "_comment_caveats": "Qualifications stamped in automatically at close — every drifted axis, every unverifiable axis, and the tolerance-versus-reality note. They exist so the conclusion carries its own limits wherever it is quoted later, which is the whole reason this record exists: a repro verdict is written once and read by people who can no longer re-check it.",
+  "caveats": []
+}

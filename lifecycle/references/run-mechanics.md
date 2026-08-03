@@ -27,9 +27,10 @@ Fork check: "Base on a previous run?"
      │          skip Step 1 if sources unchanged
      ↓
 Step 1: Resolve Assets                        depends on: init (items defined),
-     │  - fill concrete paths in                         resources (credentials)
-     │    artifacts.json/input.json sources
-     │  - ask user for each path (one at a time)
+     │  - CHOOSE from `candidates`; see                  resources (credentials)
+     │    "Asset resolution (Step 1 detail)"
+     │  - only ask for a path when no
+     │    candidates block exists at all
      │  [external: credentials fail? ── invoke /resources ── resume]
      │  - validate paths exist, test connectivity
      ↓
@@ -66,6 +67,48 @@ Step 4: Collect Results                       depends on: execution finished
 Steps correspond to headings in the skill's SKILL.md: `##` headings are major steps, `###` headings are sub-steps. All are recorded. Different stages may have different steps (e.g., training-run may add a `monitor` step).
 
 `steps.ad_hoc` is an array for unplanned actions that don't match any predefined step — e.g., fixing a file permission, patching a config typo, installing a missing package. Each entry: `{ "name": "...", "description": "...", "after_step": "...", "status": "...", "at": "..." }`. If the same ad_hoc action shows up across multiple runs, it's a signal to promote it into a formal step in the SKILL.md.
+
+### Asset resolution (Step 1 detail)
+
+Defined here once because all three run skills do it and each had started describing it
+differently. `/train-init` and `/eval-init` fill `input.json` / `artifacts.json -> candidates`;
+`/infer-init` deliberately does not, since inference inputs change every run.
+
+**When a `candidates` block exists, it is the source — do not interrogate the user path by path.**
+Asking for a path that init already located throws away the work init did, and invites a different
+answer than the one that was validated.
+
+**Every `match` value routes somewhere. Filtering to `ok` and ignoring the rest is a bug**, and it is
+the bug this section exists to name: a run skill that shows only the `ok` rows and then reports "no
+usable options" has erased the difference between *not here* and *could not look* — the same
+collapse that `match: "unreachable"` was added to prevent, committed one layer further down.
+
+| `match` | What the run skill does |
+|---|---|
+| `ok` | offer it; default to it when there is exactly one, and confirm rather than ask |
+| `mismatch` | show it **with its `notes`**, never as the default. The notes say what is wrong — wrong format, wrong sample count — and that is usually a conversion away, not a dead end |
+| `absent` | never a choice. It is the layout reference (the original author's path) and the yardstick for the others |
+| `pending` | **stop.** Name the party, the spec version and the due date from the handoff, offer `handoff.py status --project {PROJECT} --open-only`, and do not fall through to asking for a path. Falling through is how a half-labeled directory gets picked over work that is still arriving |
+| `unreachable` | **stop.** Name what is missing (a credential, a host) and route to `/resources`. Never present it as absent and never drop it — the asset is claimed to exist and only the check is missing |
+
+Two more that are not `match` values but change how a chosen candidate resolves:
+
+- **`location: dataset:<id>@<snapshot>`** — a citation, not a path. Re-gate it at launch
+  (`phase.py gate --to consume`), then `census.py resolve --at <loc>` into the run directory. Never
+  into the config: a resolved path embeds one machine's root. Cite `datasets/<id>@<sid>` in
+  `run.json -> lineage.parents`.
+- **`location: run:<stage>/<run_id>`** — a checkpoint from a run in this project (evaluation and
+  inference only). Resolve through that run's directory and add it to `lineage.parents`, which is
+  what makes the consuming run an edge rather than a number about an anonymous file.
+
+**Candidates go stale.** They are machine-specific, so an rsync to another host invalidates every
+path in the list. Re-verify the chosen one resolves before launching. If they all dangle, re-run the
+init skill's locate step — do not fall back to interrogating the user, which produces a path nobody
+judged against `items`.
+
+**If nothing is `ok`, say which kind of no it is.** They route to different places, and a flat
+"no data available" sends people to the wrong one: `absent`/`mismatch` → `/data-collect` or a
+conversion; `pending` → the party and the date; `unreachable` → `/resources`.
 
 ### Code snapshot (Step 2 detail)
 
@@ -283,6 +326,10 @@ Rules for anything a run writes down now that somebody reads later. They share o
 | The chosen checkpoint and the recorded metric describe the **same artifact**. | When the peak epoch was never saved, falling through to the next-best is correct — recording the stream's peak beside the surviving file is a fake metric. |
 | Retention plans and applies as two steps, never deletes what it cannot rank, and aborts wholly on drift. | It is the only irreversible operation here. "Confirm with the user" is not a safeguard: a list of filenames carries no evidence that the sort behind it was right. |
 | A skill writes only step keys the `run.json` template defines. | Resume skips completed steps by reading them back; an undefined key is never recognized as completed and re-runs forever. This is how `check_sources` vs `resolve_assets` survived unnoticed. |
+| An axis probe that could not run is `unverifiable`, never `intact`. | Same shape as the metric rule above, applied to reproduction: "the commit resolves" and "no commit was recorded" are different facts, and only the first is evidence. A probe that fails open turns every unchecked axis into a pass. |
+| The overall reproduction verdict ranks `gone` above every other axis state. | Ranking by the verdict enum's own order put `unverifiable` above `gone` and reported a run whose cited data had been **deleted** as merely unverifiable — the worst state in the table, announced as the second mildest, with the `you can still` guidance never firing. |
+| `reproduced` requires a measured band, every axis `intact`, and — if a probe was declared — that the probe actually ran. | Each missing piece degrades it to a different weaker claim, and all three read identically once the word "reproduced" is written down. A matching average over changed predictions is the fake-metric shape one layer above the model. |
+| A repro trial is comparable to its target: same `mode`, equivalent `scope`. | A band assembled from mismatched trials is "Metric comparability" below with a measurement's authority on top — nothing errors, nothing is missing, and the noise estimate every later verdict rests on is of the wrong quantity. |
 
 ### Listing runs (no separate index)
 
@@ -332,6 +379,9 @@ lineage:
 - **`fork_of`** (same-stage, metadata only): this run started from that run's config, with modifications. **No I/O dependency** — fork is reproducible even if base is deleted. Drawn as dashed arrow within the same stage column.
 - **`variation_summary`** (auto-derived, optional): short human-readable diff of `runtime_params` vs the `fork_of` base, e.g., `"lr: 1e-4 → 2e-4; warmup_ratio: 0 → 0.03"`. Filled by the run skill at create time. Null when `fork_of` is null. Saves `/train-compare` and DAG renderers from re-diffing snapshots.
 - **`session`** (optional): when this run is part of a `/train-tune` HPO session, this field holds the session ID (matches `tune_sessions/<id>/` directory). Null for ad-hoc runs. `/train-tune-report` filters runs by this field to render a single session's chain.md without scanning all project runs.
+- **`repro_of`** (optional, cross-stage): `<stage>/<run_id>` of the run this one is trying to reproduce. Set by `/repro` on each trial. **Deliberately none of the three above.** Not `fork_of`, because a fork intends to differ and carries a `variation_summary` of what it changed, whereas a trial intends to be *identical* and its empty diff is the entire point — conflating them makes every reproduction read as an experiment. Not `parents`, because a trial consumes no artifact of its target; it re-measures the same quantity. Not `session`, which is `/train-tune`'s. A run skill launched as a trial fills this and otherwise leaves it null.
+
+**A repro trial is only evidence if it is comparable to its target** — same `mode`, equivalent `scope`, per the rules above. `repro.py trial` refuses a mismatch, and that refusal is load-bearing rather than fussy: the band every later verdict rests on is a noise estimate, and one assembled from a debug trial and a production target is an estimate of the wrong quantity carrying a measurement's authority.
 
 ```
      training           evaluation
