@@ -168,7 +168,7 @@ Scripts are an optimization, not a dependency.
 python -m unittest discover -s contracts -t contracts -p 'contract_*.py'
 ```
 
-The `-p` is required; the default pattern is `test*.py` and would silently find nothing. Stdlib only, no dependencies, no virtualenv — that is why CI needs no install step. Scripts live in hyphenated directories that aren't importable package names, so `contracts/helpers.py` loads them by path and provides temp-dir and real-git-repo fixtures.
+The `-p` is required; the default pattern is `test*.py` and would silently find nothing. Stdlib only — that is why CI needs no install step for the suite and why a green run means something on any machine. `pixi.toml` pins the *interpreter* and nothing else; `contract_pixi.py` holds the line (default environment declares only python, and a third-party import must be guarded). Vendor SDKs live in one opt-in `probes` environment, which is why `discover.py` answers "the package is not installed in this interpreter" instead of a false `gone`. Scripts live in hyphenated directories that aren't importable package names, so `contracts/helpers.py` loads them by path and provides temp-dir and real-git-repo fixtures.
 
 **Every check class cites the section it enforces**, in its docstring. That citation is the admission rule: a check that cannot point at a written contract is either a missing line in this file or padding — decide which, don't leave it. It is also how you find out what is *not* enforced: grep the citations, diff against this file's sections.
 

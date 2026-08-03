@@ -10,10 +10,19 @@ make this pass"; a contract check failing asks "is the code in breach, or has
 the contract changed?" If the contract changed, edit CLAUDE.md and let the check
 follow. The contract is upstream; this directory is downstream.
 
-Standard library only. The tool repo has no dependencies and no virtualenv, so
-`python -m unittest discover -s contracts -t contracts -p 'contract_*.py'` runs
-on a bare interpreter — that is the whole reason CI needs no install step. Note
-the `-p`: the default pattern is `test*.py` and would silently find nothing.
+Standard library only, which is the claim that matters and is narrower than the
+one this said before. The repo now has a `pixi.toml`, and that does not weaken it:
+pixi supplies the *interpreter*, while the suite still imports nothing outside the
+standard library — so `pixi run test` installs a Python and nothing else, and the
+same command works against any interpreter you point at it. `contract_pixi.py`
+enforces the narrow claim (default environment declares only python; a
+third-party import must be guarded by a `try`).
+
+What pinning replaced was worse than an unpinned version: CI declared a 3.8 floor
+the code had already left — `dict | dict` (PEP 584) and `str.removeprefix`
+(PEP 616) are 3.9, and both are valid *syntax* on 3.8, so `compileall` passed and
+the floor read as tested. Note the `-p`: the default pattern is `test*.py` and
+would silently find nothing.
 
 Some script directories have hyphens (`lifecycle/scripts/train-run/`), which are
 not importable package names, so scripts are loaded by file path throughout.

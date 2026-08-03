@@ -66,6 +66,10 @@ code_dir = stages/<stage>/code/_source if exists else stages/<stage>/code
 ### MLClaw repo (`<wherever the MLClaw tool repo is cloned>`, e.g. `~/code/MLClaw`) — the tool
 
 ```
+pixi.toml                       ← the tool's own env: pins the interpreter, declares no package
+
+pixi.lock                       ← tracked on purpose; it is what makes that env reconstructible
+
 CLAUDE.md                           ← routing + the always-loaded rules
 README.md                           ← what MLClaw is, and which stages are built
 .claude/

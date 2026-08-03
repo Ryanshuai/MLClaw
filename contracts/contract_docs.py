@@ -108,7 +108,7 @@ def actual_dirs(root):
     """Everything on disk except build junk. `.git` is excluded by name rather
     than by a dotfile rule — `.claude` and `.github` are both real entries."""
     junk = {".git", "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache",
-            ".venv", "node_modules", ".egg-info"}
+            ".venv", ".pixi", "node_modules", ".egg-info"}
     found = set()
     for dirpath, dirnames, _ in os.walk(root):
         dirnames[:] = [d for d in dirnames if d not in junk]

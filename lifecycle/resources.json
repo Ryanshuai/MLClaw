@@ -25,6 +25,7 @@
     "base_paths": [],
     "mlclaw_root": "",
     "python_path": "",
+    "_comment_env_manager": "How a run enters the right Python env. `tool`: pixi | mamba | conda | uv, detected by /resources in that preference order. pixi is preferred where present because its env is keyed to a project directory and a lockfile — an env it resolves is reconstructible from the repo, where a named conda env is a machine's local state that may simply be gone. /repro's env axis can only report drift against what was captured; a lockfile is the only form that lets somebody rebuild it.",
     "env_manager": {
       "tool": "",
       "path": ""

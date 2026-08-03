@@ -13,20 +13,22 @@ on:
 jobs:
   contracts:
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        # Floor and current. The suite is standard-library only on purpose —
-        # this repo has no dependencies and no virtualenv, so there is nothing
-        # to install and nothing to pin.
-        python-version: ["3.8", "3.12"]
-
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
+      # The interpreter comes from pixi.lock, not from a matrix. What that
+      # replaced was worse than one version: the matrix declared a 3.8 floor the
+      # code had already left — six files use `dict | dict` (PEP 584) and two use
+      # `str.removeprefix` (PEP 616), both 3.9, and both are valid *syntax* on
+      # 3.8, so `compileall` passed and the floor read as tested.
+      #
+      # There is still no install step for the SUITE: pixi's default environment
+      # declares only python, and `contract_pixi.py` asserts that. The vendor SDKs
+      # live in the `probes` environment, which CI does not build.
+      - uses: prefix-dev/setup-pixi@v0.8.1
         with:
-          python-version: ${{ matrix.python-version }}
+          environments: default
+          cache: true
 
       - name: git identity
         # code_snapshot checks build real git working trees and commit to them.
@@ -37,20 +39,19 @@ jobs:
 
       - name: Byte-compile every script
         # Catches syntax errors in scripts no check happens to import.
-        run: python -m compileall -q lifecycle/scripts contracts
+        run: pixi run compile
 
       - name: Contract checks
         # -p is required: the default pattern is test*.py and would find nothing,
         # reporting a green run over zero checks.
-        run: python -m unittest discover -s contracts -t contracts -p 'contract_*.py' -v
+        run: pixi run test -v
 
       - name: Every lifecycle/**.json parses
         # The JSON templates are the schema every skill fills in. A trailing
         # comma in one breaks project creation at the worst possible moment,
         # and nothing else in the repo would catch it.
-        if: matrix.python-version == '3.12'
         run: |
-          python - <<'PY'
+          pixi run python - <<'PY'
           import json, pathlib, sys
           bad = []
           for p in sorted(pathlib.Path("lifecycle").rglob("*.json")):
@@ -67,7 +68,6 @@ jobs:
         # lifecycle/secrets.json was committed for months while its own first
         # line read "NEVER COMMIT THIS FILE". Make that class of mistake fail
         # the build.
-        if: matrix.python-version == '3.12'
         run: |
           tracked=$(git ls-files | grep -E '(^|/)(secrets|resources)\.json$' \
                     | grep -v '^lifecycle/resources\.json$' || true)
@@ -79,7 +79,6 @@ jobs:
           fi
 
       - name: Template carries no plaintext password field
-        if: matrix.python-version == '3.12'
         run: |
           if python -c "
           import json,sys
