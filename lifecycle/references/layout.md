@@ -85,6 +85,8 @@ README.md                           ← what MLClaw is, and which stages are bui
     lease/SKILL.md                  ← /lease
     data-label/SKILL.md             ← /data-label
     ask-human/SKILL.md              ← /ask-human
+    data-collect/SKILL.md           ← /data-collect
+    data-discover/SKILL.md          ← /data-discover
   settings.json
 contracts/                          ← executable form of this file's contracts; stdlib only
   helpers.py                        ← temp dirs, real git repos, script loading by path
@@ -138,6 +140,11 @@ lifecycle/
       ask.py                        ← open / answer / status; an answer carries its evidential status
     data-label/
       handoff.py                    ← send / receive / close / status; the manifest is the only authority
+    data-collect/
+      collect.py                    ← plan / pull / status; ingest only, records what arrived
+      rig.py                        ← optional provenance: rig facts + silent-change tripwires
+    data-discover/
+      discover.py                   ← sources / record / probe / report; `gone` ≠ `unreachable`
     resources/
       parse_ssh_config.py           ← parse ~/.ssh/config into server entries
     shared/                         ← the run step chain lives here, not under any one run skill
