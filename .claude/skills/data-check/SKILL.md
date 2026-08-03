@@ -9,7 +9,7 @@ description: >
   made it. Also trigger for Chinese requests like "数据都在哪", "有多少数据了", "哪些还没算",
   "哪些没备份", "数据同步了吗", "这批数据完整吗", "盘一下数据". Not for freezing a citable snapshot
   (use /data-freeze, which shares this skill's script) or for finding data nobody has declared yet
-  (use /data-discover).
+  (use /discover).
   Not for sending data to an outside party (use /data-label) or for judging the data's quality
   (that is an evaluation stage).
 ---

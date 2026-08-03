@@ -97,7 +97,7 @@ class TheMatchEnumAgreesEverywhere(unittest.TestCase):
 
 class TheSchemaIsDocumentedOnceAndReferencedElsewhere(unittest.TestCase):
     """CLAUDE.md -> "Skills & Dependencies": the reason the source sweep became
-    `/data-discover` instead of being copied into `/eval-init` was that a second
+    `/discover` instead of being copied into `/eval-init` was that a second
     copy drifts. The same reasoning applies to the table describing what it
     produces, so `/eval-init` cites `/train-init`'s `candidates` schema rather
     than restating it — and this check is what stops somebody helpfully pasting

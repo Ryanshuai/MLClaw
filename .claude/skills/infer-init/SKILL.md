@@ -47,7 +47,7 @@ Concrete paths come from `/infer-run` Step 1.
 
 What that does *not* mean is that you are on your own when nobody knows where anything is. If the
 user cannot say what data exists — an inherited project, a wiki page nobody trusts — invoke
-**`/data-discover`** as a sub-skill and let `discovery/leads.json` hold the answer. It is a utility,
+**`/discover`** as a sub-skill and let `discovery/leads.json` hold the answer. It is a utility,
 callable from anywhere, and its leads outlive this init. Do not grow a source sweep here; there is
 one, and two would start disagreeing.
 

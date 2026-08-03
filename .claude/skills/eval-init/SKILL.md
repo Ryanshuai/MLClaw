@@ -41,9 +41,9 @@ For item/source schemas and type classification rules, read `references/schemas.
 
 ## Step 0: Locate the checkpoint and the data
 
-**The data half is not this skill's job.** Invoke **`/data-discover`** as a sub-skill (utility pattern, like `/resources`) and read `discovery/leads.json`. Do not grow a sweep here: `/train-init` has one, this skill would have made two, and two implementations of "where is the data" is how they start disagreeing. A lead also outlives an init — access arrives weeks after a handover, and the leads file carries the unresolved ones forward where these four JSON files cannot.
+**The data half is not this skill's job.** Invoke **`/discover`** as a sub-skill (utility pattern, like `/resources`) and read `discovery/leads.json`. Do not grow a sweep here: `/train-init` has one, this skill would have made two, and two implementations of "where is the data" is how they start disagreeing. A lead also outlives an init — access arrives weeks after a handover, and the leads file carries the unresolved ones forward where these four JSON files cannot.
 
-What this skill *does* look for itself, because `/data-discover` has no reason to:
+What this skill *does* look for itself, because `/discover` has no reason to:
 
 | Source | What to look for | How |
 |---|---|---|
@@ -77,7 +77,7 @@ For metrics: after identifying them, ask the user which ones to track across run
 
 ## Step 1b: Candidates, and the match judgment
 
-Fill `input.json -> candidates` and `artifacts.json -> candidates` — the list `/eval-run` picks from. **The schema is `/train-init` `references/schemas.md` → `candidates`; read it there.** Two deltas are documented in this skill's `references/schemas.md`, and nothing else is repeated — a second copy of that table is a copy that drifts, which is the whole reason the sweep moved to `/data-discover` in the first place.
+Fill `input.json -> candidates` and `artifacts.json -> candidates` — the list `/eval-run` picks from. **The schema is `/train-init` `references/schemas.md` → `candidates`; read it there.** Two deltas are documented in this skill's `references/schemas.md`, and nothing else is repeated — a second copy of that table is a copy that drifts, which is the whole reason the sweep moved to `/discover` in the first place.
 
 Translate leads mechanically, then judge:
 

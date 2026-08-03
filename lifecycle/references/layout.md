@@ -61,6 +61,8 @@ code_dir = stages/<stage>/code/_source if exists else stages/<stage>/code
 
 ## File Layout
 
+**Skill directories are flat, one level, and the hyphen is the hierarchy.** `.claude/skills/<name>/` — never nested. `contract_docs.owned_by_a_skill()` is hardcoded to that one level, so a skill at `.claude/skills/data/collect/` would be classified as the `data` skill's *internal structure*, need no tree entry, and go invisible to this contract while it stayed green. The naming rule that replaces nesting: **a prefix means the skill belongs to one stage or line (`data-*`, `train-*`, `eval-*`, `infer-*`, `refactor-*`); no prefix means it is cross-cutting (`discover`, `repro`, `resources`, `lease`) or is itself the line's router (`data`).** Two names carry a hyphen that is *not* a family prefix — `ask-human` and `project-init` — which is the one real cost of encoding the tree in names.
+
 ### MLClaw repo (`<wherever the MLClaw tool repo is cloned>`, e.g. `~/code/MLClaw`) — the tool
 
 ```
@@ -94,7 +96,7 @@ README.md                           ← what MLClaw is, and which stages are bui
     data-freeze/SKILL.md            ← /data-freeze
     data-curate/SKILL.md            ← /data-curate
     data-retire/SKILL.md            ← /data-retire
-    data-discover/SKILL.md          ← /data-discover
+    discover/SKILL.md               ← /discover
     repro/SKILL.md                  ← /repro (+ references/axes.md, verdicts.md)
   settings.json
 contracts/                          ← executable form of this file's contracts; stdlib only
@@ -162,7 +164,7 @@ lifecycle/
       curate.py                     ← plan / register / trace; derived_from, checked against the run
     data-retire/
       retire.py                     ← plan / apply / log; the only delete on the data line
-    data-discover/
+    discover/
       discover.py                   ← sources / record / probe / report; `gone` ≠ `unreachable`
     repro/
       repro.py                      ← check/open/trial/band/attribute/close; five axes of rot

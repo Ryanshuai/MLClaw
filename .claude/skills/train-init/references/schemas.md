@@ -216,7 +216,7 @@ somebody looked and the data is not there. `unreachable` is a bucket with no key
 down, a repo you cannot clone: the *claim* about the data is real and only the check is missing. This
 value exists because the alternative, which this file used to prescribe, was that such a source
 "simply produces no candidates" — and an `input.json` in which the data does not appear is one every
-later reader takes as proof it does not exist. Populated from `/data-discover`'s leads:
+later reader takes as proof it does not exist. Populated from `/discover`'s leads:
 
 | lead status | `match` |
 |---|---|
