@@ -53,6 +53,7 @@ from datetime import datetime
 from glob import glob
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _records import parse_iso  # noqa: E402
 from compare import UNSPECIFIED_SCOPE, scope_key  # noqa: E402  (sibling module)
 
 # Known values of run.json -> mode. Extend here (one place) if the schema grows;
@@ -190,23 +191,6 @@ def project_run(run, run_json_path):
 
 
 # ── sorting ──────────────────────────────────────────────────────────────────
-
-def parse_iso(s):
-    """-> (datetime, assumed_local: bool). Naive input is read as local time.
-
-    A copy of the helper in finalize_run.py / create_run.py. Deliberate: this
-    module is a pure reader that six skills call, and importing a run-mutating
-    script for a date parser would make the query break whenever that script
-    moves. If the three copies ever want one home, it is a timeutil next to
-    compare.py, not any of the three. Keep them in step until then.
-    """
-    if s.endswith("Z"):
-        s = s[:-1] + "+00:00"
-    dt = datetime.fromisoformat(s)
-    if dt.tzinfo is None:
-        return dt.astimezone(), True
-    return dt, False
-
 
 def _created_at_key(value):
     """Sort a timestamp by its instant, not its characters.

@@ -21,16 +21,15 @@ Usage:
 import json
 import os
 import sys
-from datetime import datetime, timezone
+from datetime import datetime
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _records import now_iso  # noqa: E402
 
 MAX_COLLISION_SUFFIX = 100
 
 
 # --- timestamp helper (mirrored in finalize_run.py; keep the two in step) ---
-
-def now_iso():
-    return datetime.now(timezone.utc).isoformat()
-
 
 def allocate_run_dir(stage_dir, base_id):
     """-> (run_id, run_dir). Never returns a directory that already holds a run.json."""

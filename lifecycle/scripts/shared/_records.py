@@ -1,0 +1,184 @@
+#!/usr/bin/env python3
+"""Primitives every record-layer script needs, defined once.
+
+Why this file exists
+--------------------
+Eleven scripts had byte-identical copies of `emit` / `refuse` / `broke` — 33
+copies of the exit-code contract in CLAUDE.md "Script Integration". A contract
+implemented eleven times can drift eleven ways, and two forks had already
+started: the same UTC-timestamp helper was called `now_utc` in six scripts and
+`utcnow` in five, and `read_json` had three signatures. None of that changed
+behaviour yet, which is exactly why it was worth collapsing before it did.
+
+Import it the way `shared/compare.py` is already imported across stage
+directories -- the script dirs are hyphenated and therefore not importable
+package names, so the path comes off `__file__`:
+
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__))), "shared"))
+    from _records import broke, emit, now_utc, read_json, refuse  # noqa: E402
+
+That keeps every script runnable directly (`python .../retire.py plan ...`) with
+no environment setup, which is the property the duplication was buying.
+
+Stdlib only, like everything under `contracts/` -- no script may acquire a
+dependency by importing this.
+"""
+
+import json
+import os
+import sys
+from datetime import datetime, timezone
+
+# --------------------------------------------------------------------------
+# the exit-code contract -- CLAUDE.md "Script Integration"
+#
+#   0  worked
+#   1  worked, and the answer is no. A refusal, arrived at correctly. The
+#      caller must pass it through rather than redo the work by hand, because
+#      redoing it means overriding a check.
+#   2  the script broke. Fall back and do the same work manually.
+#
+# The distinction is the whole reason these are three functions and not one
+# `die()`: a skill decides whether to fall back by reading the exit code, so a
+# refusal that exits 2 gets worked around and a crash that exits 1 gets
+# reported to the user as a finding.
+# --------------------------------------------------------------------------
+
+def emit(obj):
+    """Success payload on stdout. Machine-readable; the skill renders it."""
+    print(json.dumps(obj, indent=2, ensure_ascii=False))
+
+
+def refuse(detail, **extra):
+    """Exit 1 -- worked, the answer is no. Say what would have to change."""
+    print(json.dumps({"refused": detail, **extra}, indent=2, ensure_ascii=False))
+    sys.exit(1)
+
+
+def broke(detail, **extra):
+    """Exit 2 -- the script failed. The skill falls back to doing it by hand."""
+    print(json.dumps({"error": detail, **extra}, indent=2, ensure_ascii=False))
+    sys.exit(2)
+
+
+# --------------------------------------------------------------------------
+# time -- run-mechanics.md "Record integrity": UTC with an explicit offset
+# --------------------------------------------------------------------------
+
+def now_utc():
+    """UTC with an explicit offset. Naive local strings from machines in
+    different zones sort wrongly and look fine while doing it."""
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def stamp():
+    """`YYYYmmdd_HHMMSS` for record ids. Not a timestamp -- an identifier."""
+    return datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+
+
+def parse_ts(v):
+    """-> aware datetime, or None.
+
+    A naive string returns None on purpose rather than being assumed local: it
+    cannot be ordered against a timestamp from another machine, and pretending
+    it can is how a stale record passes for a fresh one. Callers must treat
+    None as "the ordering is unknown", never as "not stale".
+    """
+    if not isinstance(v, str) or not v:
+        return None
+    try:
+        dt = datetime.fromisoformat(v)
+    except (ValueError, TypeError):
+        return None
+    return dt if dt.tzinfo is not None else None
+
+
+def age_days(iso, ndigits=1):
+    """Age in days, or None when the timestamp cannot be ordered at all."""
+    dt = parse_ts(iso)
+    if dt is None:
+        return None
+    return round((datetime.now(timezone.utc) - dt).total_seconds() / 86400, ndigits)
+
+
+# There are deliberately TWO of each of the above, and picking the wrong one is
+# a record-integrity bug rather than a style slip:
+#
+#   now_utc / parse_ts   for RECORDS and their ORDERING. Second precision, and a
+#                        naive string is None — unorderable against another
+#                        machine's clock, so refusing to guess is the answer.
+#   now_iso / parse_iso  for run.json TIMESTAMPS and DURATIONS. Full precision,
+#                        and a naive string is read as local time *with a flag
+#                        saying so*, because a duration that could not be
+#                        computed must be reported as such rather than dropped
+#                        (run-mechanics.md "Record integrity") — and refusing
+#                        outright would report every pre-offset run as
+#                        durationless.
+#
+# `list_runs.py` used to carry its own copy of parse_iso with a note saying the
+# three copies should share "a timeutil next to compare.py" if one ever existed.
+# This is it.
+
+def now_iso():
+    """Full-precision UTC, for `run.json` timestamps that durations subtract."""
+    return datetime.now(timezone.utc).isoformat()
+
+
+def parse_iso(s):
+    """-> (datetime, assumed_local: bool). Always aware.
+
+    Naive input is read as local time and the flag says so, so a caller can
+    report that its answer rests on an assumption. Contrast `parse_ts`, which
+    returns None instead — the difference is that ordering two records wrongly
+    is silent, while a duration computed off an assumed zone is at worst a few
+    hours out and worth having with a caveat attached.
+    """
+    if s.endswith("Z"):
+        s = s[:-1] + "+00:00"
+    dt = datetime.fromisoformat(s)
+    if dt.tzinfo is None:
+        return dt.astimezone(), True
+    return dt, False
+
+
+# --------------------------------------------------------------------------
+# record io
+# --------------------------------------------------------------------------
+
+def read_json(path, required=True):
+    """-> parsed JSON, or None when `required` is false and it is absent.
+
+    `required=False` is how a caller says "absent is a legitimate answer here".
+    Unreadable is never that: a permission error or truncated file exits 2, so
+    "could not read it" and "it is not there" stay different facts.
+    """
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return json.load(fh)
+    except FileNotFoundError:
+        if required:
+            broke(f"not found: {path}")
+        return None
+    except (OSError, ValueError) as exc:
+        broke(f"unreadable: {path}", why=str(exc))
+
+
+def atomic_write_json(path, obj, *, fsync=False, ensure_ascii=False):
+    """Write via a temp file and `os.replace`, so a crash mid-write cannot
+    leave a truncated record where a valid one used to be.
+
+    `fsync=True` also forces the bytes to disk before the rename -- worth it for
+    a record something irreversible will be decided against (a census that a
+    deletion plan reads), not for every write.
+    """
+    parent = os.path.dirname(path)
+    os.makedirs(parent or ".", exist_ok=True)
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump(obj, fh, indent=2, ensure_ascii=ensure_ascii)
+        fh.write("\n")
+        if fsync:
+            fh.flush()
+            os.fsync(fh.fileno())
+    os.replace(tmp, path)

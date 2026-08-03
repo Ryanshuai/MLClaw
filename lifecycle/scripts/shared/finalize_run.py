@@ -22,30 +22,15 @@ Usage:
 import json
 import os
 import sys
-from datetime import datetime, timezone
+from datetime import timezone
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _records import now_iso, parse_iso  # noqa: E402
 
 VALID_STATUS = ("completed", "failed", "cancelled", "preempted")
 
 
 # --- timestamp helpers (mirrored in create_run.py; keep the two in step) ---
-
-def now_iso():
-    return datetime.now(timezone.utc).isoformat()
-
-
-def parse_iso(s):
-    """-> (datetime, assumed_local: bool). Naive input is read as local time.
-
-    Returns aware datetimes only. `assumed_local` flags that the stored value
-    carried no zone, so the result rests on an assumption worth reporting.
-    """
-    if s.endswith("Z"):
-        s = s[:-1] + "+00:00"
-    dt = datetime.fromisoformat(s)
-    if dt.tzinfo is None:
-        return dt.astimezone(), True
-    return dt, False
-
 
 def main():
     if len(sys.argv) < 3:
