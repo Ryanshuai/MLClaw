@@ -13,7 +13,7 @@ Two silent-record defects under test:
 import json
 import os
 import unittest
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from helpers import REPO_ROOT, TempDirCase, run_script
 
@@ -58,12 +58,32 @@ class RunIdCollision(TempDirCase):
             self.assertTrue(os.path.isfile(os.path.join(stage, "runs", run_id, "run.json")))
 
     def test_collision_is_reported_not_silent(self):
+        """Occupy every id `create_run.py` could pick in the next few seconds,
+        rather than launching it twice and hoping both land in the same one.
+
+        The two-launch version failed roughly one full-suite run in fifty: when
+        the pair straddled a second boundary there was no collision to report and
+        the check failed for being right. A flaky contract is worse than a
+        missing one — it teaches people that red means "run it again", which is
+        the opposite of what this suite is for.
+        """
         stage = self.path("stages", "training")
         os.makedirs(stage)
-        run_script("shared/create_run.py", stage, TEMPLATE)
+
+        # Local time, because `create_run.py` builds `run_id` from `datetime.now()`
+        # — a human-facing label, per its own docstring.
+        now = datetime.now()
+        for delta in range(4):
+            rid = "run_" + (now + timedelta(seconds=delta)).strftime("%Y%m%d_%H%M%S")
+            d = os.path.join(stage, "runs", rid)
+            os.makedirs(d)
+            with open(os.path.join(d, "run.json"), "w") as fh:
+                fh.write("{}")
+
         rc, out, err = run_script("shared/create_run.py", stage, TEMPLATE)
 
-        self.assertIn("id_collision", out)
+        self.assertIn("id_collision", out,
+                      "the base id was taken and the reallocation went unreported")
         self.assertIn("id_collision", err.replace("warning: ", "id_collision"))
 
 class Finalize(TempDirCase):
