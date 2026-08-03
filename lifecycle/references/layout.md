@@ -87,6 +87,7 @@ README.md                           ← what MLClaw is, and which stages are bui
     ask-human/SKILL.md              ← /ask-human
     data/SKILL.md                   ← /data
     data-collect/SKILL.md           ← /data-collect
+    data-online-sample/SKILL.md     ← /data-online-sample
     data-report/SKILL.md            ← /data-report
     data-check/SKILL.md             ← /data-check
     data-freeze/SKILL.md            ← /data-freeze
@@ -149,6 +150,8 @@ lifecycle/
     data-collect/
       collect.py                    ← plan / pull / status; ingest only, records what arrived
       rig.py                        ← optional provenance: rig facts + silent-change tripwires
+    data-online-sample/
+      online.py                     ← declare / sample / status; uniform only, a reading nobody can retake
     data-check/
       census.py                     ← scan / show / snapshot / resolve / status; three states, never two
     data-curate/
