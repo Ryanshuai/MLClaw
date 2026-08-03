@@ -1,0 +1,34 @@
+{
+  "_comment": "One question or request put to a person, and what came back. Written by lifecycle/scripts/ask-human/ask.py; this template documents the shape and is what a manual fallback must reproduce. Lives flat at {PROJECT}/asks/{ask_id}.json — one file, no directory, because an ask holds no attachments. Like a handoff it has no `steps` block: the work happens in somebody's head and inbox, not in a process MLClaw can step through.",
+
+  "ask_id": "ask_{YYYYMMDD}_{HHmmss}",
+  "project": "",
+
+  "_comment_kind": "question | request | approval | heads_up. Shapes what an answer even means — an approval that goes unanswered blocks, a heads_up that goes unanswered does not — so it is a fixed vocabulary rather than free text.",
+  "kind": "question",
+
+  "status": "open",
+
+  "_comment_to": "The party key in `resources.json -> outsourcing`, or a plain name for a one-off. The KEY only. Contact details stay in the never-committed file because `asks/` is git-tracked, and a phone number copied in here is a phone number committed to the project repo. Same split as /data-label and rig.json -> host.server.",
+  "to": "",
+
+  "asked": "",
+  "why": null,
+  "about": null,
+
+  "_comment_channel": "How the question travels. `manual` means a human carries it, and that is the only value today: MLClaw does not message people on anyone's behalf. The adapter seam is real but empty — see the skill file's 'Adding a channel'. A channel_ref is how the thread is found again three weeks later, which is usually the field that turns out to matter.",
+  "channel": "manual",
+  "channel_ref": null,
+
+  "_comment_verify": "A command that could answer this WITHOUT a person, if one exists. Two jobs, and the second is the important one: it makes `verified` provable, and its absence makes `verified` refusable. Declaring it costs nothing and converts a class of answers from hearsay into fact.",
+  "verify": null,
+
+  "due_at": null,
+  "follow_up_of": null,
+
+  "_comment_answer": "What came back — and `kind` is the load-bearing field, not `says`.\n\n  claim     they said so. Nothing checked it. THE DEFAULT, because it is what an answer usually is.\n  verified  something other than their word confirmed it: the `verify` command passed, or `evidence` names what corroborated it.\n  decision  a judgement that is theirs to make. Not verifiable and does not need to be — it is authoritative because of who made it.\n  refused   they said no.\n  unknown   they do not know.\n\nEverything downstream must branch on `kind`, never on the text of `says`. 'The operator says the shoot finished' and 'the census counted 52 finished units' read identically once someone writes \"done\" in a notes field, and only one of them is a fact. This is CLAUDE.md 'Never record a metric you did not read', one domain over.\n\n`valid_until` exists because answers about the world expire. 'This data is fine to use' was true in July; nothing makes it true today, and an answer quoted past its date is a stale metric wearing a sentence.",
+  "answer": null,
+
+  "opened_at": "",
+  "answered_at": null
+}

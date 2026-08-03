@@ -1,0 +1,65 @@
+{
+  "_comment": "One exchange with a party MLClaw does not control. Written by lifecycle/scripts/data-label/handoff.py; this template documents the shape and is what a manual fallback must reproduce. Unlike run.json there is no `steps` block — a handoff has no internal step chain to resume, its state is the `status` field and the per-round reconciliations. Lives at {PROJECT}/handoffs/{handoff_id}/handoff.json.",
+
+  "handoff_id": "handoff_{YYYYMMDD}_{HHmmss}",
+  "project": "",
+
+  "_comment_stage": "Which stage this exchange serves, or null when it serves none (a data request that predates any stage). A handoff is NOT a stage — it is an edge that any stage can hang off, which is why it lives at project level rather than under stages/.",
+  "stage": null,
+
+  "_comment_dataset": "The dataset_id this exchange feeds, or null. This is the join key between the handoff record and the data lifecycle: /data reads it to answer 'is inflow still in flight for this dataset', which decides whether freezing now would pin a set that is about to change. Null is fine for a handoff that feeds no dataset (a checkpoint sent for review).",
+  "dataset": null,
+
+  "_comment_kind": "Fixed vocabulary: annotation | data_request | review | human_eval | delivery | other. Decides what a reviewer looks for on return, so an open string would make that undecidable downstream.",
+  "kind": "",
+
+  "_comment_status": "sent -> returned -> accepted | rejected, plus cancelled from any pre-terminal state. `returned` means a reconciliation was computed, NOT that the work was taken: computing is not accepting. Only accepted | rejected | cancelled are terminal.",
+  "status": "sent",
+
+  "_comment_round": "Rework is normal, not exceptional — a batch comes back short and the deficit goes out again. Each round gets its own manifest and its own handoff record; `rework_of` chains them. Round-scoped reconciliations mean a second receive cannot overwrite the first round's finding.",
+  "round": 1,
+  "rework_of": null,
+
+  "to": "",
+  "channel": "manual",
+  "channel_ref": null,
+  "description": null,
+
+  "_comment_spec": "The guideline / acceptance criteria the other party worked from, snapshotted into spec/ at send time. Part of the returned data's identity: two annotation batches produced under different guidelines are different distributions, and mixing them raises nothing — the same failure shape as run-mechanics.md 'Preprocessing contract (cross-stage)'. A null path is allowed but must be deliberate (`send --no-spec`), never a default.",
+  "spec": {
+    "path": null,
+    "hash": null,
+    "version": null
+  },
+
+  "_comment_sent": "Frozen at send. `manifest` is a JSONL sibling: one header line {_manifest: {hash_algo, count, frozen_at}} then one {item, hash, bytes} per item. This manifest is the ONLY authority for what the return is supposed to cover — there is no external truth source to consult, unlike lease.py reap against a cloud API. `source_root` is where the bytes were read from, and is re-hashed at receive to detect local drift.",
+  "sent": {
+    "source_root": "",
+    "count": 0,
+    "bytes": 0,
+    "hash_algo": "sha256",
+    "manifest": "manifest.jsonl",
+    "include": [],
+    "exclude": []
+  },
+
+  "due_at": null,
+
+  "_comment_latest": "Pointer to the most recent round's reconciliation, denormalized so `status` can be read without opening the round file. `drift_count` is null when drift was not checked — 'not checked' and 'checked, none found' are different facts and must not both read as clean.",
+  "latest": null,
+  "rounds": [],
+
+  "_comment_accepted": "Written only by `close --accept`. `partial: true` is the field that must survive into every downstream description of this data — a partial return that closes as merely 'accepted' becomes a full-coverage artifact in every record that follows it.",
+  "accepted": null,
+
+  "_comment_lineage": "`parents` are runs whose outputs went out (a training run whose checkpoint was sent for review). `consumed_by` is advisory and may lag: the authoritative direction is the consuming run's own run.json -> lineage.parents, which cites this handoff as 'handoffs/{handoff_id}'.",
+  "lineage": {
+    "parents": [],
+    "consumed_by": []
+  },
+
+  "created_at": "",
+  "returned_at": null,
+  "closed_at": null,
+  "outcome": null
+}

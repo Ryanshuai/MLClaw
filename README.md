@@ -204,6 +204,8 @@ claude
 - [x] Training — `/train-init`, `/train-run` (background launch, stream monitoring, crash diagnosis, best-checkpoint selection + retention)
 - [x] Adaptive HPO — `/train-tune`, `/train-tune-report` (hypothesis/outcome per trial, chain.md)
 - [x] Refactor — `/refactor-init`, `/refactor-run`, `/refactor-report`
+- [x] External handoff — `/data-label` (frozen manifest, spec snapshot, coverage + drift reconciliation on return)
+- [x] Human exchange — `/ask-human` (a question to a person, answered as claim / verified / decision; refuses `verified` when nothing checked it)
 - [x] Skill dependency system (inter-skill graph + internal dependency chain + cross-session resume)
 - [x] Remote execution + path mapping
 - [ ] Run comparison — `/train-compare` (side-by-side metrics/params/env diff)

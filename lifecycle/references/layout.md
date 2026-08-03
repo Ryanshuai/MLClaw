@@ -83,6 +83,8 @@ README.md                           ← what MLClaw is, and which stages are bui
     refactor-report/SKILL.md        ← /refactor-report
     resources/SKILL.md              ← /resources
     lease/SKILL.md                  ← /lease
+    data-label/SKILL.md             ← /data-label
+    ask-human/SKILL.md              ← /ask-human
   settings.json
 contracts/                          ← executable form of this file's contracts; stdlib only
   helpers.py                        ← temp dirs, real git repos, script loading by path
@@ -132,6 +134,10 @@ lifecycle/
       lease.py                      ← acquire / renew / release a rented host
       provider_ssh.py               ← SSH-reachable provider backend
       _common.py                    ← JSON/error conventions every provider adapter reuses
+    ask-human/
+      ask.py                        ← open / answer / status; an answer carries its evidential status
+    data-label/
+      handoff.py                    ← send / receive / close / status; the manifest is the only authority
     resources/
       parse_ssh_config.py           ← parse ~/.ssh/config into server entries
     shared/                         ← the run step chain lives here, not under any one run skill
@@ -166,6 +172,10 @@ lifecycle/
     input.json                      ← dataset + preprocessing (train/serve skew guard)
     output.json                     ← streaming-metric schema, ckpt selection, done signal
     provenance.json                 ← which values were read vs guessed; sidecar, not consumed by a run
+  ask-human/                        ← one question to a person, and what came back
+    ask.json                        ← the answer's `kind` is the load-bearing field, not its text
+  data-label/                       ← exchange record template (project-level, not a stage)
+    handoff.json                    ← one exchange: frozen manifest ref, spec, rounds, coverage
   refactor/                         ← refactor stage JSON templates
     plan.json                       ← repo analysis, module classification, paper benchmarks
     config.json                     ← benchmark entry command + params

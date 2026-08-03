@@ -94,6 +94,8 @@ what, what is deliberately *not* a phase (Archive, Train), and how `/data` compo
 | `/train-tune` | Adaptive HPO loop: observe prior runs → find coverage gaps → hypothesize the next config → launch trials via `/train-run` → iterate until budget or convergence |
 | `/train-tune-report` | Render a tune session as `chain.md`: headline, best-so-far curve, coverage map, decision timeline, confirmed/refuted distillation, recipe |
 | `/lease` | Acquire, renew and release a rented compute host, with a dead-man switch so nothing is left running. Also answers "what am I paying for right now" |
+| `/data-label` | Send work to a party MLClaw doesn't control and verify the return against a manifest frozen at send time. The only skill whose loop is closed by someone else |
+| `/ask-human` | Put a question to a person and record the answer as what it is — `claim` / `verified` / `decision`. Sibling of `/data-label`: that one exchanges artifacts, this one exchanges answers |
 | `/refactor-init` | Clone research repo, analyze codebase, classify modules (core/support/dead), extract paper benchmark targets |
 | `/refactor-run` | Execute one refactoring round: make changes → run benchmark → compare with paper → commit or revert |
 | `/refactor-report` | Generate refactoring audit report: round changelog, rollback points, verification results, reproduction instructions |

@@ -30,6 +30,21 @@
       "path": ""
     }
   },
+  "outsourcing": {
+    "_comment": "Parties work is sent to and comes back from — annotation vendors, data owners, reviewers, customers. This is the /data-label analogue of `servers`: a route to a capability MLClaw doesn't own, recorded once and reused across every batch. Workspace-level for the same reason servers are — a vendor is not project-specific, and their turnaround and rate are facts about them, not about one batch. Contact details are personal data, and this file is the one that is never committed; that is why they live here and are never copied into a project's handoff records, which are git-tracked. Handoff records store the key only, and contact is resolved live at report time — the same rule as /lease 'never write a resolved address into a config file'.",
+    "_example": {
+      "name": "",
+      "kind": "",
+      "org": "",
+      "contact": { "person": "", "email": "", "im": "", "phone": "" },
+      "channel": "",
+      "channel_ref": "",
+      "spec_default": "",
+      "turnaround_days": null,
+      "rate": "",
+      "notes": ""
+    }
+  },
   "registry": {
     "url": "",
     "token": ""
