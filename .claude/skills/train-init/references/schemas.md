@@ -196,16 +196,62 @@ The middle layer between "what the code needs" (`items`) and "what this run used
       { "location": "s3", "path": "s3://bucket/datasets/coco2017/", "match": "ok",
         "notes": "~19GB, download or stream", "needs": "aws credentials" },
       { "location": "downloadable", "path": "https://cocodataset.org/#download",
-        "match": "ok", "notes": "fallback when no local copy exists" }
+        "match": "ok", "notes": "fallback when no local copy exists" },
+      { "location": "handoff:handoff_20260731_025626", "path": "", "match": "pending",
+        "notes": "5000 imgs out with vendor-a for labeling, spec v3, due 2026-08-14" },
+      { "location": "dataset:boxes@v3", "path": "", "match": "ok",
+        "notes": "1240 units frozen 2026-07-28; resolve --at nas --layer rgbd,gt",
+        "resolve": { "dataset": "boxes", "snapshot": "v3", "at": "nas",
+                     "layers": ["rgbd", "gt"] } }
     ]
   }
 }
 ```
 
-`location`: `code_default` | `local` | `s3` | `server:<key>` | `downloadable` | `registry` (weights only).
-`match`: `ok` | `mismatch` | `absent`.
+`location`: `code_default` | `local` | `s3` | `server:<key>` | `downloadable` | `registry` (weights only) | `handoff:<handoff_id>` | `dataset:<id>@<snapshot>`.
+`match`: `ok` | `mismatch` | `absent` | `pending` | `unreachable`.
+
+**`unreachable` is not `absent`, and it is the value that gets dropped.** `absent` is a conclusion —
+somebody looked and the data is not there. `unreachable` is a bucket with no key, a host that was
+down, a repo you cannot clone: the *claim* about the data is real and only the check is missing. This
+value exists because the alternative, which this file used to prescribe, was that such a source
+"simply produces no candidates" — and an `input.json` in which the data does not appear is one every
+later reader takes as proof it does not exist. Populated from `/data-discover`'s leads:
+
+| lead status | `match` |
+|---|---|
+| `verified` | `ok` (or `mismatch` when it is there but the shape is wrong) |
+| `gone` | `absent` — looked, not there |
+| `unreachable`, or never probed | `unreachable` — carry the `evidence` across |
+
+`/train-run` Step 1 must **stop** on `unreachable` exactly as it does on `pending`: report what is
+missing and where to fix it (usually `/resources`), never fall through to asking for a path, which is
+how a stale local copy gets picked over the real thing.
 
 `location` drives `/train-run` behavior, it isn't decoration: use directly / fetch first / **run on that host instead**. The `code_default` entry is listed even when `absent` — it's the layout reference and the yardstick for the others.
+
+**`dataset:` is the only location that is a citation rather than a path**, and it is the one to prefer when it exists. Every other value names bytes somewhere; this one names a *frozen membership set* — 1240 specific units, pinned against a census, with the unverified ones counted. `path` stays empty on purpose: the paths are derived, not stored, by
+
+```bash
+python lifecycle/scripts/data-check/census.py resolve \
+  --project {PROJECT} --dataset boxes --snapshot v3 \
+  --at nas --layer rgbd --layer gt \
+  --out {RUN_DIR}/data_resolved.jsonl
+```
+
+which emits one JSONL line per unit with openable paths. Store the `resolve` block (not the resolved paths) in the candidate, re-resolve per run into the run dir, and cite `datasets/boxes@v3` in `run.json -> lineage.parents` — same slot and same form as `handoffs/<id>`. Storing the resolved paths in `input.json` instead would freeze one machine's roots into a config that outlives the machine; `dataset.json` is machine-independent for exactly this reason.
+
+Two refusals to expect and pass through rather than route around (exit 1, not a script bug):
+- **not every unit carries the requested layers at that location** — `resolve` refuses rather than quietly handing over the subset, because 900 units emitted under a citation that says 1240 is a run whose recorded data lies. Confirm with `--allow-missing <the measured count>`, or resolve fewer layers.
+- **`--at` names a `backup`** — refused. A backup is written to, never read from for compute.
+
+`resolve` stats nothing: the paths were true as of the census named in its header, and the header carries that census's id and the snapshot's age. A resolve against a three-week-old census is three-week-old paths — same staleness rule as quoting a count off an old census.
+
+**`handoff:` is the one location that is not machine-fetchable.** Every other value resolves by doing something — read the disk, pull from S3, ssh to a host. This one resolves by *somebody else finishing*, which is why `match` needs a fourth value: `pending` is not `absent`. "The labels aren't here" and "the labels are with vendor-a, due Friday, round 2" are different facts, and only the second one tells `/train-run` to stop rather than to go hunting for a path. Resolve it through `/data-label`:
+
+- `match: "pending"` → the handoff is still open. `/train-run` Step 1 must **stop here**, report the party and the due date, and offer `handoff.py status --open-only` (the skill is `/data-label`) — not fall through to asking the user for a path, which is how a half-labeled directory gets picked instead.
+- `match: "ok"` → the handoff closed `accepted`; `path` is `accepted.location`. Two facts travel with it into `input.json -> sources` and must not be dropped: the **spec version** and **`coverage` / `partial`**. A batch accepted at 0.94 that reads as complete downstream is the fake-metric shape one layer up from the model.
+- The consuming run also cites `handoffs/<handoff_id>` in `run.json -> lineage.parents`. The candidate entry says where the data came from; the lineage edge is what makes "why did the model get worse after the new batch" a DAG walk instead of a guess.
 
 ### `artifacts.json -> items.<name>.origin`
 
@@ -285,9 +331,10 @@ What happens to an input before the model sees it. Read out of code, so every bl
 
 ```json
 {
-  "log_format": "jsonl",
-  "log_path": "train_log.jsonl",
+  "log_format": "tensorboard",
+  "log_path": "output/tb_logs",
   "stdout_extractor": null,
+  "normalize": {"group_by": "step"},
   "record_types": {
     "<type_name>": {
       "fields": ["<field1>", "<field2>"],
@@ -308,15 +355,42 @@ What happens to an input before the model sees it. Read out of code, so every bl
 }
 ```
 
-`log_format` enum:
+`log_format` names **the source** — what the training code itself writes. It says
+nothing about what `/train-run` reads: that is always the normalized stream at
+`<RUN_DIR>/stream.jsonl`, one shape regardless of source. See
+`lifecycle/references/run-mechanics.md` → "Metric stream" for the vocabulary and
+the normalizer's rules.
 
-| Value | Meaning | extractor needed? |
+| Value | What the code does | Normalizer |
 |---|---|---|
-| `jsonl` | Code writes JSON-lines to a file (preferred) | No |
-| `jsonl_stdout` | Code prints JSON-lines to stdout | No (just tail stdout) |
-| `wandb` | Code uses `wandb.log` | `/train-run` reads via wandb API or tails `wandb/*/files/output.log` |
-| `tensorboard` | Code uses `SummaryWriter` | `/train-run` parses event files via `EventAccumulator` |
-| `stdout_regex` | Plain text prints; need pattern extraction | Yes — `stdout_extractor` field has the regex |
+| `jsonl` | writes JSON-lines to a file | built — records copied verbatim, grouping is already the author's |
+| `jsonl_stdout` | prints JSON-lines | built — same reader, pointed at `logs/stdout.log` |
+| `stdout_regex` | plain text prints | built — `stdout_extractor` holds the regex. Last resort: a print-format change breaks it silently |
+| `tensorboard` | `SummaryWriter().add_scalar(...)` | written, **never executed** — needs `tensorboard` importable in the env running `ingest.py` |
+| `wandb` | `wandb.log(...)` | **not built** — no adapter exists |
+
+All adapters live in `ingest.py`. There is no per-format converter.
+
+**On the tensorboard row: written and unverified are not the same as built.** The
+triple→record layer under it (grouping, provenance, restart collisions) is covered
+by `contracts/`, but `read_tfevents` itself has never run against a real event
+file — no environment on hand has the package. Treat the first use as a test:
+check the record count and tag list against what TensorBoard shows for the same
+directory before trusting a checkpoint picked from it.
+
+**On the wandb row: record it, then say so.** The detection is real and belongs in
+the config, but tell the user in the same breath that `/train-run` cannot read
+that source, and offer `stdout_regex` as the interim if the code also prints its
+metrics. Filling `log_format: "wandb"` and moving on hands `/train-run` a run it
+will fail to monitor — the init-records-a-promise-run-can't-keep failure this
+table used to contain.
+
+`normalize.group_by` is `step` | `step+namespace` | `step+wall_time`, and it is a
+**recorded decision** — show the user the observed tag/field list and pick one.
+Only meaningful for sources that emit loose `(tag, step, value)` triples
+(tensorboard); a jsonl source carries the author's own grouping and takes
+`group_by: "step"` with no choice to make. It affects `record_types`
+reconciliation, not ranking.
 
 `done_signal` shapes:
 

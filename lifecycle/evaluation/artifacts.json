@@ -1,5 +1,11 @@
 {
   "_comment": "Static inputs — model weights, evaluator configs. Set once per model version.",
   "items": {},
+
+  "_comment_candidates": "Per item name, an ordered list of usable options found by /eval-init Step 1b. Entry shape and the `location` enum are /train-init references/schemas.md -> `candidates`.\n\nONE LOCATION VALUE IS SPECIFIC TO EVALUATION: `run:<stage>/<run_id>`, a checkpoint produced by a run in THIS project. Prefer it over a bare path whenever it exists. A `.pt` on a disk is an anonymous file; the same file cited as `run:training/run_20260801_101500` carries that run's data, env and own metrics through run.json, which is what makes an eval an edge in the lineage graph instead of a number about an unknown model. Only `mode: \"production\"` runs qualify — the same rule the baseline in Step 4 enforces, for the same reason.\n\n`match`: ok | mismatch | absent | pending | unreachable. `unreachable` is never `absent`.",
+  "candidates": {
+    "items": {}
+  },
+
   "sources": {}
 }

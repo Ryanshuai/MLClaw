@@ -356,6 +356,104 @@ PREPROC_BLOCKS = {
 }
 
 
+MATCH_VALUES = {"ok", "mismatch", "absent", "pending", "unreachable"}
+
+
+def check_candidates(which, cands, dataset, project_root, fnd):
+    """Gate every candidate somebody marked usable.
+
+    In evaluation a candidate is not merely a copy of the data — it decides what
+    the metric MEANS. Three ways an `ok` here produces a number that answers a
+    different question than the one being asked, and none of them errors at
+    runtime:
+
+      a sample count that differs from `dataset.num_samples`
+          mAP over 500 images and mAP over 5000 are both real numbers with the
+          same name. Diffed against a baseline measured on the other one, the
+          delta is sampling noise. /eval-init Step 4 already refuses an
+          unqualified baseline for this reason; this is the same rule early
+          enough to prevent rather than caveat.
+      a checkpoint from a debug run
+          it carries a debug run's data scope, so its number is comparable to
+          nothing.
+      a `pending` handoff that already closed
+          either an `ok` nobody promoted or a fiction, and both send /eval-run
+          to wait for work that already came back.
+    """
+    declared = dataset.get("num_samples")
+    for name, entries in (cands or {}).items():
+        if not isinstance(entries, list):
+            fnd.error(which, "candidates.items.%s" % name,
+                      "must be a list of candidate entries")
+            continue
+        for i, c in enumerate(entries):
+            key = "candidates.items.%s[%d]" % (name, i)
+            match = c.get("match")
+            loc = c.get("location") or ""
+            if match not in MATCH_VALUES:
+                fnd.error(which, key, "match=%r is not one of %s"
+                          % (match, ", ".join(sorted(MATCH_VALUES))))
+                continue
+
+            if match == "ok":
+                n = c.get("samples")
+                if not isinstance(declared, int):
+                    fnd.warn(which, key,
+                             "cannot check the sample count: config.json -> "
+                             "dataset.num_samples is not set, so nothing pins what "
+                             "this metric is measured over")
+                elif not isinstance(n, int):
+                    fnd.error(which, key,
+                              "marked ok with no `samples` count. In evaluation a "
+                              "subset is not a smaller copy of the data, it is a "
+                              "different measurement — record the count so it can "
+                              "be compared against dataset.num_samples=%d" % declared)
+                elif n != declared:
+                    fnd.error(which, key,
+                              "marked ok but holds %d samples while "
+                              "dataset.num_samples=%d. This is `mismatch`, not `ok`: "
+                              "the run would complete and report a real number "
+                              "measured over a different set than the baseline it "
+                              "gets diffed against" % (n, declared))
+
+            if loc.startswith("run:") and match == "ok":
+                ref = loc.split(":", 1)[1]
+                stage, _, run_id = ref.partition("/")
+                rpath = os.path.join(project_root, "stages", stage, "runs",
+                                     run_id, "run.json")
+                run = load_json(rpath)
+                if run is None:
+                    fnd.error(which, key,
+                              "names run %s, whose run.json is not at %s" % (ref, rpath))
+                elif run.get("mode") != "production":
+                    fnd.error(which, key,
+                              "names run %s with mode=%r. Only a production run's "
+                              "checkpoint carries a comparable data scope; a debug "
+                              "run's number is comparable to nothing"
+                              % (ref, run.get("mode")))
+
+            if match == "pending":
+                if not loc.startswith("handoff:"):
+                    fnd.error(which, key,
+                              "match=pending but location=%r — pending means the "
+                              "asset resolves by somebody else finishing, which "
+                              "only handoff: can express" % loc)
+                    continue
+                hid = loc.split(":", 1)[1]
+                hpath = os.path.join(project_root, "handoffs", hid, "handoff.json")
+                h = load_json(hpath)
+                if h is None:
+                    fnd.error(which, key,
+                              "names handoff %s, which does not exist at %s" % (hid, hpath))
+                elif h.get("status") in ("accepted", "rejected", "cancelled"):
+                    fnd.error(which, key,
+                              "names handoff %s, which already closed as %r. A "
+                              "pending candidate pointing at a closed handoff is "
+                              "either an ok nobody promoted or a fiction, and both "
+                              "make /eval-run wait for work that came back"
+                              % (hid, h.get("status")))
+
+
 def check_preprocessing(eval_preproc, train_preproc, train_path, allow_tta, fnd):
     """lifecycle/references/run-mechanics.md 'Preprocessing contract (cross-stage)'.
 
@@ -443,6 +541,16 @@ def validate(stage_dir, training_input=None, project_root=None, allow_tta=False)
     facts = check_sources(gt_items, gt_sources, pairing, project_root, stage_dir, fnd)
     check_dataset_agreement(config.get("dataset") or {}, gt_items,
                             eval_preproc.get("label_transform"), facts, fnd)
+    dataset = config.get("dataset") or {}
+    check_candidates("input.json", (inputs.get("candidates") or {}).get("items"),
+                     dataset, project_root, fnd)
+    artifacts = load_json(os.path.join(stage_dir, "artifacts.json")) or {}
+    # Artifact candidates are weights, not data, so the sample-count gate does
+    # not apply to them — an empty dataset here suppresses it while leaving the
+    # run: and pending: checks, which do.
+    check_candidates("artifacts.json",
+                     (artifacts.get("candidates") or {}).get("items"),
+                     {}, project_root, fnd)
     check_preprocessing(eval_preproc,
                         (train_json or {}).get("preprocessing") if train_json else None,
                         training_input, allow_tta, fnd)
@@ -452,6 +560,7 @@ def validate(stage_dir, training_input=None, project_root=None, allow_tta=False)
         "checked": {
             "input.json": os.path.join(stage_dir, "input.json"),
             "config.json": os.path.join(stage_dir, "config.json"),
+            "artifacts.json": os.path.join(stage_dir, "artifacts.json"),
             "training_input": training_input if train_json else None,
         },
         "errors": fnd.errors,
