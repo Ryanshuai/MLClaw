@@ -85,7 +85,9 @@ README.md                           ← what MLClaw is, and which stages are bui
     lease/SKILL.md                  ← /lease
     data-label/SKILL.md             ← /data-label
     ask-human/SKILL.md              ← /ask-human
+    data/SKILL.md                   ← /data
     data-collect/SKILL.md           ← /data-collect
+    data-report/SKILL.md            ← /data-report
     data-check/SKILL.md             ← /data-check
     data-freeze/SKILL.md            ← /data-freeze
     data-discover/SKILL.md          ← /data-discover
@@ -149,6 +151,10 @@ lifecycle/
       census.py                     ← scan / show / snapshot / resolve / status; three states, never two
     data-discover/
       discover.py                   ← sources / record / probe / report; `gone` ≠ `unreachable`
+    data-report/
+      board.py                      ← the whole line as one self-contained HTML page
+    data/
+      phase.py                      ← join census + handoffs + snapshots + citing runs → phase, gates
     resources/
       parse_ssh_config.py           ← parse ~/.ssh/config into server entries
     shared/                         ← the run step chain lives here, not under any one run skill
@@ -250,6 +256,7 @@ stages/
     output.json                     ← filled by /{stage}-init
     provenance.json                 ← sidecar: source_mode, sources_checked, evidence, unresolved (training only so far)
     artifacts/                      ← actual artifact files (gitignored)
+    data/                           ← actual input data (gitignored)
     runs/
       run_{YYYYMMDD}_{HHmmss}/      ← one execution
         run.json                    ← run record (code, env, metrics, steps, lineage)

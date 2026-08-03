@@ -100,6 +100,8 @@ what, what is deliberately *not* a phase (Archive, Train), and how `/data` compo
 | `/data-collect` | Name a resource, name a path on it, pull — and record what arrived. Ingest only, one direction. Never waits for a human — that is `/data-label` |
 | `/data-check` | Declare a dataset's layout contract, then census it across every machine: GAP / DRIFT / UNREPLICATED / UNARCHIVED / INCOMPLETE. Reports; moves no byte. **Freezing is `/data-freeze`'s** — same script, different skill |
 | `/data-freeze` | Freeze a citable snapshot so a run can record exactly which units it consumed — `datasets/<id>@<snapshot>`, the boundary the model lifecycle cites |
+| `/data-report` | The whole line as one self-contained HTML board, Airflow-grid shaped: datasets × censuses, each column that census **replayed**. Computes nothing; no auto-refresh on purpose |
+| `/data` | Where a dataset sits on the line, what blocks it, what is next — a join across census + handoffs + snapshots + runs that no single skill can perform. Refuses transitions whose preconditions fail |
 | `/refactor-init` | Clone research repo, analyze codebase, classify modules (core/support/dead), extract paper benchmark targets |
 | `/refactor-run` | Execute one refactoring round: make changes → run benchmark → compare with paper → commit or revert |
 | `/refactor-report` | Generate refactoring audit report: round changelog, rollback points, verification results, reproduction instructions |
