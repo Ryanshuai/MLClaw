@@ -41,9 +41,9 @@ For each server found, create an entry with host, username, ssh_key_path, alias 
 
 ### Python Environment Manager
 
-Check in preference order: mamba -> conda -> uv. Record first found in `resources.json -> local.env_manager`. Also run `conda env list` to record existing environments.
+Check in preference order: **pixi -> mamba -> conda -> uv** — `pixi` first because it pins a per-directory lockfile, so an env it resolves can be rebuilt from the repo instead of depending on a named env still existing on somebody's machine. Record first found in `resources.json -> local.env_manager`. Also run `conda env list` (and `pixi info` where present) to record existing environments.
 
-If none found, warn that `/refactor-init` needs mamba or conda.
+If none found, warn that `/refactor-init` needs pixi, mamba or conda.
 
 ### Models & Artifacts
 

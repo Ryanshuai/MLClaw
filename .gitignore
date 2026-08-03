@@ -8,3 +8,8 @@ resources.json
 # Python bytecode
 __pycache__/
 *.pyc
+
+# pixi's solved environments. `pixi.toml` and `pixi.lock` ARE tracked — the lock
+# is the point, it is what makes the env reconstructible from the repo. What must
+# not be committed is the ~200-directory materialised env under it.
+.pixi/

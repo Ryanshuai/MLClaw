@@ -1,0 +1,50 @@
+# MLClaw's own environment. Read the next paragraph before adding a dependency.
+#
+# THIS FILE DOES NOT WEAKEN THE STDLIB-ONLY CONTRACT. That contract is about what
+# the scripts *import*; this file is about which *interpreter* runs them. The two
+# are separate, and `contract_pixi.py` keeps the first one true by asserting this
+# manifest declares no third-party package outside `[feature.probes]`.
+#
+# Latest Python, unpinned, on purpose: nothing here targets a customer's fixed
+# runtime. What that replaced was worse than an unpinned version — CI declared a
+# 3.8 floor that the code had already left, since six files use `dict | dict`
+# (PEP 584, 3.9) and two use `str.removeprefix` (PEP 616, 3.9). Both are valid
+# *syntax* on 3.8, so `compileall` passed and the fictional floor read as tested.
+#
+#   pixi run test          the contract suite
+#   pixi run compile       byte-compile every script
+#   pixi run -e probes …   the ONE env with vendor SDKs; see [feature.probes]
+
+[workspace]
+name = "mlclaw"
+description = "Conversation-driven ML lifecycle management"
+channels = ["conda-forge"]
+platforms = ["linux-64", "osx-arm64", "win-64"]
+
+[dependencies]
+# Only the interpreter, and unpinned. A package here would break the property that
+# makes the contract suite trustworthy on any machine: it imports nothing but the
+# standard library, so there is nothing to install and nothing to go stale.
+python = "*"
+
+# The vendor SDKs the tracking probes reach for, isolated on purpose.
+#
+# `discover.py`'s service-family probes shell out to `sys.executable`, so the
+# packages have to be importable by the interpreter running discover.py — which is
+# exactly why they belong in a named environment rather than in `default`. Run the
+# probes with `pixi run -e probes python lifecycle/scripts/discover/discover.py …`
+# and the stdlib-only guarantee still holds everywhere else.
+#
+# mlflow is deliberately absent: its listing is urllib-only REST, which is why it
+# is the one service listing testable against a stub. Prefer REST over an SDK when
+# a backend offers both — it needs no environment at all. Same for clearml,
+# neptune and comet once their REST listings land.
+[feature.probes.pypi-dependencies]
+wandb = "*"
+
+[environments]
+probes = ["probes"]
+
+[tasks]
+test = "python -m unittest discover -s contracts -t contracts -p 'contract_*.py'"
+compile = "python -m compileall -q lifecycle/scripts contracts"

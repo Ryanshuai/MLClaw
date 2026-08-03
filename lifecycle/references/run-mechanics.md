@@ -429,9 +429,10 @@ Environment resolution:
 
 5. **Remote execution**: server's `python_path` in `resources.json → servers.{key}` takes precedence. Local env resolution doesn't apply.
 
-**Env manager** is read from `{WORKSPACE}/resources.json → local.env_manager.tool` (mamba/conda/uv). If empty, invoke `/resources` to detect it.
+**Env manager** is read from `{WORKSPACE}/resources.json → local.env_manager.tool` (pixi/mamba/conda/uv). If empty, invoke `/resources` to detect it. **Prefer `pixi` when it is present**: it is the one that pins a lockfile per project directory, so the env a run resolves is reconstructible from the repo rather than from a named env somebody has to still have — which is the difference between a run whose env can be rebuilt and one whose env is a machine's local state. This matters directly to `/repro`'s env axis.
 
 Run skills use `{run_in_env}` as shorthand for the activation command:
+- pixi: `pixi run --manifest-path {project_dir}/pixi.toml` — the env is keyed to the directory and its lockfile, not to a global name
 - mamba/conda: `mamba run -n {env_name}` or `conda run -n {env_name}`
 - uv/venv: `source {venv_path}/bin/activate &&` (Linux) or `{venv_path}/Scripts/activate &&` (Windows)
 
