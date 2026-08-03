@@ -65,10 +65,10 @@ The consuming run also cites `handoffs/<handoff_id>` in `run.json -> lineage.par
 **The schema lives in `/train-init` `references/schemas.md` → `candidates`** — entry shape, the full
 `location` enum, and the `match` enum including why `unreachable` is not `absent`. Read it there.
 It is not restated here on purpose: a second copy of that table is a copy that drifts, which is the
-same reasoning that moved the source sweep out of `/train-init` into `/data-discover` rather than
+same reasoning that moved the source sweep out of `/train-init` into `/discover` rather than
 copying it into this skill.
 
-Locating candidates is `/data-discover`'s job. What this skill owns is the **`match` judgment**, and
+Locating candidates is `/discover`'s job. What this skill owns is the **`match` judgment**, and
 two parts of it have no training equivalent.
 
 ### `samples` is part of the metric, not a property of the copy

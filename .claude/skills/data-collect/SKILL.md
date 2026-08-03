@@ -104,7 +104,7 @@ tailnet IP through it. Same split as `rig.json -> host.server` and `/data-label`
   if it is missing, invoke `/resources` and resume.
 - **Suggests**: `/data-check scan` — it is what turns "the pull said 400 files" into "the units are
   present at the authority", and it is what clears `UNARCHIVED`. Then `/data`.
-- **Upstream, when the user cannot name a path**: `/data-discover` is what finds out where the data
+- **Upstream, when the user cannot name a path**: `/discover` is what finds out where the data
   is; this skill pulls once somebody knows. A `verified` lead is exactly what `--from` / `--at` need.
   Don't go hunting from here — that is a sweep, and there is one.
 

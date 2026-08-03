@@ -29,9 +29,9 @@ The user brings training code (`train.py`, `pretrain.py`, `accelerate launch ...
 
 These files are **mostly schema** — WHAT the code needs and produces. Two deliberate exceptions, both specific to training:
 
-- **`candidates`** (in `input.json` / `artifacts.json`) — init records which of the located data and weights actually fit, and how well. Training data is a project-level asset that rarely changes, so settling it here is what makes "init is done" a real state rather than one that collapses the first time you try to launch. It also locks the dataset for `/train-tune`, whose whole comparability premise is that every trial saw the same data. `/infer-init` keeps the original rule, since inference inputs genuinely do change every run — it calls `/data-discover` per run instead, if at all.
+- **`candidates`** (in `input.json` / `artifacts.json`) — init records which of the located data and weights actually fit, and how well. Training data is a project-level asset that rarely changes, so settling it here is what makes "init is done" a real state rather than one that collapses the first time you try to launch. It also locks the dataset for `/train-tune`, whose whole comparability premise is that every trial saw the same data. `/infer-init` keeps the original rule, since inference inputs genuinely do change every run — it calls `/discover` per run instead, if at all.
 
-  **`/eval-init` has the same case for candidates and reaches them differently**: the locating half is `/data-discover`, which it calls rather than growing a second copy of the sweep. What is genuinely eval-specific is the `match` judgment against its own `items` + ground-truth `pairing`.
+  **`/eval-init` has the same case for candidates and reaches them differently**: the locating half is `/discover`, which it calls rather than growing a second copy of the sweep. What is genuinely eval-specific is the `match` judgment against its own `items` + ground-truth `pairing`.
 - **`preprocessing`** (in `input.json`) — the transform chain, read out of the code. It's a cross-stage contract, not a per-run choice.
 
 Which candidate a given run actually used stays per-run (the run's `sources.json` snapshot).
@@ -75,7 +75,7 @@ For item/source schemas and type classification, read `references/schemas.md`. T
 
 Before analyzing anything, find out **what you can see** — the way a person taking over a project starts by checking which systems they have access to. Organize by source, not by element: each backend gets contacted once here, and every credential gap surfaces together rather than ambushing you at Step 4. Results → `provenance.json -> sources_checked`.
 
-**The data half of this sweep is not this skill's.** Finding out what data exists is `/data-discover`, and it is invoked here as a sub-skill (utility pattern, like `/resources`). Two reasons it does not live here: `/eval-init` and `/infer-init` need exactly the same excavation and would otherwise each grow their own copy; and a lead is *longer-lived than an init* — access arrives weeks later, and `discovery/leads.json` is what carries the unresolved ones forward, where a `provenance.json` written once does not. This sweep keeps the model-side sources: weights, params, tracking backend, compute, hazards.
+**The data half of this sweep is not this skill's.** Finding out what data exists is `/discover`, and it is invoked here as a sub-skill (utility pattern, like `/resources`). Two reasons it does not live here: `/eval-init` and `/infer-init` need exactly the same excavation and would otherwise each grow their own copy; and a lead is *longer-lived than an init* — access arrives weeks later, and `discovery/leads.json` is what carries the unresolved ones forward, where a `provenance.json` written once does not. This sweep keeps the model-side sources: weights, params, tracking backend, compute, hazards.
 
 | Source | What to look for | How | Default? |
 |---|---|---|---|
@@ -150,11 +150,11 @@ If a value can't be determined, leave it empty rather than filling in the framew
 
 Fill `input.json -> candidates` and `artifacts.json -> candidates` — the list `/train-run` will pick from.
 
-**The data candidates are `/data-discover`'s output — read `discovery/leads.json`, don't re-excavate.** A `verified` lead becomes a candidate with `match: "ok"`; a `gone` one becomes `match: "absent"`; a lead that was never probed or came back `unreachable` becomes **`match: "unreachable"`**, which is the value that must not be skipped.
+**The data candidates are `/discover`'s output — read `discovery/leads.json`, don't re-excavate.** A `verified` lead becomes a candidate with `match: "ok"`; a `gone` one becomes `match: "absent"`; a lead that was never probed or came back `unreachable` becomes **`match: "unreachable"`**, which is the value that must not be skipped.
 
 **An unreachable source produces a candidate, not silence.** Dropping it yields an `input.json` in which that data does not appear at all, and every later reader concludes it does not exist — the claim is real, only the check is missing. Record it with its evidence and let `/train-run` refuse rather than guess.
 
-**Weight reachability was already settled in Step 0 — don't re-ask and don't reconnect.** Read `provenance.json -> sources_checked`. Two candidate sources are specific to this sub-step, because neither Step 0 nor `/data-discover` goes looking for them:
+**Weight reachability was already settled in Step 0 — don't re-ask and don't reconnect.** Read `provenance.json -> sources_checked`. Two candidate sources are specific to this sub-step, because neither Step 0 nor `/discover` goes looking for them:
 
 | Source | Where from |
 |---|---|

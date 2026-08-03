@@ -58,20 +58,20 @@ Every skill knows its position in this graph. Two types of edges:
 | `/resources` | — (workspace-level utility) | return to caller |
 | `/lease` | — (utility, on demand) | return to caller |
 | `/ask-human` | project.json | whatever `why` said was blocked |
-| `/infer-init` | project.json, code available. May call `/data-discover` per run — infer inputs change every run, so it has **no `candidates` by design** | `/infer-run` |
+| `/infer-init` | project.json, code available. May call `/discover` per run — infer inputs change every run, so it has **no `candidates` by design** | `/infer-run` |
 | `/infer-run` | infer-init done | (done) |
-| `/eval-init` | project.json, code available. Calls `/data-discover` for the data; finds checkpoints itself | `/eval-run` |
+| `/eval-init` | project.json, code available. Calls `/discover` for the data; finds checkpoints itself | `/eval-run` |
 | `/eval-run` | eval-init done | `/eval-report`, `/eval-triage` |
 | `/eval-report` | eval-run completed | (done) |
 | `/eval-triage` | eval-run completed **and** `output.json -> per_sample.path` non-null | whatever the piles named: `/data-label` (`label_wrong`), the data line (`sample_hard`), `/train-init` or a `/train-run` fork (`model_wrong`). Never `/eval-run` "to try again" |
-| `/train-init` | project.json, code available. Calls `/data-discover` for the data half of Step 0 | `/train-run` |
+| `/train-init` | project.json, code available. Calls `/discover` for the data half of Step 0 | `/train-run` |
 | `/train-run` | train-init done | `/eval-run`, `/train-tune` |
 | `/train-tune` | train-init done, ≥1 prior train-run completed | `/train-tune-report` (auto at close) |
 | `/train-tune-report` | a tune session with ≥1 run | (done) |
 | `/refactor-init` | project.json | `/refactor-run` |
 | `/refactor-run` | refactor-init done (plan.json) | `/refactor-run` (next round), `/refactor-report` when complete |
 | `/refactor-report` | refactor-run completed | (done) |
-| `/data-discover` | project.json — *nothing declared yet, which is the point* | `/data-check` to declare + census what is verified; `/data-collect` to pull it; `/ask-human` for `gone` |
+| `/discover` | project.json — *nothing declared yet, which is the point* | `/data-check` to declare + census what is verified; `/data-collect` to pull it; `/ask-human` for `gone` |
 | `/data-collect` | project.json (+ resources.json for a server) | `/data-check scan` to confirm it landed, then `/data` |
 | `/data-online-sample` | `dataset.json` — its `identity` is what both sides count. **Not** a frozen snapshot: that is needed to *compare* a reading, not to take one | a drift comparison against a frozen snapshot; `/data-collect --cite-window` to pull the interesting units; `/ask-human` for a `decision` on retention or vendor access |
 | `/data-check` | project.json | on GAP: whatever `layers[].produced_by` names. On a clean census: `/data-freeze` |
@@ -97,7 +97,15 @@ honest step is to go look, not to train.
 
 **On exit** — check `suggests` column. Offer the next skill. If user accepts, invoke it as a sub-skill.
 
-**`/resources`**, **`/lease`** and **`/data-discover`** are utility skills — called on-demand, invoked standalone too, and none appears in a stage's dependency chain; they interrupt one and return. `/resources` when credentials are missing, `/lease` when the run needs a machine it doesn't have, **`/data-discover` when an `-init` has to find out what data exists at all.**
+**`/resources`**, **`/lease`** and **`/discover`** are utility skills — called on-demand, invoked standalone too, and none appears in a stage's dependency chain; they interrupt one and return. But they are three different jobs and the first two used to be described as one:
+
+| Skill | Job |
+|---|---|
+| **`/discover`** | **goes and looks.** The sweep: leads, probes, four verdicts, and the access worklist that falls out of every `unreachable` naming what it was missing |
+| **`/resources`** | **keeps the registry.** `resources.json` is the declaration of what is configured and usable, which every run skill reads through `${}`. Verified sweep results are written *into* it |
+| **`/lease`** | **acquires.** A machine that does not exist yet, with a dead-man switch |
+
+The first two split the way `census.py` and `dataset.json` do — one is a dated observation that may be partial, the other is the durable contract — and for the same reason: a missing credential is not the substrate beneath discovery, it is discovery's most common **finding**.
 
 Two reasons the sweep is not `/train-init`'s, and be precise about the first: **`/train-init` was the only skill that ever owned one**, so nothing was de-duplicated — what it recorded was a *plan to copy it into `/eval-init` later*, and extracting it **prevented the fork rather than repairing one**. A second copy drifts, so the copy never happened. The binding reason is the second, and it holds however many copies exist: **a lead outlives an init.** Access arrives weeks after a handover starts, and `discovery/leads.json` carries the unresolved ones forward where a `provenance.json` written once and declared done cannot. So the data half moved out; the model half (weights, params, tracking, compute, hazards) stayed.
 

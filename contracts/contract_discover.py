@@ -1,0 +1,1149 @@
+"""On a handover, "I could not look" is the answer you get for weeks.
+
+`/discover` runs when nobody can tell you what data exists, which means it
+runs when access has not arrived yet — credentials come after responsibility
+does. So the majority state of its findings, early on, is `unreachable`, and the
+single thing that would make the skill actively harmful is spelling that `gone`.
+Somebody would spend a week chasing data that is fine, and the one dataset that
+really did vanish would be indistinguishable in the noise.
+
+That is CLAUDE.md "Never report data you could not look at", in the domain where
+it bites hardest: a census at least knows which machines it asked, while a
+discovery sweep does not know what it does not know.
+
+The checks below are grouped by what would go wrong if the code drifted: a
+failure to look reported as a finding, a lead recorded without the evidence that
+makes it interpretable later, and a report that reads as an inventory.
+"""
+import json
+import os
+import unittest
+from datetime import datetime, timedelta, timezone
+
+from helpers import TempDirCase, load_script, run_script
+
+SCRIPT = "discover/discover.py"
+
+
+class DiscoverCase(TempDirCase):
+    def setUp(self):
+        super().setUp()
+        # A workspace, so resources.json sits one level above the project the
+        # way it really does.
+        self.project = self.path("ws", "proj")
+        os.makedirs(self.project, exist_ok=True)
+        self.write_json("ws/proj/project.json", {"name": "proj"})
+
+    def resources(self, **blocks):
+        self.write_json("ws/resources.json", {
+            "aws": {"access_key_id": "", "secret_access_key": "", "region": "",
+                    "s3_bucket": ""},
+            "servers": {}, "local": {"base_paths": []},
+            "outsourcing": {}, **blocks})
+
+    def record(self, path, *extra, on=None, st="doc", ev="a wiki page"):
+        args = ["record", "--project", self.project, "--path", path,
+                "--source-type", st, "--evidence", ev]
+        if on:
+            args += ["--on", on]
+        return run_script(SCRIPT, *args, *extra)
+
+    def probe(self, *extra):
+        return run_script(SCRIPT, "probe", "--project", self.project, *extra)
+
+    def report(self):
+        rc, out, err = run_script(SCRIPT, "report", "--project", self.project, "--json")
+        self.assertEqual(rc, 0, err)
+        return out
+
+    def table(self):
+        rc, out, err = run_script(SCRIPT, "report", "--project", self.project)
+        self.assertEqual(rc, 0, err)
+        return out
+
+    def leads(self):
+        return self.read_json("ws/proj/discovery/leads.json")["leads"]
+
+
+class CouldNotLookIsNeverGone(DiscoverCase):
+    """CLAUDE.md -> "Never silently": never report data you could not look at.
+
+    Four statuses exist so that two specific pairs never collapse. `claim` vs
+    `verified` is the /ask-human split. `gone` vs `unreachable` is this one, and
+    it is the pair that decides whether the skill is useful or actively
+    misleading during the weeks when access is still arriving.
+    """
+
+    def test_a_local_path_that_is_not_there_is_gone(self):
+        """The one place `gone` is a real reading: we could look, and it is not
+        there."""
+        self.record(self.path("nope", "highway_2024"))
+        rc, out, _ = self.probe()
+        self.assertEqual(rc, 1, "a `gone` finding is a verdict, exit 1")
+        self.assertEqual(out["counts"]["gone"], 1)
+        self.assertEqual(self.leads()[0]["status"], "gone")
+
+    def test_a_directory_that_cannot_be_read_is_unreachable_not_gone(self):
+        """Permission-denied is the most common way a sweep manufactures a false
+        `gone`: the path exists, the data may be fine, and the only thing that
+        happened is that we were not allowed to look."""
+        d = self.path("locked")
+        os.makedirs(d, exist_ok=True)
+        os.chmod(d, 0o000)
+        self.addCleanup(os.chmod, d, 0o755)
+        if os.access(d, os.R_OK):
+            self.skipTest("running as a user that ignores directory permissions")
+        self.record(d)
+        rc, out, _ = self.probe()
+        self.assertEqual(rc, 0, "not being allowed to look is not a finding")
+        self.assertEqual(self.leads()[0]["status"], "unreachable")
+        self.assertEqual(out["counts"]["gone"], 0)
+
+    def test_an_s3_lead_with_no_credentials_is_unreachable(self):
+        """The handover case exactly: the bucket name came off a wiki page and
+        there is no key yet. `absent` here would send somebody hunting."""
+        self.resources()
+        self.record("s3://some-bucket/highway_2024/")
+        rc, _out, _ = self.probe()
+        self.assertEqual(rc, 0)
+        self.assertEqual(self.leads()[0]["status"], "unreachable")
+
+    def test_an_unknown_server_is_unreachable_not_gone(self):
+        self.resources()
+        self.record("/mnt/nas/highway", on="server:ghost")
+        self.probe()
+        lead = self.leads()[0]
+        self.assertEqual(lead["status"], "unreachable")
+        self.assertIn("ghost", lead["probes"][-1]["detail"])
+
+    def test_an_unprobed_lead_is_a_claim_and_not_a_finding(self):
+        """Recording is not checking. A lead sitting at `claim` has to be
+        visibly outstanding, or a wiki page's assertions read as results."""
+        self.record("s3://b/x/")
+        self.assertEqual(self.leads()[0]["status"], "claim")
+        r = self.report()
+        self.assertEqual(len(r["not_checked"]["unprobed_leads"]), 1)
+        self.assertEqual(r["verified"], [])
+
+
+class ALeadCarriesTheEvidenceOrItIsARumour(DiscoverCase):
+    """CLAUDE.md -> "Never silently": never let somebody's word become a checked
+    fact. Here the word arrives as a path in a document, and the question a
+    reader has six months later is which paths came from code that ran and which
+    came from a wiki page written from memory — because that is what decides
+    which `gone` is worth escalating.
+    """
+
+    def test_evidence_is_required(self):
+        rc, _out, err = run_script(SCRIPT, "record", "--project", self.project,
+                                   "--path", "/x", "--source-type", "doc")
+        self.assertNotEqual(rc, 0, "a lead with no evidence must not be recordable")
+
+    def test_the_source_type_is_recorded_and_survives_probing(self):
+        self.record("/x", st="code", ev="train.py:44 DATA_ROOT")
+        self.probe()
+        lead = self.leads()[0]
+        self.assertEqual(lead["source_type"], "code")
+        self.assertEqual(lead["evidence"], "train.py:44 DATA_ROOT")
+
+    def test_a_probe_appends_rather_than_replacing(self):
+        """Access arrives late, so the interesting record is the sequence: this
+        was unreachable in July and verified in August. Overwriting would lose
+        the only evidence that the gap existed."""
+        self.record(self.path("nope"))
+        self.probe()
+        self.probe("--all")
+        self.assertEqual(len(self.leads()[0]["probes"]), 2)
+
+    def test_a_duplicate_path_is_refused_not_silently_added(self):
+        """Two leads for one place get probed twice and reported twice, turning
+        one location into two findings and inflating every count."""
+        self.record("/x")
+        rc, out, _ = self.record("/x")
+        self.assertEqual(rc, 1)
+        self.assertIn("already recorded", out["refused"])
+        self.assertEqual(len(self.leads()), 1)
+        rc, _, _ = self.record("/x", "--again")
+        self.assertEqual(rc, 0, "--again is the deliberate path")
+
+
+class ASweepNeverReadsAsAnInventory(DiscoverCase):
+    """CLAUDE.md -> "Never silently": a count from a partial reading is a lower
+    bound and must be said as one.
+
+    A discovery report is worse than a partial census in one respect: a census
+    knows which machines it failed to ask, while a sweep cannot know about data
+    nobody wrote down. Handing somebody a findings list on day three of a
+    handover, with the caveats underneath, is how a missing dataset is
+    discovered in month four.
+    """
+
+    def test_the_report_states_it_is_not_exhaustive(self):
+        self.record("/x")
+        r = self.report()
+        self.assertFalse(r["exhaustive"])
+        self.assertTrue(r["why_not_exhaustive"])
+
+    def test_an_unmeasured_size_prints_as_a_dash_and_never_as_zero(self):
+        """The table's `—` carries three different facts — nobody looked, we
+        could not look, or the walk ran out of budget — and the row's status says
+        which. A `0` would collapse all three into "there is no data here",
+        which is the one conclusion none of them supports.
+        """
+        self.record("s3://b/x/")                       # recorded, never probed
+        t = self.table()
+        self.assertIn("—", t)
+        self.assertNotIn(" 0 B", t)
+        self.assertIn("LOWER BOUND", t,
+                      "a total with anything unmeasured must say it is a floor")
+
+    def test_a_measured_total_is_flagged_as_a_lower_bound_in_json_too(self):
+        os.makedirs(self.path("real"), exist_ok=True)
+        with open(self.path("real", "a.bin"), "wb") as fh:
+            fh.write(b"x" * 2048)
+        self.record(self.path("real"))
+        self.record("s3://b/never-probed/", "--again")
+        self.probe("--id", "lead_0001")
+        m = self.report()["measured"]
+        self.assertEqual(m["bytes"], 2048)
+        self.assertEqual(m["files"], 1)
+        self.assertTrue(m["is_lower_bound"])
+
+    def test_gaps_are_keyed_above_the_findings(self):
+        """Order, not merely presence: `not_checked` precedes the result keys so
+        that reading top to bottom reaches the caveat first."""
+        self.record("/x")
+        keys = list(self.report())
+        self.assertLess(keys.index("not_checked"), keys.index("verified"))
+        self.assertLess(keys.index("not_checked"), keys.index("counts"))
+
+    def test_every_source_says_whether_it_is_usable_and_why_not(self):
+        """`sources` exists to make "what did you not check" answerable at all.
+        Without a list of what could have been checked, a findings list is
+        unfalsifiable — it looks identical after one probe and after twenty.
+
+        Asserted structurally rather than on a count, because whether *this*
+        machine has AWS credentials is not a property of MLClaw.
+        """
+        self.resources(servers={"box": {"host": "10.0.0.5"}, "nohost": {}})
+        rc, out, err = run_script(SCRIPT, "sources", "--project", self.project)
+        self.assertEqual(rc, 0, err)
+        self.assertTrue(out["sources"])
+        for s in out["sources"]:
+            self.assertIn("usable", s, f"{s} does not say whether it is usable")
+            if not s["usable"]:
+                self.assertTrue(s.get("why"), f"{s['source']} is blocked with no reason")
+        blocked = [s for s in out["sources"] if not s["usable"]]
+        self.assertEqual(out["counts"]["blocked"], len(blocked))
+        # The two blockages yield DIFFERENT statuses downstream, so one sentence
+        # cannot cover both. An access-blocked source produces `unreachable`; a
+        # doc or a person produces `claim` no matter how long you wait.
+        if any(s["blocked_by"] in ("credential", "registration") for s in blocked):
+            self.assertIn("UNREACHABLE", out["note"],
+                          "a blocked source must be said to yield UNREACHABLE, "
+                          "not nothing")
+        if any(s["blocked_by"] == "human" for s in blocked):
+            self.assertIn("`claim`", out["note"],
+                          "a doc or a person never yields `unreachable` — saying "
+                          "so would put them in the waiting-for-access queue")
+
+    def test_a_missing_resources_file_is_a_blocked_source_not_an_error(self):
+        """Day one of a handover: nothing is registered yet. That is the normal
+        state this skill runs in, so it must report rather than fail."""
+        rc, out, err = run_script(SCRIPT, "sources", "--project", self.project)
+        self.assertEqual(rc, 0, err)
+        self.assertTrue(any(s["source"] == "resources.json" and not s["usable"]
+                            for s in out["sources"]))
+
+    def test_a_vendor_is_never_probed(self):
+        """An outsourcing party can hold the only copy of a batch, and no
+        listing will ever reveal it. They are a source of answers, so the report
+        routes to /ask-human instead of pretending a probe could settle it."""
+        self.resources(outsourcing={"vendor-a": {"name": "Vendor A"}})
+        _rc, out, _ = run_script(SCRIPT, "sources", "--project", self.project)
+        row = next(s for s in out["sources"] if s["source"] == "outsourcing:vendor-a")
+        self.assertFalse(row["usable"])
+        self.assertEqual(row["fix"], "/ask-human")
+
+    def test_it_never_declares_a_dataset(self):
+        """`identity.unit_glob`'s depth decides every unit id and a wrong depth
+        yields zero units with no error. A guessed contract is worse than none,
+        so discovery hands over a verified path and stops."""
+        os.makedirs(self.path("real", "260731", "s000"), exist_ok=True)
+        self.record(self.path("real"))
+        self.probe()
+        self.assertEqual(self.leads()[0]["status"], "verified")
+        self.assertFalse(os.path.isdir(os.path.join(self.project, "datasets")),
+                         "discovery must not create a dataset declaration")
+        self.assertIn("/data-check", self.report()["next"])
+
+
+if __name__ == "__main__":
+    unittest.main()
+
+
+class AProbeNeverGuessesWhichProbe(DiscoverCase):
+    """CLAUDE.md -> "Contracts": a record written now and read later by somebody
+    who can no longer verify it. A lead carries a status and a `last_probed`, so a
+    reader six months on takes "probed, unreachable" at face value — there is no
+    way to tell from the file that nothing actually looked.
+
+    The dispatch used to be `local` / `s3` / else -> server, with
+    `on.split(":")[-1]` as the server key. Every unhandled value therefore probed
+    as a server: `tracking:wandb` came back `unreachable: no server 'wandb' in
+    resources.json`, which is the right verdict reached by nonsense, carrying a
+    fix instruction that tells the reader to register a machine that does not
+    exist. A typo did the same. This is the "wrong answer that reads as right"
+    class, and it is worse than a refusal precisely because the lead looks done.
+
+    Found by pointing the skill at a real handover: three S3 buckets classified
+    correctly off a live AccessDenied, and the W&B locator quietly misfiled.
+    """
+
+    def test_an_unknown_on_is_refused_at_record_time(self):
+        rc, out, _ = self.record("/x", on="tracker:wandb", st="code", ev="typo")
+        self.assertEqual(rc, 2, "validated at write time so a value nothing can "
+                                "dispatch never enters the record")
+        self.assertIn("allowed", json.dumps(out))
+
+    def test_a_tracking_lead_is_never_probed_as_a_server(self):
+        """`tracking:wandb` has a probe now; what must never come back is a
+        verdict about a SERVER named wandb, which is what the old dispatch
+        produced. Whatever the environment yields here — no key, no package, a
+        real answer — it must not mention resources.json."""
+        self.record("ent/proj", on="tracking:wandb", st="code",
+                    ev="train.py:8 wandb.init")
+        rc, out, _ = self.probe("--all")
+        self.assertEqual(rc, 0)
+        got = out["probed"][0]
+        self.assertNotIn("resources.json", got["detail"])
+        self.assertNotEqual(got["status"], "gone",
+                            "a missing key or package is never absence")
+
+    def test_an_unknown_tracking_backend_says_it_is_not_absence(self):
+        self.record("ent/proj", on="tracking:nosuchthing", st="code", ev="t.py:2")
+        rc, out, _ = self.probe("--all")
+        got = out["probed"][0]
+        self.assertEqual(got["status"], "unreachable")
+        self.assertIn("absent", got["detail"],
+                      "an unbuilt probe must say it is not absence")
+        self.assertNotIn("resources.json", got["detail"])
+
+    def test_no_credential_says_it_is_a_credential_lead_not_an_absence(self):
+        self.record("ent/proj", on="tracking:clearml", st="code", ev="t.py:2")
+        rc, out, _ = self.probe("--all")
+        got = out["probed"][0]
+        self.assertEqual(got["status"], "unreachable")
+        self.assertIn("credential", got["detail"])
+        self.assertIn("not an absence", got["detail"])
+
+    def test_a_credential_with_no_listing_adapter_states_both_halves(self):
+        """Reporting only "not counted" throws away the actionable half — that a
+        credential WAS found. Reporting only the credential implies somebody
+        counted the runs. Both, or the reader draws one of two wrong conclusions.
+
+        Driven against a SYNTHETIC backend, and the reason is a lesson this test
+        already learned twice: it used to name mlflow, then neptune, and each time
+        the named backend acquired a listing the check went stale while staying
+        green about the wrong thing. No shipped backend is in this state now — every
+        service one has a REST listing and wandb has its SDK — but the branch is
+        what a NEW backend lands in, so it has to keep working. Naming a real one
+        again would just schedule the same drift.
+        """
+        mod = load_script(SCRIPT)
+        mod.TRACKING["futurething"] = {"family": "service", "pkg": "futurething",
+                                       "env": ("FUTURETHING_TOKEN",),
+                                       "files": (), "listing": None}
+        os.environ["FUTURETHING_TOKEN"] = "not-a-real-token"
+        self.addCleanup(os.environ.pop, "FUTURETHING_TOKEN", None)
+        status, detail, _s, size = mod.probe_tracking(
+            "tracking:futurething", "ent/proj", 5.0)
+        self.assertEqual(status, "unreachable")
+        self.assertIn("credential found", detail)
+        self.assertIn("not counted", detail)
+        self.assertIn("absent", detail)
+        self.assertEqual(size["blocker"], "tracking:futurething:no_listing_adapter")
+
+    def test_a_doc_lead_keeps_its_claim_instead_of_becoming_unreachable(self):
+        """`unreachable` means "we could not look". For a doc or a person
+        somebody CAN look — it is just not a probe. Overwriting the status would
+        also move the lead out of the set /ask-human works on."""
+        self.record("Handover Index", on="doc", st="doc", ev="confluence")
+        rc, out, _ = self.probe("--all")
+        self.assertEqual(rc, 0)
+        self.assertEqual(out["probed"][0]["status"], "claim")
+        self.assertIn("ask-human", out["probed"][0]["detail"])
+        self.assertEqual(self.leads()[0]["status"], "claim")
+
+
+class ALeadAndACandidateAreOneFact(DiscoverCase):
+    """CLAUDE.md -> "Contracts": a record written now and read later. A lead in
+    `leads.json` and a candidate in a stage's `input.json` describe ONE fact — is
+    this data here — and were kept in step by hand with nothing joining them. So a
+    lead probed `unreachable` could sit behind a candidate still marked `ok`, and
+    /train-run would launch against a path nobody could reach.
+
+    The load-bearing row is `claim`: a candidate is never `ok` on a lead that only
+    a document or a person asserts. That is "never let somebody's word become a
+    checked fact", applied to whether data exists.
+    """
+
+    def stage_input(self, candidates, items=None):
+        self.write_json("ws/proj/stages/training/input.json", {
+            "items": items if items is not None else {"train_images": {"type": "d"}},
+            "candidates": {"items": candidates}})
+
+    def reconcile(self):
+        return run_script(SCRIPT, "reconcile", "--project", self.project,
+                          "--stage", "training")
+
+    def test_ok_on_an_unchecked_claim_is_drift(self):
+        self.record("/somewhere", on="local", st="doc", ev="a wiki page")
+        self.stage_input({"train_images": [
+            {"location": "local", "path": "/somewhere", "match": "ok",
+             "lead_id": "lead_0001"}]})
+        rc, out, _ = self.reconcile()
+        self.assertEqual(rc, 1, "drift is an answer, not a crash")
+        self.assertEqual(len(out["drift"]), 1)
+        self.assertIn("never `ok` on a lead nothing has checked",
+                      out["drift"][0]["fix"])
+
+    def test_ok_on_an_unreachable_lead_is_drift(self):
+        self.record("s3://nope/x", on="s3", st="code", ev="train.py:1")
+        self.probe("--all")                      # no creds in the fixture
+        self.stage_input({"train_images": [
+            {"location": "s3", "path": "s3://nope/x", "match": "ok",
+             "lead_id": "lead_0001"}]})
+        rc, out, _ = self.reconcile()
+        self.assertEqual(rc, 1)
+        self.assertEqual(out["drift"][0]["lead_status"], "unreachable")
+        self.assertEqual(out["drift"][0]["allowed"], ["unreachable"])
+
+    def test_a_code_default_entry_without_a_lead_is_not_drift(self):
+        """`code_default` and `downloadable` are derived from the code, not from a
+        sweep. Flagging them would make the check fire on every correct config,
+        which is how a check gets ignored."""
+        self.stage_input({"train_images": [
+            {"location": "code_default", "path": "/data/x", "match": "absent"}]})
+        rc, out, _ = self.reconcile()
+        self.assertEqual(out["drift"], [])
+        self.assertEqual(len(out["unlinked_candidates"]), 1)
+
+    def test_a_declared_item_nothing_is_searching_for_is_a_coverage_gap(self):
+        """The item-driven half. An item with no candidates looks identical to an
+        item whose candidates all failed, so a need nothing is looking for is
+        invisible without this."""
+        self.stage_input({}, items={"val_labels": {"type": "coco_json"}})
+        rc, out, _ = self.reconcile()
+        self.assertEqual(rc, 1)
+        self.assertEqual([g["item"] for g in out["coverage_gaps"]], ["val_labels"])
+
+    def test_gaps_are_reported_before_findings(self):
+        self.stage_input({}, items={"val_labels": {"type": "coco_json"}})
+        _, out, _ = self.reconcile()
+        keys = list(out.keys())
+        self.assertLess(keys.index("coverage_gaps"), keys.index("drift"),
+                        "same ordering rule as report and a partial census")
+
+    def test_a_consistent_stage_passes(self):
+        self.record("/there", on="local", st="code", ev="train.py:1")
+        os.makedirs(self.path("there"), exist_ok=True)
+        self.stage_input({"train_images": [
+            {"location": "local", "path": self.path("there"), "match": "absent",
+             "lead_id": "lead_0001"}]})
+        rc, out, _ = self.reconcile()
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(out["consistent"])
+
+
+class AccessCanExpireNotJustGoStale(DiscoverCase):
+    """`--recheck-days` covers staleness in one direction: the world may have
+    changed, go look again. It cannot say the other one — *this source stops being
+    resolvable on a known date*. A departing account's tracking history, a wiki
+    page in a personal space, a key pending rotation: all read identically to a
+    lead that can be resolved next month, and the standing advice for
+    `unreachable` ("come back when access arrives") is exactly wrong when access
+    is about to be revoked instead of granted.
+
+    `/ask-human`'s ask.json has `valid_until` for the same reason. This is its
+    counterpart for a lead.
+    """
+
+    def expiring(self, path, when, *, on="local"):
+        return self.record(path, "--access-expires-at", when, on=on, st="doc",
+                           ev="a handover page")
+
+    def test_an_expiry_inside_the_window_is_reported_before_any_count(self):
+        soon = (datetime.now(timezone.utc) + timedelta(days=5)).isoformat()
+        self.expiring("/x", soon)
+        out = self.report()
+        ids = [l["lead_id"] for l in out["not_checked"]["access_expiring_soon"]]
+        self.assertEqual(ids, ["lead_0001"])
+
+    def test_expired_and_still_unresolved_is_its_own_finding(self):
+        past = (datetime.now(timezone.utc) - timedelta(days=3)).isoformat()
+        self.expiring("/x", past)
+        out = self.report()
+        got = out["not_checked"]["access_expired_and_unresolved"]
+        self.assertEqual([l["lead_id"] for l in got], ["lead_0001"])
+        self.assertIn("nothing else observes", got[0]["why_it_matters"])
+
+    def test_an_expiry_that_was_resolved_in_time_is_not_a_finding(self):
+        """The point is the unresolved ones. A lead that was verified before its
+        access lapsed is a success, and listing it would bury the real cases."""
+        past = (datetime.now(timezone.utc) - timedelta(days=3)).isoformat()
+        os.makedirs(self.path("there"), exist_ok=True)
+        self.expiring(self.path("there"), past)
+        self.probe("--all")
+        self.assertEqual(self.leads()[0]["status"], "verified")
+        out = self.report()
+        self.assertEqual(out["not_checked"]["access_expired_and_unresolved"], [])
+
+    def test_no_expiry_is_the_normal_case_and_reports_nothing(self):
+        self.record("/x", on="local", st="doc", ev="e")
+        out = self.report()
+        self.assertEqual(out["not_checked"]["access_expiring_soon"], [])
+        self.assertEqual(out["not_checked"]["access_expired_and_unresolved"], [])
+
+
+class TheCredentialFreeFamilyIsProbedWithoutAKey(DiscoverCase):
+    """train-init Step 0 marks "Local tracking leftovers" (`wandb/`, `mlruns/`,
+    `lightning_logs/`) a default-yes because they need no credentials. That makes
+    them the only tracking history probeable on day one of a handover, before any
+    access has arrived — so they must not be lumped in with the service backends
+    and left `unreachable` for weeks.
+
+    `gone` is a real reading here, on the same bar probe_s3 sets for an empty
+    prefix: the directory listed, and it holds no runs.
+    """
+
+    def tb(self, rel, n):
+        for i in range(n):
+            d = self.path(rel, f"run-{i}")
+            os.makedirs(d, exist_ok=True)
+            open(os.path.join(d, f"events.out.tfevents.{i}.h.0"), "w").close()
+        return self.path(rel)
+
+    def test_tfevents_on_disk_verify_with_no_credential_present(self):
+        root = self.tb("logs", 3)
+        self.record(root, on="tracking:tensorboard", st="code", ev="train.py:9")
+        rc, out, _ = self.probe("--all")
+        got = out["probed"][0]
+        self.assertEqual(got["status"], "verified")
+        self.assertIn("3 run dir", got["detail"])
+        self.assertIn("no credential needed", got["detail"])
+
+    def test_verified_says_it_is_about_the_record_not_the_numbers(self):
+        """`verified` on a tracking lead and `verified` in origin.confidence are
+        two words with opposite bars. The one that means "somebody re-ran eval and
+        it reproduced" is only reachable through /repro."""
+        self.record(self.tb("logs", 1), on="tracking:tensorboard", st="code", ev="e")
+        _, out, _ = self.probe("--all")
+        self.assertIn("RECORD", out["probed"][0]["detail"])
+
+    def test_a_directory_with_no_runs_is_gone_not_unreachable(self):
+        empty = self.path("empty")
+        os.makedirs(empty, exist_ok=True)
+        self.record(empty, on="tracking:tensorboard", st="code", ev="e")
+        rc, out, _ = self.probe("--all")
+        self.assertEqual(out["probed"][0]["status"], "gone")
+        self.assertEqual(rc, 1, "a gone lead is an answer, and exit 1 says so")
+
+    def test_a_missing_directory_is_gone_and_names_the_machine_not_a_key(self):
+        self.record(self.path("nope"), on="tracking:mlruns", st="doc", ev="e")
+        _, out, _ = self.probe("--all")
+        self.assertEqual(out["probed"][0]["status"], "gone")
+        self.assertNotIn("credential", out["probed"][0]["detail"])
+
+
+class TheAccessWorklistGroupsOnAssertedBlockers(DiscoverCase):
+    """CLAUDE.md -> "Contracts". The worklist is the one output somebody can act
+    on without reading a lead: which key to get, and what it unblocks. It grouped
+    on the probe's prose, and `err[-300:]` cut those strings mid-token at an
+    offset that depended on the path length — so ONE AccessDenied across three
+    buckets produced three separate rows, which is the opposite of the point.
+    """
+
+    def test_one_blocker_across_several_leads_is_one_row(self):
+        for i in range(3):
+            self.record(f"ent/proj{i}", on="tracking:neptune", st="code", ev="e")
+        self.probe("--all")
+        rows = self.report()["access_worklist"]
+        self.assertEqual(len(rows), 1, f"one missing token, one row: {rows}")
+        self.assertEqual(rows[0]["blocks"], 3)
+        self.assertEqual(len(rows[0]["leads"]), 3)
+
+    def test_rows_are_ordered_by_how_much_they_unblock(self):
+        for i in range(2):
+            self.record(f"ent/n{i}", on="tracking:neptune", st="code", ev="e")
+        self.record("ent/c", on="tracking:comet", st="code", ev="e")
+        self.probe("--all")
+        rows = self.report()["access_worklist"]
+        self.assertGreaterEqual(rows[0]["blocks"], rows[-1]["blocks"])
+
+    def test_a_blocker_key_is_stable_and_not_the_prose(self):
+        self.record("ent/p", on="tracking:neptune", st="code", ev="e")
+        self.probe("--all")
+        row = self.report()["access_worklist"][0]
+        self.assertEqual(row["blocker"], "tracking:neptune:no_credential")
+        self.assertIsNotNone(row["example"], "the prose stays as the example")
+
+
+class TheMlflowListingActuallyRuns(DiscoverCase):
+    """CLAUDE.md -> "Contracts". Every other tracking service listing is staged but
+    unexercised, because reaching it needs a vendor package no environment here
+    has — and an unexercised probe is a promise, not a capability.
+
+    MLflow is the exception and the reason is worth keeping: it has a documented
+    REST surface, so the listing is urllib-only. That makes it runnable on the bare
+    interpreter a handover starts with, and testable against a stub — which is what
+    these checks are. Prefer `rest` over `pkg` when a backend offers both.
+
+    What must hold: a real count when the server answers, `gone` only when the
+    server itself says the experiment is not there, and `unreachable` when the host
+    does not answer — never the two swapped.
+    """
+
+    EXPS = {"experiments": [{"experiment_id": "1", "name": "yolo26-kontoor"},
+                            {"experiment_id": "2", "name": "yolo26-face"}]}
+
+    def serve(self, exps=None, runs=8, runs_code=200):
+        import json as _json
+        import threading
+        from http.server import BaseHTTPRequestHandler, HTTPServer
+        body_exps = self.EXPS if exps is None else exps
+        body_runs = {"runs": [{"info": {"run_id": f"r{i:08d}", "status": "FINISHED"}}
+                              for i in range(runs)]}
+
+        class H(BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def _send(self, obj, code=200):
+                b = _json.dumps(obj).encode()
+                self.send_response(code)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(b)))
+                self.end_headers()
+                self.wfile.write(b)
+
+            def do_POST(self):
+                self.rfile.read(int(self.headers.get("Content-Length") or 0))
+                if self.path.endswith("/experiments/search"):
+                    self._send(body_exps)
+                elif self.path.endswith("/runs/search"):
+                    self._send(body_runs, runs_code)
+                else:
+                    self._send({}, 404)
+
+            def do_GET(self):
+                self._send({}, 404)
+
+        srv = HTTPServer(("127.0.0.1", 0), H)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        self.addCleanup(srv.server_close)
+        self.addCleanup(srv.shutdown)
+        return f"http://127.0.0.1:{srv.server_address[1]}"
+
+    def setUp(self):
+        super().setUp()
+        self.mod = load_script(SCRIPT)
+
+    def probe_mlflow(self, loc, uri=None):
+        if uri is not None:
+            os.environ["MLFLOW_TRACKING_URI"] = uri
+            self.addCleanup(os.environ.pop, "MLFLOW_TRACKING_URI", None)
+        return self.mod.probe_tracking("tracking:mlflow", loc, 5.0)
+
+    def test_a_reachable_server_is_verified_with_a_real_count(self):
+        base = self.serve(runs=37)
+        status, detail, _s, _z = self.probe_mlflow(base, uri=base)
+        self.assertEqual(status, "verified")
+        self.assertIn("2 experiment(s)", detail)
+        self.assertIn("37 run(s)", detail)
+
+    def test_verified_says_it_is_about_the_record_not_the_numbers(self):
+        base = self.serve()
+        _st, detail, _s, _z = self.probe_mlflow(base, uri=base)
+        self.assertIn("RECORD", detail)
+        self.assertIn("claim until /repro", detail)
+
+    def test_an_experiment_name_the_server_does_not_list_is_gone(self):
+        base = self.serve()
+        status, detail, _s, _z = self.probe_mlflow("no-such-experiment", uri=base)
+        self.assertEqual(status, "gone", "the server itself listed and it is absent")
+        self.assertIn("none is named", detail)
+
+    def test_a_host_that_does_not_answer_is_unreachable_never_gone(self):
+        status, detail, _s, size = self.probe_mlflow("exp", uri="http://127.0.0.1:1")
+        self.assertEqual(status, "unreachable")
+        self.assertEqual(size["blocker"], "tracking:mlflow:unreachable_host")
+
+    def test_auth_failure_is_unreachable_and_says_so(self):
+        base = self.serve(exps={"error_code": "PERMISSION_DENIED"})
+        # the stub answers 200 with a body carrying no experiments; the real
+        # 401/403 path is covered by the code's explicit branch. What must not
+        # happen is an auth-shaped answer becoming a count.
+        status, _d, _s, _z = self.probe_mlflow(base, uri=base)
+        self.assertIn(status, ("gone", "unreachable"))
+        self.assertNotEqual(status, "verified")
+
+    def test_a_file_store_is_routed_to_the_disk_family_not_guessed_at(self):
+        """`file:./mlruns` is the on-disk family. Treating it as a service would
+        report `unreachable` for something sitting right there on the disk."""
+        status, detail, _s, size = self.probe_mlflow("exp", uri="file:./mlruns")
+        self.assertEqual(status, "unreachable")
+        self.assertIn("tracking:mlruns", detail)
+        self.assertEqual(size["blocker"], "tracking:mlflow:no_http_uri")
+
+    def test_experiments_answer_but_runs_fail_is_verified_and_says_not_counted(self):
+        """The server is real, so `verified` is right; the count is not, so it must
+        say the runs were not counted rather than reporting zero."""
+        base = self.serve(runs=0, runs_code=500)
+        status, detail, _s, _z = self.probe_mlflow(base, uri=base)
+        self.assertEqual(status, "verified")
+        self.assertIn("NOT COUNTED", detail)
+
+
+class TheOtherRestListingsRun(DiscoverCase):
+    """CLAUDE.md -> "Contracts", and `searches.md` -> the per-`on` probe table.
+
+    Three backends used to stop at "credential found, no listing adapter". They now
+    have urllib listings, for the reason stated in `REST_LISTINGS`: a REST listing
+    needs no package AND is testable against a stub, so the probe can be exercised
+    without owning an account on any of the three.
+
+    That is also the limit of what these checks prove, and it is worth saying
+    plainly: they verify the PARSING AND THE DISPATCH, not the endpoints. mlflow and
+    wandb are the two that have answered a real server. So the property that has to
+    hold here is not "the URL is right" — it is that being wrong about the URL, the
+    auth scheme or the body shape can only ever produce `unreachable`. A false
+    `gone` would tell somebody their history was deleted because this file guessed a
+    path wrong, and that is the one failure that cannot be walked back: they stop
+    looking.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.mod = load_script(SCRIPT)
+
+    def env(self, **kw):
+        for key, val in kw.items():
+            if val is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = val
+            self.addCleanup(os.environ.pop, key, None)
+
+    def serve(self, routes, code=200):
+        """routes: {path_without_query: body_obj}. Anything unmatched -> 404.
+
+        `code` applies to matched routes, so one dict serves the happy path and the
+        auth-failure path without a second stub.
+        """
+        import json as _json
+        import threading
+        from http.server import BaseHTTPRequestHandler, HTTPServer
+
+        class H(BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def _route(self):
+                if self.headers.get("Content-Length"):
+                    self.rfile.read(int(self.headers["Content-Length"]))
+                path = self.path.split("?")[0]
+                if path in routes:
+                    body, status = routes[path], code
+                else:
+                    body, status = {"error": "no such route"}, 404
+                b = _json.dumps(body).encode()
+                self.send_response(status)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(b)))
+                self.end_headers()
+                self.wfile.write(b)
+
+            do_GET = do_POST = _route
+
+        srv = HTTPServer(("127.0.0.1", 0), H)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        self.addCleanup(srv.server_close)
+        self.addCleanup(srv.shutdown)
+        return f"http://127.0.0.1:{srv.server_address[1]}"
+
+    # ---- fixtures, one per backend -------------------------------------------
+
+    CLEARML = {
+        "/auth.login": {"data": {"token": "tok"}},
+        "/projects.get_all": {"data": {"projects": [{"id": "p1", "name": "unload"},
+                                                    {"id": "p2", "name": "jenga"}]}},
+        "/tasks.get_all": {"data": {"tasks": [
+            {"id": f"t{i}", "name": f"train-{i}", "status": "completed"}
+            for i in range(6)]}},
+    }
+    NEPTUNE = {
+        "/api/backend/v1/authorization/oauth-token": {"accessToken": "acc"},
+        "/api/backend/v1/projects": [{"organizationName": "acme", "name": "seg"},
+                                     {"organizationName": "acme", "name": "box"}],
+    }
+    COMET = {
+        "/api/rest/v2/workspaces": {"workspaceNames": ["acme"]},
+        "/api/rest/v2/projects": {"projects": [{"projectId": "pid1",
+                                                "projectName": "seg"}]},
+        "/api/rest/v2/experiments": {"experiments": [
+            {"experimentKey": f"key{i:08d}"} for i in range(4)]},
+    }
+
+    def neptune_token(self, api):
+        import base64
+        return base64.b64encode(
+            json.dumps({"api_url": api, "api_key": "k"}).encode()).decode()
+
+    def clearml(self, base, path=None):
+        self.env(CLEARML_API_HOST=base, CLEARML_API_ACCESS_KEY="ak",
+                 CLEARML_API_SECRET_KEY="sk")
+        return self.mod.probe_tracking("tracking:clearml",
+                                       base if path is None else path, 5.0)
+
+    def neptune(self, api, path=""):
+        self.env(NEPTUNE_API_TOKEN=self.neptune_token(api))
+        return self.mod.probe_tracking("tracking:neptune", path, 5.0)
+
+    def comet(self, base, path="acme/seg"):
+        self.env(COMET_API_KEY="ck", COMET_URL_OVERRIDE=base)
+        return self.mod.probe_tracking("tracking:comet", path, 5.0)
+
+    # ---- the table and the dispatch agree ------------------------------------
+
+    def test_every_rest_listing_named_in_the_table_has_an_adapter(self):
+        """A `listing` value with no entry in REST_LISTINGS falls through to the
+        wandb branch and reports "no listing adapter" for a backend that has one —
+        green, wrong, and invisible."""
+        named = {s["listing"] for s in self.mod.TRACKING.values()
+                 if s.get("listing", "").endswith("_rest")}
+        self.assertEqual(named - set(self.mod.REST_LISTINGS), set())
+
+    def test_wandb_is_the_only_service_backend_left_on_the_package_path(self):
+        """Not a style rule: a package listing cannot be exercised without an
+        account, so this is the count of probes nobody can test. It was 4."""
+        pkg_only = sorted(k for k, s in self.mod.TRACKING.items()
+                          if s["family"] == "service"
+                          and s.get("listing") not in self.mod.REST_LISTINGS)
+        self.assertEqual(pkg_only, ["wandb"],
+                         "if a backend must use its SDK, say why in TRACKING — "
+                         "prefer REST whenever the backend publishes one")
+
+    # ---- happy paths ---------------------------------------------------------
+
+    def test_clearml_logs_in_then_counts_projects_and_tasks(self):
+        status, detail, sample, _z = self.clearml(self.serve(self.CLEARML))
+        self.assertEqual(status, "verified")
+        self.assertIn("2 project(s)", detail)
+        self.assertIn("6 task(s)", detail)
+        self.assertIn("RECORD", detail)
+        self.assertIn("claim until /repro", detail)
+        self.assertTrue(sample)
+
+    def test_neptune_decodes_the_token_for_the_host_then_lists(self):
+        base = self.serve(self.NEPTUNE)
+        status, detail, sample, _z = self.neptune(base)
+        self.assertEqual(status, "verified")
+        self.assertIn("2 project(s)", detail)
+        self.assertIn("acme/seg", sample)
+        self.assertIn("RUNS ARE NOT COUNTED", detail,
+                      "Neptune's listing gives no per-project run count; saying "
+                      "nothing would read as zero")
+
+    def test_comet_counts_experiments_under_a_named_project(self):
+        status, detail, _s, _z = self.comet(self.serve(self.COMET))
+        self.assertEqual(status, "verified")
+        self.assertIn("1 project(s)", detail)
+        self.assertIn("4 experiment(s)", detail)
+
+    def test_comet_with_no_workspace_asks_the_key_what_it_can_see(self):
+        """The handover shape: a key arrives and nobody wrote down the workspace.
+        Refusing without one would fail the case discovery exists for."""
+        status, detail, sample, _z = self.comet(self.serve(self.COMET), path="")
+        self.assertEqual(status, "verified")
+        self.assertIn("1 workspace(s)", detail)
+        self.assertEqual(sample, ["acme"])
+
+    # ---- gone is only ever the server's own answer ---------------------------
+
+    def test_a_name_the_server_does_not_list_is_gone(self):
+        for label, call, empty in (
+            ("clearml", lambda b: self.clearml(b, path="no-such-project"), None),
+            ("neptune", lambda b: self.neptune(b, path="no-such-project"), None),
+            ("comet", lambda b: self.comet(b, path="acme/no-such"), None),
+        ):
+            with self.subTest(backend=label):
+                fixture = {"clearml": self.CLEARML, "neptune": self.NEPTUNE,
+                           "comet": self.COMET}[label]
+                status, detail, _s, _z = call(self.serve(fixture))
+                self.assertEqual(status, "gone",
+                                 f"{label}: the server itself listed and the name "
+                                 f"is not in it")
+                self.assertIn("none is", detail.replace("holds no", "none is"))
+
+    def test_an_empty_listing_is_gone_because_the_server_answered(self):
+        cases = {
+            "clearml": (dict(self.CLEARML, **{"/projects.get_all":
+                                              {"data": {"projects": []}}}),
+                        lambda b: self.clearml(b)),
+            "neptune": (dict(self.NEPTUNE, **{"/api/backend/v1/projects": []}),
+                        lambda b: self.neptune(b)),
+            "comet": (dict(self.COMET, **{"/api/rest/v2/workspaces":
+                                          {"workspaceNames": []}}),
+                      lambda b: self.comet(b, path="")),
+        }
+        for label, (routes, call) in cases.items():
+            with self.subTest(backend=label):
+                status, _d, _s, size = call(self.serve(routes))
+                self.assertEqual(status, "gone")
+                self.assertIsNone(size["blocker"],
+                                  "a real reading has no blocker — nobody is "
+                                  "waiting on access")
+
+    # ---- the load-bearing property ------------------------------------------
+
+    def test_a_two_hundred_with_the_wrong_shape_is_unreachable_never_gone(self):
+        """The whole reason these three are shippable while unexercised against a
+        real server. If an endpoint moved or the body shape changed, the answer must
+        be "I could not read it", not "it is not there"."""
+        cases = {
+            "clearml": (dict(self.CLEARML,
+                             **{"/projects.get_all": {"unexpected": "shape"}}),
+                        lambda b: self.clearml(b)),
+            "neptune": (dict(self.NEPTUNE,
+                             **{"/api/backend/v1/projects": {"nope": 1}}),
+                        lambda b: self.neptune(b)),
+            "comet": (dict(self.COMET,
+                           **{"/api/rest/v2/projects": {"nope": 1}}),
+                      lambda b: self.comet(b)),
+        }
+        for label, (routes, call) in cases.items():
+            with self.subTest(backend=label):
+                status, detail, _s, size = call(self.serve(routes))
+                self.assertEqual(status, "unreachable",
+                                 f"{label}: a body this code cannot parse says "
+                                 f"nothing about whether the runs exist")
+                self.assertNotEqual(status, "gone")
+                self.assertIn("NOTHING WAS COUNTED", detail,
+                              "silence here reads as zero")
+                self.assertTrue(size["blocker"], "somebody has to fix this")
+
+    def test_a_missing_endpoint_is_unreachable_not_gone(self):
+        """A 404 on the LISTING is this code being wrong about a path. Only a
+        successful listing that omits the name may say `gone` — the distinction the
+        mlflow class draws for experiments, held for all three."""
+        for label, call in (("clearml", lambda b: self.clearml(b)),
+                            ("neptune", lambda b: self.neptune(b)),
+                            ("comet", lambda b: self.comet(b))):
+            with self.subTest(backend=label):
+                status, _d, _s, _z = call(self.serve({}, code=404))
+                self.assertEqual(status, "unreachable")
+
+    def test_a_host_that_does_not_answer_is_unreachable(self):
+        dead = "http://127.0.0.1:1"
+        for label, call in (("clearml", lambda: self.clearml(dead)),
+                            ("neptune", lambda: self.neptune(dead)),
+                            ("comet", lambda: self.comet(dead))):
+            with self.subTest(backend=label):
+                status, _d, _s, size = call()
+                self.assertEqual(status, "unreachable")
+                self.assertEqual(size["blocker"],
+                                 f"tracking:{label}:unreachable_host")
+
+    # ---- auth is named as auth ----------------------------------------------
+
+    def test_auth_failure_names_the_auth_stage_not_the_listing(self):
+        """"the key is wrong" and "the key is fine, the endpoint moved" go to
+        different people. Collapsing them sends somebody to request access they
+        already have."""
+        cases = {
+            "clearml": (dict(self.CLEARML, **{"/auth.login": {"meta": {"result": 401}}}),
+                        lambda b: self.clearml(b), "login_200"),
+            "neptune": (dict(self.NEPTUNE,
+                             **{"/api/backend/v1/authorization/oauth-token": {}}),
+                        lambda b: self.neptune(b), "oauth_200"),
+        }
+        for label, (routes, call, blocker) in cases.items():
+            with self.subTest(backend=label):
+                status, detail, _s, size = call(self.serve(routes))
+                self.assertEqual(status, "unreachable")
+                self.assertEqual(size["blocker"], f"tracking:{label}:{blocker}")
+                self.assertIn("authentication is the blocker", detail)
+
+    def test_comet_401_is_the_key_not_absence(self):
+        status, detail, _s, size = self.comet(self.serve(self.COMET, code=401))
+        self.assertEqual(status, "unreachable")
+        self.assertEqual(size["blocker"], "tracking:comet:http_401")
+        self.assertIn("not absence", detail)
+
+    def test_an_undecodable_neptune_token_does_not_implicate_the_project(self):
+        """The token carries the host, so a mangled one — a shell ate the quotes —
+        means nothing can even be addressed. Reporting that as absence would blame
+        the server for a local typo."""
+        self.env(NEPTUNE_API_TOKEN="not-base64-json!!")
+        status, detail, _s, size = self.mod.probe_tracking("tracking:neptune", "", 5.0)
+        self.assertEqual(status, "unreachable")
+        self.assertEqual(size["blocker"], "tracking:neptune:undecodable_token")
+        self.assertIn("project is not implicated", detail)
+
+    def test_clearml_half_a_key_pair_says_which_half(self):
+        """ClearML needs both halves and a config file often carries only one.
+        "no credential" would be wrong and would send the reader to the wrong fix."""
+        self.env(CLEARML_API_HOST="https://api.clear.ml",
+                 CLEARML_API_ACCESS_KEY="ak", CLEARML_API_SECRET_KEY=None)
+        status, detail, _s, size = self.mod.probe_tracking("tracking:clearml", "", 5.0)
+        self.assertEqual(status, "unreachable")
+        self.assertEqual(size["blocker"], "tracking:clearml:partial_credential")
+        self.assertIn("secret_key no", detail)
+
+
+class SomethingWatchesTheExpiryDate(DiscoverCase):
+    """CLAUDE.md -> "On Conversation Start", step 4.
+
+    `--access-expires-at` and the two report sections it feeds were the fix for a
+    specific loss: a key rotates, an account is deactivated, and the history behind
+    it stops being reachable on a date somebody already knew. But a computed section
+    nobody opens is exactly the failure the field was added to prevent — `leads.json`
+    turning into the wiki page it replaced. The field only pays off if something
+    re-reads it on its own, and the only thing that runs unprompted is the
+    conversation-start pass.
+
+    So this check joins the two halves: the report must emit the sections, and
+    CLAUDE.md must tell the session to read them. Either one alone is inert.
+    """
+
+    def report_keys(self):
+        return set(self.report()["not_checked"])
+
+    def test_the_report_emits_both_expiry_sections(self):
+        self.record("s3://b/x/")
+        keys = self.report_keys()
+        for want in ("access_expiring_soon", "access_expired_and_unresolved"):
+            self.assertIn(want, keys)
+
+    def test_the_conversation_start_pass_is_told_to_read_them(self):
+        from helpers import REPO_ROOT
+        with open(os.path.join(REPO_ROOT, "CLAUDE.md")) as fh:
+            text = fh.read()
+        block = text[text.index("On Conversation Start"):]
+        block = block[:block.index("\n## ")] if "\n## " in block else block
+        for want in ("access_expiring_soon", "access_expired_and_unresolved"):
+            self.assertIn(want, block,
+                          f"the report computes {want} and nothing reads it — "
+                          f"either wire it into the conversation-start pass or "
+                          f"delete the section, because an unread deadline is "
+                          f"worse than no deadline field at all")
+        self.assertIn("deadline", block,
+                      "the reason this entry outranks the others has to survive "
+                      "in the text, or it gets reordered by whoever edits next")
+
+    def test_an_expired_unresolved_lead_is_separated_from_one_merely_pending(self):
+        """The two are the same JSON shape and completely different facts: one is a
+        todo, the other is a loss that already happened and that no probe will ever
+        report, because `unreachable` never becomes `gone` on its own."""
+        past = (datetime.now(timezone.utc) - timedelta(days=3)).isoformat()
+        soon = (datetime.now(timezone.utc) + timedelta(days=5)).isoformat()
+        self.record("s3://b/lapsed/", "--access-expires-at", past)
+        self.record("s3://b/rotating/", "--access-expires-at", soon)
+        self.record("s3://b/no-deadline/")
+        r = self.report()["not_checked"]
+        self.assertEqual([l["path"] for l in r["access_expired_and_unresolved"]],
+                         ["s3://b/lapsed/"])
+        self.assertEqual([l["path"] for l in r["access_expiring_soon"]],
+                         ["s3://b/rotating/"])
+        self.assertEqual(len(r["unprobed_leads"]), 3,
+                         "all three are still unprobed; the expiry sections are a "
+                         "second axis over the same leads, not a partition")
+
+
+class SourcesListsWhatCouldBeSweptNotJustWhatIsRegistered(DiscoverCase):
+    """`searches.md` -> "Sources, ranked by what a mention is worth", and CLAUDE.md
+    -> "Never report data you could not look at".
+
+    `sources` is the falsifiability check on the whole skill: a findings list is
+    unreadable without a list of what could have been looked at. It used to enumerate
+    only what `resources.json` registered, and the failure that produces is specific
+    and backwards — on day one of a handover, with nothing registered, it reported ONE
+    blocked source. The project's git history and its on-disk tracking leftovers were
+    sitting right there, needing no credential, and the verb whose job is "what did
+    you not check" said there was nothing to check.
+
+    That is worse than silence: it reads as an argument for waiting for access, in
+    exactly the weeks when the credential-free sources are all anybody has.
+    """
+
+    def sources(self):
+        rc, out, err = run_script(SCRIPT, "sources", "--project", self.project)
+        self.assertEqual(rc, 0, err)
+        return out
+
+    def names(self, out):
+        return [s["source"] for s in out["sources"]]
+
+    def test_the_credential_free_families_appear_with_nothing_registered(self):
+        """No resources.json, no keys — the day-one state. The four families that
+        need no access must still be listed, because they are the entire sweep that
+        is possible today."""
+        os.makedirs(self.path("ws", "proj", "stages", "training", "code"))
+        got = self.names(self.sources())
+        self.assertIn("code:training", got)
+        self.assertIn("git_history:training", got)
+        self.assertIn("tracking_disk", got)
+        self.assertIn("doc", got)
+        self.assertGreater(len(got), 4,
+                           "this used to be a single row saying resources.json is "
+                           "missing")
+
+    def test_the_note_names_where_to_start_without_a_credential(self):
+        os.makedirs(self.path("ws", "proj", "stages", "training", "code"))
+        out = self.sources()
+        self.assertIn("no credential at all", out["note"])
+        self.assertIn("code:training", out["note"])
+
+    def test_a_wiki_page_and_an_expired_key_are_not_the_same_blockage(self):
+        """"Blocked" alone routes them to one queue. A key is a request to a person
+        who can grant it; a doc is a person who has to go and read it, and no
+        credential ever unblocks it. Different queue, different week."""
+        out = self.sources()
+        by = {s["source"]: s["blocked_by"] for s in out["sources"] if not s["usable"]}
+        self.assertEqual(by.get("doc"), "human")
+        self.assertEqual(by.get("person"), "human")
+        self.assertEqual(by.get("resources.json"), "registration")
+        self.assertGreaterEqual(out["blocked_by"].get("human", 0), 2)
+
+    def test_every_service_backend_gets_its_own_row(self):
+        """"Which tracking backends can I list right now" is the takeover question,
+        and one aggregate row cannot answer it — the answer is per-key."""
+        got = self.names(self.sources())
+        for backend in ("wandb", "mlflow", "clearml", "neptune", "comet"):
+            self.assertIn(f"tracking:{backend}", got)
+
+    def test_a_blocked_row_says_which_env_vars_were_checked(self):
+        """A bare "no credential" produces a lead nobody can clear. The names of the
+        variables checked are the actionable half."""
+        row = next(s for s in self.sources()["sources"]
+                   if s["source"] == "tracking:comet")
+        if row["usable"]:
+            self.skipTest("this machine has a Comet credential")
+        self.assertIn("COMET_API_KEY", row["why"])
+
+    def test_a_non_git_code_tree_says_what_is_lost_rather_than_vanishing(self):
+        """Silence would read as "there is no history to mine", which is true of the
+        tree and false of the data."""
+        os.makedirs(self.path("ws", "proj", "stages", "training", "code"))
+        row = next(s for s in self.sources()["sources"]
+                   if s["source"] == "git_history:training")
+        self.assertFalse(row["usable"])
+        self.assertIn("not a git tree", row["why"])
+        self.assertEqual(row["blocked_by"], "absent")
+
+    def test_every_row_says_its_kind(self):
+        """mine / probe / ask. A place to grep and a person to ask are both
+        "sources" and nothing else about them is alike."""
+        for s in self.sources()["sources"]:
+            self.assertIn(s["kind"], ("mine", "probe", "ask"), s)
