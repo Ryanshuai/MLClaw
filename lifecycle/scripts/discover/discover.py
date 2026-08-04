@@ -2087,6 +2087,56 @@ def md_link(text, url):
 
 
 BRIEF = "brief.md"
+READING = "## Reading — filled in by hand"
+PLACEHOLDER = ("*Empty until somebody writes it.* Everything above is computed and "
+               "can only report what it measured; what any of it means for this "
+               "project is judgment, and generated prose that reads like judgment "
+               "misrepresents where the judgment came from.")
+
+
+def cmd_note(a) -> None:
+    """Append a dated annotation to a lead. Never edits what is already there.
+
+    A probe records what a machine saw. This records what a PERSON found out — the
+    path was mistyped, the directory turns out to be inside a container, half the
+    images in that archive have no annotation. None of those are probe results and
+    none of them fit in `what`, which was written before anybody looked.
+
+    Append-only, and that is the whole design. The obvious alternative is editing
+    the lead, and it destroys the thing the record is for: `lead_0006` here was
+    recorded against a mistyped prefix and probed `gone`, which read as confirming
+    a document's claim. Correcting the path in place would leave a record that
+    looks like it was always right, and the reader six months on would have no way
+    to know a conclusion had once been drawn from the wrong path. The wrong lead
+    stays, annotated, and the correct path is recorded as its own lead.
+    """
+    project = os.path.expanduser(a.project)
+    rec = read_json(leads_path(project), required=False)
+    if not rec:
+        broke(f"no leads file at {leads_path(project)}")
+    hit = [l for l in rec["leads"] if l["lead_id"] == a.id]
+    if not hit:
+        refuse(f"no lead {a.id!r} in this project",
+               known=[l["lead_id"] for l in rec["leads"]])
+    lead = hit[0]
+    lead.setdefault("notes", []).append({
+        "at": now_utc(), "note": a.note,
+        # What kind of amendment, because they are read differently: a `correction`
+        # means an earlier conclusion is suspect, a `finding` adds to it.
+        "kind": a.kind})
+    if a.supersedes:
+        # Stated on the lead itself rather than only in prose, so anything reading
+        # the register sees that this entry has been replaced.
+        lead["superseded_by"] = a.supersedes
+    rec["updated_at"] = now_utc()
+    atomic_write_json(leads_path(project), rec)
+    emit({"lead_id": a.id, "notes": len(lead["notes"]),
+          "superseded_by": lead.get("superseded_by"),
+          "status": lead["status"],
+          "note": "appended; nothing was overwritten"})
+
+
+NOTE_KINDS = ("finding", "correction", "context")
 
 
 def cmd_brief(a) -> None:
@@ -2154,6 +2204,16 @@ def cmd_brief(a) -> None:
                   f"{md_link(x['path'], u)}",
                   f"  - observed: {x['observed']}",
                   f"  - means: {x['means']}"]
+        L += [""]
+
+    corrections = [(l, n) for l in leads for n in (l.get("notes") or [])
+                   if n["kind"] == "correction"]
+    if corrections:
+        L += ["**Corrections recorded on leads** — each one means an earlier "
+              "reading was drawn from the wrong thing, so anything concluded from "
+              "it is suspect:", ""]
+        for l, n in corrections:
+            L += [f"- {anchor(l['lead_id'])} `{l['path']}` — {n['note']}"]
         L += [""]
 
     L += ["## What to look at next", ""]
@@ -2241,27 +2301,51 @@ def cmd_brief(a) -> None:
         mark = "†" if (u and derived) else ""
         ev = l.get("evidence") or "—"
         ev = f"[{ev}]({l['evidence_url']})" if l.get("evidence_url") else ev
+        # A correction has to be visible in the row, not just in the JSON: this is
+        # the column a reader scans, and `lead_0006` is the case that proves it —
+        # a mistyped path that probed `gone` and read as confirming a document.
+        note_bits = []
+        for n in l.get("notes") or []:
+            tag = "**CORRECTION**" if n["kind"] == "correction" else n["kind"]
+            note_bits.append(f"{tag}: {n['note']}")
+        if l.get("superseded_by"):
+            note_bits.insert(0, f"**SUPERSEDED BY** {anchor(l['superseded_by'])}")
         L += [f"| <a id=\"{l['lead_id']}\"></a>`{l['lead_id']}` | "
               f"{l.get('what') or '—'} | {md_link(l['path'], u)}{mark} | "
               f"{l['status']} | "
               f"{human(l['bytes']) if l.get('bytes') is not None else '—'} | "
               f"{l.get('source_type')}: {ev} |"]
+        for nb in note_bits:
+            L += [f"| | ↳ {nb} | | | | |"]
     if any(link[i][0] and link[i][1] for i in link):
         L += ["",
               "† link built by this script from the path (an S3 console route, a "
               "`file://`, a W&B project). It is a convenience, not part of the "
               "finding — the path is the record, and a console that has since "
               "been reorganised gives a dead link, never a wrong status."]
-    L += ["",
-          "## Reading — filled in by hand",
-          "",
-          "*Empty until somebody writes it.* Everything above is computed and can "
-          "only report what it measured; what any of it means for this project is "
-          "judgment, and generated prose that reads like judgment misrepresents "
-          "where the judgment came from.",
-          ""]
-
+    # The one section a person writes is CARRIED OVER, not regenerated. Without
+    # this the file's own instruction — "do not edit above the last section" —
+    # would be a trap: the next `brief` run destroys the only part that took
+    # somebody's judgment, and it does it silently, having just told them where to
+    # write. Regenerating has to be safe or nobody will run it twice.
     path = os.path.join(project, "discovery", BRIEF)
+    kept = None
+    if os.path.exists(path):
+        with open(path, encoding="utf-8") as fh:
+            old = fh.read()
+        if READING in old:
+            body = old[old.index(READING) + len(READING):].strip()
+            if body and PLACEHOLDER not in body:
+                kept = body
+
+    L += ["", READING, ""]
+    if kept:
+        L += [kept, "",
+              f"<!-- carried over by `discover.py brief`; edit freely, this "
+              f"section is never regenerated -->"]
+    else:
+        L += [PLACEHOLDER, ""]
+
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as fh:
         fh.write("\n".join(L))
@@ -2483,6 +2567,15 @@ def main() -> None:
     rc.add_argument("--stage", required=True,
                     help="training | evaluation | inference | ...")
     rc.set_defaults(fn=cmd_reconcile)
+
+    nt = sub.add_parser("note", help="append a dated annotation to a lead")
+    nt.add_argument("--project", required=True)
+    nt.add_argument("--id", required=True)
+    nt.add_argument("--note", required=True)
+    nt.add_argument("--kind", default="finding", choices=NOTE_KINDS)
+    nt.add_argument("--supersedes", default=None,
+                    help="lead_id that replaces this one (for a mistyped path)")
+    nt.set_defaults(fn=cmd_note)
 
     bf = sub.add_parser("brief", help="render discovery/brief.md — the write-up")
     bf.add_argument("--project", required=True)
