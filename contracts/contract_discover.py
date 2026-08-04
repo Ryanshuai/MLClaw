@@ -1354,6 +1354,244 @@ class AnEmptyPrefixIsAReadingAndSilenceIsNot(DiscoverCase):
         self.assertEqual(self.leads()[0]["status"], "unreachable")
 
 
+class _NotInstalledHere:
+    """Stands in for `ultralytics.nn.tasks.SegmentationModel`.
+
+    Module-level so `pickle` can save it by reference; the discover.py subprocess
+    cannot import `contract_discover`, so the reader meets a global it has no
+    class for — exactly the situation a real checkpoint puts it in.
+    """
+
+
+class TheCheckpointIsASourceNotAFileWithASize(DiscoverCase):
+    """`searches.md` -> "Sources, ranked by what a mention is worth", the
+    `checkpoint` family. CLAUDE.md -> `/discover`: "Data, weights, somebody's
+    recorded results, and the credentials the other probes turned out to need —
+    one engine, one lead register".
+
+    The tracking family's own tagline is "a run that trained recorded what it
+    read". A modern checkpoint does precisely that, offline, inside the artifact,
+    and the family was missing — so every sweep treated a `.pt` as a name and a
+    byte count. The cost lands on evaluation specifically: eval's two needs are a
+    checkpoint and a val set, the checkpoint is usually the easiest thing to
+    obtain because it is the deployed artifact, and `train_args.data` NAMES THE
+    VAL SET. Not opening it means the highest-yield search for the stage that most
+    needs it was never run.
+
+    Four properties, and the last two are the ones that could do harm:
+
+      - the reader needs no framework (torch is not in a record script's path)
+      - a shape it cannot read REFUSES, and never guesses
+      - a path a checkpoint names has no host, and must not claim one
+      - a metric read out of an artifact is still a `claim`, because it has no
+        `scope`
+    """
+
+    def ckpt(self, top, name="best.pt"):
+        """A real torch-shaped file: a zip whose */data.pkl holds `top`."""
+        import pickle
+        import zipfile
+        path = self.path(name)
+        with zipfile.ZipFile(path, "w") as z:
+            z.writestr("best/data.pkl", pickle.dumps(top))
+        return path
+
+    def introspect(self, path, *extra):
+        return run_script(SCRIPT, "introspect", "--project", self.project,
+                          "--checkpoint", path, *extra)
+
+    def ULTRA(self):
+        return {
+            "date": "2026-06-21T03:11:37",
+            "version": "8.4.40",
+            "epoch": -1,
+            "git": {"branch": None, "commit": None, "origin": None, "root": "None"},
+            "train_args": {"data": "/workspace/ai/src/dataset/kontoor_yolo/data.yaml",
+                           "model": "/workspace/ai/src/unload_BL.pt",
+                           "epochs": 140, "imgsz": 1024, "seed": 0},
+            "train_metrics": {"metrics/mAP50-95(M)": 0.89116},
+            "train_results": {"epoch": list(range(1, 141))},
+        }
+
+    def test_it_names_the_val_split(self):
+        """The load-bearing one. A checkpoint's `train_args.data` is the only
+        record of which units its metrics were measured on, so it decides whether
+        the number can ever be reproduced."""
+        rc, out, err = self.introspect(self.ckpt(self.ULTRA()))
+        self.assertEqual(rc, 0, err)
+        data = [l for l in out["leads_named"] if l["subject"] == "data"]
+        self.assertEqual(len(data), 1, "the val split must be named exactly once")
+        self.assertEqual(data[0]["path"],
+                         "/workspace/ai/src/dataset/kontoor_yolo/data.yaml")
+        self.assertIn("train_args.data", data[0]["evidence"],
+                      "evidence must say which field it came from")
+
+    def test_it_names_the_parent_and_its_own_numbers(self):
+        rc, out, _ = self.introspect(self.ckpt(self.ULTRA()))
+        subjects = sorted(l["subject"] for l in out["leads_named"])
+        self.assertEqual(subjects, ["data", "results", "weights"])
+        self.assertEqual(out["recorded_by_the_training_process"]["epochs_in_curve"],
+                         140)
+        self.assertFalse(out["recorded_by_the_training_process"]["resumable"],
+                         "epoch == -1 is a stripped checkpoint, not a null")
+
+    def test_a_null_commit_is_reported_as_the_writer_finding_none(self):
+        """`/repro` axes.md: "the commit resolves" and "no commit was recorded" are
+        different facts. The checkpoint's own git block distinguishes them, and
+        dropping it would collapse the code axis into an unexplained null."""
+        rc, out, _ = self.introspect(self.ckpt(self.ULTRA()))
+        self.assertEqual(rc, 0)
+        self.assertIsNone(out["code_axis"]["commit"])
+        self.assertIn("branch", out["code_axis"])
+
+    def test_looking_is_not_recording(self):
+        rc, out, _ = self.introspect(self.ckpt(self.ULTRA()))
+        self.assertEqual(rc, 0)
+        self.assertNotIn("recorded", out)
+        self.assertIn("NONE recorded", out["note"])
+        self.assertFalse(os.path.exists(self.leads_file()),
+                         "a look must not create the register")
+
+    def test_recording_writes_them_as_claims_with_the_checkpoint_source(self):
+        rc, out, err = self.introspect(self.ckpt(self.ULTRA()), "--record")
+        self.assertEqual(rc, 0, err)
+        leads = self.leads()
+        self.assertEqual(len(leads), 3)
+        for l in leads:
+            self.assertEqual(l["source_type"], "checkpoint")
+            self.assertEqual(l["status"], "claim",
+                             "reading a field out of an artifact is evidence, not "
+                             "a probe — the lead is still a claim")
+
+    def test_a_metric_from_an_artifact_is_still_a_claim_because_it_has_no_scope(self):
+        """CLAUDE.md -> "Never compare metrics across different `mode` or
+        non-equivalent `scope`". Nothing in a checkpoint says which units its
+        metrics were measured on, so a `verified` here would be a number that reads
+        as checked and cannot lawfully be compared to anything."""
+        self.introspect(self.ckpt(self.ULTRA()), "--record")
+        res = [l for l in self.leads() if l["subject"] == "results"][0]
+        self.assertEqual(res["status"], "claim")
+        self.assertIn("NO SCOPE", res["what"])
+
+    def test_a_path_a_checkpoint_names_has_no_host_and_does_not_claim_one(self):
+        """The two obvious substitutes are both wrong in a way that reads as right:
+        `local` asserts this machine (a false `gone` waiting to happen), and a
+        made-up `server:UNKNOWN` reports "no server 'UNKNOWN' in resources.json"
+        and sends the reader to register a machine that does not exist."""
+        self.introspect(self.ckpt(self.ULTRA()), "--record")
+        for l in self.leads():
+            if l["subject"] in ("data", "weights"):
+                self.assertEqual(l["on"], "host_unknown")
+                self.assertNotEqual(l["on"], "local")
+
+    def test_probing_a_hostless_path_is_unreachable_and_names_the_real_task(self):
+        self.introspect(self.ckpt(self.ULTRA()), "--record")
+        self.resources()
+        rc, _out, err = self.probe()
+        self.assertEqual(rc, 0, err)
+        hostless = [l for l in self.leads() if l["on"] == "host_unknown"]
+        self.assertTrue(hostless)
+        for l in hostless:
+            self.assertEqual(l["status"], "unreachable",
+                             "never `gone` — nothing was looked at")
+            self.assertEqual(l["probes"][-1]["blocker"], "host_unidentified",
+                             "the blocker must name identifying the machine, not "
+                             "a credential — a key would not have helped")
+
+    def test_an_unreadable_shape_refuses_rather_than_guessing(self):
+        """Exit 1, not 2. The script worked and the answer is no: the file is
+        present and this code cannot read it. Falling back to a hand-guess about
+        what trained would destroy the only property that makes this family worth
+        anything — that the training process wrote these fields, not a person."""
+        junk = self.path("weights.safetensors")
+        with open(junk, "wb") as fh:
+            fh.write(b"\x00" * 64)
+        rc, out, _ = self.introspect(junk)
+        self.assertEqual(rc, 1)
+        self.assertIn("no reader", json.dumps(out))
+        self.assertIn("readers_missing", out)
+
+    def test_a_bare_state_dict_records_nothing_and_says_so(self):
+        """A checkpoint whose top level is not a dict of metadata is a real
+        reading, distinct from an unreadable file: it IS a torch archive and it
+        genuinely carries no training record."""
+        rc, out, _ = self.introspect(self.ckpt([1, 2, 3], name="bare.pt"))
+        self.assertEqual(rc, 1)
+        self.assertIn("state_dict", json.dumps(out))
+
+    def test_the_reader_does_not_need_the_framework_that_wrote_it(self):
+        """A record-keeping script must not put torch in its dependency path, or
+        the answer becomes "the package is not installed" instead of a finding —
+        the same reason `discover.py` prefers REST over vendor SDKs.
+
+        `_NotInstalledHere` pickles by reference as `contract_discover.…`, which
+        the discover.py subprocess cannot import — standing in for the
+        `ultralytics.nn.tasks.SegmentationModel` a real checkpoint names.
+        """
+        top = self.ULTRA()
+        top["model"] = _NotInstalledHere()
+        rc, out, err = self.introspect(self.ckpt(top, name="exotic.pt"))
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(len(out["leads_named"]), 3,
+                         "an unresolvable class must not stop the metadata read")
+        self.assertEqual(out["recorded_by_the_training_process"]["framework_version"],
+                         "8.4.40")
+
+    def test_sources_ranks_it_first_and_needs_no_credential(self):
+        """It needs less than every other family — one local file, no host, no
+        key — and what it names was written by the run rather than asserted by a
+        person. `sources` must therefore never report it blocked."""
+        self.resources()
+        rc, out, err = run_script(SCRIPT, "sources", "--project", self.project)
+        self.assertEqual(rc, 0, err)
+        names = [r["source"] for r in out["sources"]]
+        self.assertEqual(names[0], "checkpoint",
+                         "first in searches.md's ranking, so first in the listing")
+        row = out["sources"][0]
+        self.assertTrue(row["usable"])
+        self.assertIsNone(row["blocked_by"])
+        self.assertEqual(row["kind"], "mine",
+                         "it produces candidate locations; it does not classify one")
+
+    def leads_file(self):
+        return os.path.join(self.project, "discovery", "leads.json")
+
+
+class AProjectThatIsNotThereIsNotAProjectWithNothingInIt(DiscoverCase):
+    """CLAUDE.md -> "Never silently": never report data you could not look at. A
+    machine that did not answer, a path that is not there, and a directory that is
+    genuinely empty are three facts, and only the last one means the data is gone.
+
+    The same three facts, one level up from the probe. `report` is the verb somebody
+    runs to ask "what do we know about this project", and it is the one output a
+    reader trusts without re-deriving. Reaching its empty-record branch on a project
+    that does not exist answers a question about a typo as though it were a question
+    about the data — and the answer, "nothing recorded yet", is indistinguishable
+    from a real project nobody has swept.
+
+    Every other verb (`sources`, `record`, `reconcile`) already refuses a missing
+    directory. `report` was the one that did not, which is the wrong one to miss:
+    the others are things you do, this is the thing you believe.
+    """
+
+    def test_a_missing_project_is_refused_not_reported_empty(self):
+        rc, out, _err = run_script(SCRIPT, "report", "--json",
+                                   "--project", self.path("ws", "no-such-proj"))
+        self.assertEqual(rc, 2, "a mistyped path is the script breaking, not a "
+                                "verdict about the data")
+        self.assertIn("project not found", json.dumps(out))
+        self.assertNotIn("nothing recorded yet", json.dumps(out),
+                         "the empty-record wording must never describe a project "
+                         "that was never there")
+
+    def test_a_real_project_with_no_leads_still_reports_empty(self):
+        """The refusal must not swallow the legitimate case it sits in front of:
+        a project that exists and genuinely has not been swept."""
+        out = self.report()
+        self.assertEqual(out["leads"], [])
+        self.assertIn("nothing recorded yet", out["note"])
+
+
 class TheRecordIsKeptNotJustWritten(DiscoverCase):
     """CLAUDE.md -> "Contracts": what earns a check is "a record written now and
     read later by someone who can no longer verify it". SKILL.md -> "The record is

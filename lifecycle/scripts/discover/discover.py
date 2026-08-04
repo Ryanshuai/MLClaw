@@ -74,8 +74,8 @@ DEFAULT_BUDGET_S = 30.0
 # Where a lead came from. Ordered by how much the mere mention is worth, which is
 # the ordering a reader needs: code that ran pointed somewhere real, a doc only
 # ever asserted something.
-SOURCE_TYPES = ("code", "tracking", "git_history", "server", "s3", "cloud_console",
-                "doc", "person", "other")
+SOURCE_TYPES = ("checkpoint", "code", "tracking", "git_history", "server", "s3",
+                "cloud_console", "doc", "person", "other")
 
 STATUSES = ("claim", "verified", "gone", "unreachable")
 
@@ -94,8 +94,14 @@ SUBJECTS = ("data", "weights", "results", "credentials", "unclassified")
 # Source families in the order `searches.md` ranks them, worst-to-best reversed:
 # work down. The ranking is what makes an empty cell actionable — nothing found
 # in `code` is a different sentence from nothing found in `doc`.
-SOURCE_RANK = ("code", "git_history", "tracking", "server", "s3", "cloud_console",
-               "doc", "person", "other")
+#
+# `checkpoint` outranks `code` for one reason: code shows what a script COULD
+# read, a checkpoint records what it DID read, and the training process wrote it
+# rather than a person. It also needs less than any other family — no server, no
+# credential, no network, just the file. It is the tracking backend that ships
+# inside the weights.
+SOURCE_RANK = ("checkpoint", "code", "git_history", "tracking", "server", "s3",
+               "cloud_console", "doc", "person", "other")
 
 # Where the thing IS, which decides which probe goes and looks. Deliberately not
 # the same axis as `source_type` (where the CLAIM came from): "the code that ran
@@ -116,6 +122,19 @@ ON_MACHINE_PROBEABLE = ("local", "s3", "server:", "tracking:")
 # would be wrong: somebody can look, it is just not a probe. They stay `claim`
 # and resolve through /ask-human.
 ON_ASK_A_PERSON = ("doc", "person", "cloud_console")
+
+# An absolute path with no machine attached — the normal state of every path a
+# checkpoint's own metadata names, because `train_args.data` records where the
+# training process read from and nothing anywhere records which host that was.
+#
+# It needs its own value because the two obvious substitutes are both wrong in a
+# way that reads as right. `local` asserts this machine, which is a false `gone`
+# waiting to happen. A made-up `server:UNKNOWN` gets the right verdict for the
+# nonsense reason the comment on ON_MACHINE_PROBEABLE warns about: it reports
+# "no server 'UNKNOWN' in resources.json" and tells the reader to go register a
+# machine that does not exist, when the actual task is to find out whose disk
+# this was. That task belongs on the access worklist, so the blocker names it.
+ON_HOST_UNKNOWN = "host_unknown"
 
 # Every `on` below is dispatched. An unbuilt tracking BACKEND is refused by
 # probe_tracking itself rather than by a table here, because the locator is
@@ -169,6 +188,8 @@ def classify_on(on):
         return "machine"
     if on in ON_ASK_A_PERSON:
         return "ask"
+    if on == ON_HOST_UNKNOWN:
+        return "no_probe"
     return None
 
 
@@ -283,6 +304,21 @@ def cmd_sources(a) -> None:
             code_dirs.append((stage, code))
 
     # --- credential-free, and therefore first. searches.md's ranking, in order.
+
+    # checkpoint — the tracking backend that ships inside the weights. First,
+    # because it needs less than anything else here (one local file, no host, no
+    # key) and because what it names was written by the training process rather
+    # than asserted by a person. Always `usable`: unlike every other row this one
+    # is not contingent on the project's state, only on the caller having a file.
+    ckpts = local_checkpoints(project, res)
+    add("checkpoint", "mine", True,
+        why="`introspect` a .pt and read what the run itself recorded: the val "
+            "split it measured on (train_args.data), the checkpoint it was "
+            "fine-tuned from (train_args.model), its own metrics, its params, and "
+            "whether a commit was ever stamped. Needs no credential and no host — "
+            "pass any checkpoint already on this disk, or pull one first",
+        found_on_disk=ckpts[:10] or None,
+        found_on_disk_count=len(ckpts))
 
     # code — a path a script read is a path that existed.
     for stage, code in code_dirs:
@@ -415,6 +451,271 @@ def cmd_sources(a) -> None:
 
 
 # --------------------------------------------------------------------------- #
+# introspect — the checkpoint is a source, not just a file with a size
+# --------------------------------------------------------------------------- #
+#
+# `searches.md` ranks tracking backends with the line "a run that trained recorded
+# what it read". A modern checkpoint does exactly that, offline, inside the
+# artifact — and the family was missing, so every sweep treated a `.pt` as a name
+# and a byte count. What that costs is specific and it lands on evaluation: eval's
+# two needs are a checkpoint and a val set, the checkpoint is usually the easiest
+# thing in the world to obtain (it is the deployed artifact), and it NAMES THE VAL
+# SET. Not opening it means the one search with the highest yield for the one
+# stage that most needs it was never run.
+
+
+class _Stub:
+    """Stand-in for a class this interpreter does not have.
+
+    Reading a checkpoint's metadata must not require the framework that wrote it —
+    that would put torch in the dependency path of a record-keeping script and
+    make the answer "the package is not installed" instead of a finding. So every
+    global the pickle names becomes an inert type. NOTHING FROM THE FILE IS
+    EXECUTED: `find_class` fabricates a type, it never imports one, and
+    `__reduce__` keeps re-pickling harmless.
+    """
+
+    _mod = _name = "?"
+
+    def __init__(self, *a, **kw):
+        self._args = a
+
+    def __repr__(self):
+        return f"<{self._mod}.{self._name}>"
+
+    def __setstate__(self, state):
+        self._state = state
+
+    def append(self, *a):
+        pass
+
+    def __setitem__(self, *a):
+        pass
+
+    def __reduce__(self):
+        return (object, ())
+
+
+_STUBS = {}
+
+
+def _stub_for(mod, name):
+    """A CLASS, not a factory — pickle's NEWOBJ opcode requires a type."""
+    key = (mod, name)
+    if key not in _STUBS:
+        _STUBS[key] = type(name, (_Stub,), {"_mod": mod, "_name": name})
+    return _STUBS[key]
+
+
+def read_torch_metadata(path):
+    """-> (dict, None) | (None, why). The top-level dict of a torch .pt.
+
+    A torch>=1.6 checkpoint is a zip holding one pickle. Only the top level is
+    wanted: the tensors stay as placeholders because `persistent_load` refuses to
+    resolve storages, so this reads a 63 MB file without materialising a weight.
+    """
+    import io
+    import pickle
+    import zipfile
+
+    try:
+        z = zipfile.ZipFile(path)
+    except Exception as exc:                        # not a zip -> not this shape
+        return None, f"not a zip archive ({type(exc).__name__})"
+    pkls = [n for n in z.namelist() if n.endswith("data.pkl")]
+    if not pkls:
+        return None, ("a zip, but no */data.pkl member — not a torch checkpoint "
+                      "(safetensors and plain-pickle .pth are different shapes "
+                      "and have no reader here)")
+
+    class Safe(pickle.Unpickler):
+        def find_class(self, mod, name):
+            if mod == "collections" and name == "OrderedDict":
+                return dict
+            return _stub_for(mod, name)
+
+        def persistent_load(self, pid):
+            return _Stub()
+
+    try:
+        top = Safe(io.BytesIO(z.read(pkls[0]))).load()
+    except Exception as exc:
+        return None, f"the pickle did not load: {type(exc).__name__}: {exc}"
+    if not isinstance(top, dict):
+        return None, (f"the checkpoint's top level is {type(top).__name__}, not a "
+                      f"dict — a bare state_dict records nothing about its training")
+    return top, None
+
+
+def plain(v):
+    """JSON-safe or dropped. A stub rendered as a string would look like data."""
+    if isinstance(v, (str, int, float, bool, type(None))):
+        return v
+    if isinstance(v, (list, tuple)):
+        out = [plain(x) for x in v]
+        return None if any(x is None and y is not None
+                           for x, y in zip(out, v)) else out
+    if isinstance(v, dict):
+        return {str(k): plain(x) for k, x in v.items()
+                if isinstance(x, (str, int, float, bool, type(None), list, dict))}
+    return None
+
+
+def leads_from_ultralytics(top, ckpt_path):
+    """-> [proposed lead dicts]. What this checkpoint says about the world.
+
+    Deliberately narrow: only fields whose meaning is unambiguous become leads.
+    `train_args.data` and `train_args.model` are paths the training process
+    actually opened, which is the strongest kind of evidence a sweep ever gets —
+    stronger than a wiki page and stronger than a grep, because the run would
+    have crashed if they had been wrong.
+
+    `train_metrics` becomes a `results` lead rather than a number written
+    anywhere authoritative, and it is recorded as a CLAIM even though it was read
+    out of an artifact. That is not timidity: the metric has no `scope` — nothing
+    in the checkpoint says which images it was measured on — and per CLAUDE.md a
+    metric without a scope cannot be compared to anything. A `verified` here
+    would be a number that reads as checked and cannot be used.
+    """
+    ta = top.get("train_args") or {}
+    if not isinstance(ta, dict):
+        ta = {}
+    out = []
+    ck = os.path.basename(ckpt_path)
+
+    data = ta.get("data")
+    if isinstance(data, str) and data:
+        out.append({
+            "path": data, "subject": "data", "on": ON_HOST_UNKNOWN,
+            "what": "THE VAL SPLIT — this file declares which units are train and "
+                    "which are val, so it is the only definition of the quantity "
+                    "this checkpoint's recorded metrics refer to. Without it a "
+                    "re-measurement is a different measurement, not a reproduction",
+            "evidence": f"train_args.data, read out of {ck}",
+        })
+    parent = ta.get("model")
+    if isinstance(parent, str) and parent and parent.endswith((".pt", ".pth")):
+        out.append({
+            "path": parent, "subject": "weights", "on": ON_HOST_UNKNOWN,
+            "what": "the checkpoint this one was fine-tuned FROM — one edge of the "
+                    "lineage chain, recorded by the training process rather than "
+                    "by a person",
+            "evidence": f"train_args.model, read out of {ck}",
+        })
+    metrics = plain(top.get("train_metrics")) or {}
+    if metrics:
+        out.append({
+            "path": ckpt_path, "subject": "results", "on": "local",
+            "what": "metrics this checkpoint records about ITSELF: "
+                    + ", ".join(f"{k}={v}" for k, v in sorted(metrics.items())[:6])
+                    + ". NO SCOPE IS RECORDED — nothing here says which units these "
+                      "were measured on, so they are uncomparable until the val "
+                      "split above is found. A claim, from an artifact",
+            "evidence": f"train_metrics, read out of {ck}",
+        })
+    return out
+
+
+def local_checkpoints(project, res, cap=200):
+    """-> [paths] of checkpoint-shaped files already on this disk.
+
+    A convenience for `sources`, not a search: it looks in the project and in the
+    registered local base paths so the row can say "here are three you could read
+    right now" instead of "go find one". Bounded and silent on error — a listing
+    that cannot be taken must not make the row look unusable, because the row's
+    real claim is "this needs nothing", which stays true with zero files found.
+    """
+    roots = [project]
+    for base in ((res or {}).get("local") or {}).get("base_paths") or []:
+        p = os.path.expanduser(base if isinstance(base, str) else base.get("path", ""))
+        if p and os.path.isdir(p):
+            roots.append(p)
+    hits = []
+    for root in roots:
+        for dirpath, dirs, names in os.walk(root, onerror=lambda e: None):
+            dirs[:] = [d for d in dirs if not d.startswith((".git", "__pycache__"))]
+            for n in names:
+                if n.endswith((".pt", ".pth", ".ckpt", ".safetensors")):
+                    hits.append(os.path.join(dirpath, n))
+                    if len(hits) >= cap:
+                        return sorted(hits)
+    return sorted(hits)
+
+
+def cmd_introspect(a) -> None:
+    """Read a checkpoint and report the leads it names.
+
+    A MINE, not a probe — the same `kind` as `code` and `git_history` in
+    `sources`: it produces candidate locations rather than classifying one. So it
+    looks by default and writes only with `--record`, matching CLAUDE.md's
+    "confirm before saving".
+
+    Exit 1 when there is no reader for the shape. That is the script working: an
+    unreadable checkpoint must not fall back to a hand-guess about what trained,
+    because the whole value here is that the training process wrote these fields
+    and a person did not.
+    """
+    project = os.path.expanduser(a.project)
+    if not os.path.isdir(project):
+        broke(f"project not found: {project}")
+    if not os.path.exists(a.checkpoint):
+        broke(f"no such file: {a.checkpoint}")
+
+    top, why = read_torch_metadata(a.checkpoint)
+    if top is None:
+        refuse("no reader for this checkpoint shape", why=why,
+               checkpoint=a.checkpoint,
+               readers_built=["torch/ultralytics .pt (zip + */data.pkl)"],
+               readers_missing=["safetensors", "plain-pickle .pth",
+                                "ONNX metadata_props", "TF SavedModel"],
+               fix="`gone` is not the verdict here and neither is a guess: the "
+                   "file is present and this code cannot read it. Name the shape "
+                   "and add a reader")
+
+    proposed = leads_from_ultralytics(top, a.checkpoint)
+    found = {
+        "reader": "torch/ultralytics .pt",
+        "recorded_by_the_training_process": {
+            "saved_at": plain(top.get("date")),
+            "framework_version": plain(top.get("version")),
+            "epochs_in_curve": len((top.get("train_results") or {}).get("epoch")
+                                   or []) or None,
+            "resumable": None if top.get("epoch") is None
+                         else top.get("epoch") != -1,
+        },
+        # The code axis, straight from the horse's mouth. A null commit here is
+        # not "we did not look" — the writer looked and found nothing, which is
+        # the difference /repro's axes.md turns on.
+        "code_axis": plain(top.get("git")),
+        "params": plain(top.get("train_args")),
+        "metrics": plain(top.get("train_metrics")),
+        "leads_named": proposed,
+    }
+    if not a.record:
+        found["note"] = (f"{len(proposed)} lead(s) named and NONE recorded — "
+                         f"--record to write them")
+        return emit(found)
+
+    rec = load_leads(project)
+    written = []
+    for p in proposed:
+        lead = make_lead(rec, path=p["path"], on=p["on"],
+                         source_type="checkpoint", subject=p["subject"],
+                         what=p["what"], evidence=p["evidence"],
+                         dataset=a.dataset)
+        rec["leads"].append(lead)
+        written.append(lead["lead_id"])
+    rec["updated_at"] = now_utc()
+    atomic_write_json(leads_path(project), rec)
+    found["recorded"] = written
+    found["note"] = (f"{len(written)} lead(s) recorded as `claim`. Every path a "
+                     f"checkpoint names is on a host nothing records, so they are "
+                     f"`on: {ON_HOST_UNKNOWN}` — identify the machine before "
+                     f"probing, and that identification is an access task")
+    emit(found)
+
+
+# --------------------------------------------------------------------------- #
 # record — a lead
 # --------------------------------------------------------------------------- #
 
@@ -444,41 +745,58 @@ def cmd_record(a) -> None:
                fix="--again to add a second lead anyway (different claim about "
                    "the same path), or edit the record")
 
-    lead = {
-        "lead_id": f"lead_{len(rec['leads']) + 1:04d}",
-        "path": a.path,
-        "on": on,
-        "source_type": a.source_type,
-        # Which of the four searches this lead belongs to. `unclassified` is
-        # allowed and is reported as a gap rather than guessed at: inferring the
-        # subject from a path would make the coverage table confidently wrong.
-        "subject": a.subject,
-        # Two URLs on two axes, same split as `on` versus `source_type`: where the
-        # THING is, and where the CLAIM came from. One link cannot be both, and a
-        # brief that conflated them would send a reader to a wiki page when they
-        # asked to see the bucket.
-        "url": a.url,
-        "evidence_url": a.evidence_url,
-        # Not optional. A lead with no evidence is a rumour, and six months on
-        # nobody can tell which of these came from a config file that ran and
-        # which came from a wiki page somebody wrote from memory.
-        "evidence": a.evidence,
-        "what": a.what,
-        "status": "claim",
-        "recorded_at": now_utc(),
-        "probes": [],
-        "dataset": a.dataset,
-        "note": a.note,
-        # None means "no known deadline", which is the normal case. A date here
-        # says this lead stops being resolvable then — see DEFAULT_EXPIRING_SOON_DAYS.
-        "access_expires_at": a.access_expires_at,
-    }
+    lead = make_lead(
+        rec, path=a.path, on=on, source_type=a.source_type, subject=a.subject,
+        evidence=a.evidence, what=a.what, url=a.url, evidence_url=a.evidence_url,
+        dataset=a.dataset, note=a.note, access_expires_at=a.access_expires_at)
     rec["leads"].append(lead)
     rec["updated_at"] = now_utc()
     atomic_write_json(leads_path(project), rec)
     emit({"recorded": lead["lead_id"], "lead": lead,
           "path": leads_path(project),
           "next": "probe it — a claim is not a finding"})
+
+
+def make_lead(rec, *, path, on, source_type, subject, evidence, what,
+              url=None, evidence_url=None, dataset=None, note=None,
+              access_expires_at=None):
+    """The one place a lead's shape is written.
+
+    Two callers build leads — `record` from a person's argv and `introspect` from
+    a checkpoint's own metadata — and a second literal would drift. Everything a
+    later reader needs to tell one source of a lead from another is already on the
+    lead (`source_type`, `evidence`), so the two paths must produce the same shape
+    and differ only in those values.
+    """
+    return {
+        "lead_id": f"lead_{len(rec['leads']) + 1:04d}",
+        "path": path,
+        "on": on,
+        "source_type": source_type,
+        # Which of the four searches this lead belongs to. `unclassified` is
+        # allowed and is reported as a gap rather than guessed at: inferring the
+        # subject from a path would make the coverage table confidently wrong.
+        "subject": subject,
+        # Two URLs on two axes, same split as `on` versus `source_type`: where the
+        # THING is, and where the CLAIM came from. One link cannot be both, and a
+        # brief that conflated them would send a reader to a wiki page when they
+        # asked to see the bucket.
+        "url": url,
+        "evidence_url": evidence_url,
+        # Not optional. A lead with no evidence is a rumour, and six months on
+        # nobody can tell which of these came from a config file that ran and
+        # which came from a wiki page somebody wrote from memory.
+        "evidence": evidence,
+        "what": what,
+        "status": "claim",
+        "recorded_at": now_utc(),
+        "probes": [],
+        "dataset": dataset,
+        "note": note,
+        # None means "no known deadline", which is the normal case. A date here
+        # says this lead stops being resolvable then — see DEFAULT_EXPIRING_SOON_DAYS.
+        "access_expires_at": access_expires_at,
+    }
 
 
 # --------------------------------------------------------------------------- #
@@ -1520,6 +1838,18 @@ def cmd_probe(a) -> None:
         elif on.startswith("server:"):
             status, detail, sample, size = probe_server(
                 on.split(":", 1)[1], lead["path"], res, a.budget_seconds)
+        elif kind == "no_probe":
+            # A path with no machine attached. Distinct from `ask` (somebody can
+            # answer it) and from a bad `on` (a typo): this IS the right value,
+            # and what is missing is the host. So the blocker names the actual
+            # task — identify the machine — and lands it on the access worklist,
+            # where a credential ask would not have helped.
+            status, detail, sample, size = (
+                "unreachable",
+                f"the path is recorded but no machine is: `on: {on}`. Nothing can "
+                f"be dispatched until somebody says which host this path was on. "
+                f"That identification is the access task, not a key",
+                None, {"blocker": "host_unidentified"})
         elif kind == "ask":
             # Leave the status alone. Overwriting `claim` with `unreachable` here
             # would say "we could not look" about something a person can simply
@@ -1826,6 +2156,9 @@ def coverage(leads, available):
 
 
 SOURCE_WHY = {
+    "checkpoint": "the run's own record, inside the weights — `introspect` a .pt "
+                  "for the val split it measured on, its parent, its params and "
+                  "whether a commit was ever stamped. Needs no host and no key",
     "code": "the highest-signal source and it needs no credential — a path a "
             "script read is a path that existed. Nothing from here means the "
             "sweep has not started",
@@ -2414,6 +2747,16 @@ def cmd_save(a) -> None:
 
 def cmd_report(a) -> None:
     project = os.path.expanduser(a.project)
+    # A mistyped --project must NOT reach the empty-record branch below. Without
+    # this line the one verb people run to ask "what do we know" answers "nothing
+    # recorded yet" for a project that does not exist — a false empty, produced by
+    # the tool whose entire purpose is keeping "looked, nothing there" apart from
+    # "could not look". Every other verb already refuses; this one is the one a
+    # reader trusts most.
+    if not os.path.isdir(project):
+        broke(f"project not found: {project}",
+              hint="--project takes a PATH to the project directory, not a "
+                   "bare name; workspace root is in CLAUDE.md -> workspace_root")
     rec = read_json(leads_path(project), required=False)
     if rec is None:
         return emit({"leads": [], "note": "nothing recorded yet — discover.py "
@@ -2520,12 +2863,23 @@ def main() -> None:
     s.add_argument("--project", required=True)
     s.set_defaults(fn=cmd_sources)
 
+    it = sub.add_parser("introspect",
+                        help="read a checkpoint and report the leads it names")
+    it.add_argument("--project", required=True)
+    it.add_argument("--checkpoint", required=True,
+                    help="a local .pt — the file itself, already pulled")
+    it.add_argument("--record", action="store_true",
+                    help="write the named leads (default is to look only)")
+    it.add_argument("--dataset", default=None)
+    it.set_defaults(fn=cmd_introspect)
+
     r = sub.add_parser("record", help="add a lead")
     r.add_argument("--project", required=True)
     r.add_argument("--path", required=True, help="s3://..., or a path on --on")
     r.add_argument("--on", default=None,
-                   help="local | s3 | server:<key> | tracking:<backend> | doc | "
-                        "person | cloud_console  (inferred from the path if omitted)")
+                   help=f"local | s3 | server:<key> | tracking:<backend> | doc | "
+                        f"person | cloud_console | {ON_HOST_UNKNOWN} (a path whose "
+                        f"machine nobody records)  (inferred from the path if omitted)")
     r.add_argument("--access-expires-at", dest="access_expires_at", default=None,
                    metavar="ISO8601",
                    help="the date this source stops being resolvable at all — a "
