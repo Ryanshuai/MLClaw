@@ -43,6 +43,12 @@ For item/source schemas and type classification rules, read `references/schemas.
 
 **The data half is not this skill's job.** Invoke **`/discover`** as a sub-skill (utility pattern, like `/resources`) and read `discovery/leads.json`. Do not grow a sweep here: `/train-init` has one, this skill would have made two, and two implementations of "where is the data" is how they start disagreeing. A lead also outlives an init — access arrives weeks after a handover, and the leads file carries the unresolved ones forward where these four JSON files cannot.
 
+**Ask `/discover` to `introspect` the checkpoint before anything else.** `discover.py introspect --checkpoint <the .pt>` reads what the training run recorded inside its own weights, and one field there is the thing this stage most needs and can least otherwise get: **`train_args.data` names the val split** — the only record of *which units* the checkpoint's metrics were measured on. It also yields the parent checkpoint, the run's own numbers, its params, and whether a commit was ever stamped. No host, no credential, no framework.
+
+This is the highest-yield search in eval specifically, and the ordering is not a preference: **a checkpoint you already have is a stronger source than a wiki page and a cheaper one than a server you have no key for.** For an inherited model it is usually the *only* source that names a val set at all, and without one, Step 1b has nothing to judge a candidate against — every option becomes `mismatch` for lack of a `num_samples` to compare to. Read `/discover` `references/searches.md` → "checkpoint" for what it refuses and why.
+
+Two things it hands you that land directly in the files below: the val-split path becomes an `input.json` candidate (`unreachable` until somebody says which machine that path was on), and `train_metrics` becomes `output.json → baseline` carrying `confidence: claimed` **and no scope** — which is exactly the gap the val split closes.
+
 What this skill *does* look for itself, because `/discover` has no reason to:
 
 | Source | What to look for | How |

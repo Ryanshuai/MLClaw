@@ -29,8 +29,9 @@ source sweep — same discipline, same `provenance`-style honesty about what was
 S=<mlclaw_root>/lifecycle/scripts/discover/discover.py
 
 python $S sources --project <p>
-python $S record  --project <p> --path <loc> --on local|s3|server:<key> \
-                  --source-type code|tracking|git_history|server|s3|cloud_console|doc|person|other \
+python $S introspect --project <p> --checkpoint <a .pt on disk> [--record]
+python $S record  --project <p> --path <loc> --on local|s3|server:<key>|host_unknown \
+                  --source-type checkpoint|code|tracking|git_history|server|s3|cloud_console|doc|person|other \
                   --subject data|weights|results|credentials \
                   [--url <where a person opens the THING>] \
                   [--evidence-url <where a person opens the CLAIM>] \
@@ -116,6 +117,7 @@ Ordered by what a mention is actually worth. Work down; do not start at the wiki
 
 | Source | Why this rank | What to look for |
 |---|---|---|
+| **checkpoint** | code shows what a script *could* read; a checkpoint records what it *did*, and the run wrote it — plus it needs no host and no key | `introspect` it: `train_args.data` is **the val split**, `train_args.model` is the parent, `train_metrics` are its own numbers, `git.commit` is the code axis |
 | **code** | a path a script actually read is a path that existed | data roots, dataset classes, config YAMLs, `--data-dir` defaults, docker mounts |
 | **git history** | a *removed* path is evidence of data that existed and moved | `git log -S/mnt`, `git log --diff-filter=D`, old config files |
 | **tracking backend** | a run that trained recorded where it read from | W&B/MLflow run configs and artifact paths |

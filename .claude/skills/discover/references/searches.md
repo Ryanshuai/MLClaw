@@ -32,6 +32,27 @@ The last row is why credential discovery belongs in this engine rather than besi
 
 Work down. Do not start at the wiki. The ranking is the same for every subject; only the patterns change.
 
+### checkpoint — the tracking backend that ships inside the weights
+
+`discover.py introspect --checkpoint <a .pt already on disk>`. First in the ranking, and the reason is not that it is best in some general sense — it is that **code shows what a script could read and a checkpoint records what it did read**, written by the training process rather than asserted by a person. A wrong `train_args.data` would have crashed the run.
+
+It also needs less than any other family: one local file. No host, no key, no network, and no framework — the reader is a zip open plus a pickle walk with every unknown global stubbed, so `torch` never enters a record script's dependency path. That matters for the same reason `discover.py` prefers REST over vendor SDKs: "the package is not installed" is not a finding.
+
+| Subject | Field | Why it is the strongest form of this lead you will get |
+|---|---|---|
+| **data** | `train_args.data` | **The val split.** The only record of *which units* the checkpoint's metrics were measured on. Without it a re-measurement is a different measurement, so this single field decides whether `/repro` can run at all |
+| **weights** | `train_args.model` | the checkpoint it was fine-tuned from — one lineage edge, recorded by the run |
+| **results** | `train_metrics`, `train_results` | the run's own numbers, and often a full per-epoch curve that exists nowhere else |
+| **code** | `git.commit` | and a **null here is a finding**: the writer looked for a commit and found none, which is `axes.md`'s "no commit was recorded" as opposed to "the commit does not resolve" |
+| **env** | `version` | one package, precisely — and one package is not an environment. Do not let it read as one |
+
+Two rules, both about not overclaiming:
+
+- **A metric read out of an artifact is still a `claim`.** Nothing in a checkpoint says which units its numbers came from, and CLAUDE.md forbids comparing a metric with no `scope`. A `verified` here would be a number that reads as checked and cannot lawfully be used.
+- **A path a checkpoint names has no host.** `train_args.data` is an absolute path on whatever machine trained, and nothing records which one — so it is `on: host_unknown`, never `local` (a false `gone` waiting to happen) and never an invented `server:UNKNOWN` (which reports "no server 'UNKNOWN' in resources.json" and sends the reader to register a machine that never existed). `probe` answers `unreachable` with `blocker: host_unidentified`, because the task is to find out whose disk it was, and no credential helps with that.
+
+**Built and exercised**: torch/ultralytics `.pt` (a zip whose `*/data.pkl` holds a metadata dict), against a real 63 MB deployed segmentation checkpoint. **No reader**: `safetensors`, plain-pickle `.pth`, ONNX `metadata_props`, TF SavedModel. An unreadable shape **refuses** (exit 1) and lists both sets — it never guesses, because the entire value of this family is that a person did not write these fields.
+
 ### code — a path a script read is a path that existed
 
 | Subject | Patterns |
@@ -105,6 +126,7 @@ A probe's job is to reach one of four verdicts honestly. The failure that matter
 | `tracking:<backend>` — service | no credential → `unreachable`, naming which env vars and config files checked. No adapter/package → `unreachable`, and it says a key *was* found. A 200 whose body does not parse → `unreachable`, `NOTHING WAS COUNTED`. `gone` only when the server itself listed and the project was not in it | all five; `mlflow` and `wandb` against real servers, three against stubs |
 | unknown `on` | `record` refuses at write time; `probe` says no probe was dispatched rather than guessing one | yes |
 | `cloud_console`, `doc`, `person` | not probeable by machine. These stay `claim` and are resolved through `/ask-human` | n/a |
+| `host_unknown` | a path with no machine attached — the normal state of everything `introspect` reads out of a checkpoint. `unreachable` with `blocker: host_unidentified`, never `gone`: nothing was looked at. Distinct from a bad `on` (a typo) — this IS the correct value, and what is missing is the host. The blocker names identifying the machine, because a credential would not have helped | yes |
 
 **Every `unreachable` must name what was missing**, in the words a person can act on ("no AWS credentials", "host P608 did not answer", "private repo"). That text is the credential worklist; a bare `unreachable` produces a lead nobody can clear.
 
