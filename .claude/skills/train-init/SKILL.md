@@ -38,7 +38,7 @@ Which candidate a given run actually used stays per-run (the run's `sources.json
 
 ## Interaction approach
 
-Ask one question at a time. Training has more knobs than infer/eval (lr, bs, epochs, optimizer, scheduler, mixed precision, checkpoint policy …) — overwhelming the user with all of them at once is the failure mode. Ask one, record, then the next.
+Ask one question at a time. Training has more knobs than infer/eval (lr, bs, epochs, optimizer, scheduler, mixed precision, checkpoint policy …) — overwhelming the user with all of them at once is the failure mode. Ask one, record, then the next. **And only what only they know** — a value you can read is not a question, and a value nobody has is recorded absent rather than asked for: CLAUDE.md "Decide what evidence can decide".
 
 **Language.** This file, the schemas, and every example in them are English — they're instructions for an agent. Everything a *human* reads follows the user's language: the questions you ask, free text you author (`notes`, `unresolved.why`, `hazards.what`, `origin.why`), and `recipe.md`. A Chinese-speaking user should not be handed an English handover document. Enumerated values, keys, and `path:line` evidence stay as-is in every language.
 

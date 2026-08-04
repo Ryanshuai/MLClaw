@@ -14,7 +14,7 @@ description: >
 
 Execute one round of refactoring on `stages/refactor/code/`. Each invocation = one round.
 
-One question at a time. Push/pop `history.json` stack per "Workflow State Protocol" in `lifecycle/references/skill-graph.md`.
+One question at a time. Push/pop `history.json` stack per "Workflow State Protocol" in `lifecycle/references/skill-graph.md`. **And only what only they know** — a value you can read is not a question, and a value nobody has is recorded absent rather than asked for: CLAUDE.md "Decide what evidence can decide".
 
 **Requires**: `plan.json` exists with non-empty `modules` (otherwise offer `/refactor-init`). Credentials checked lazily.
 

@@ -13,7 +13,7 @@ description: >
 
 Execute an inference run: resolve sources, run the model, collect outputs.
 
-**One question at a time** — asking multiple questions at once is overwhelming. Ask one, record, ask next.
+**One question at a time** — asking multiple questions at once is overwhelming. Ask one, record, ask next. **And only what only they know** — a value you can read is not a question, and a value nobody has is recorded absent rather than asked for: CLAUDE.md "Decide what evidence can decide".
 
 **Workflow state, dependency checks, locate project, variable references** — follow `lifecycle/references/skill-graph.md` (state protocol + the requires/suggests table) and `lifecycle/references/layout.md` (Variable Reference Syntax). Stage = `inference`, upstream = `/infer-init` (check `config.json -> entry_command` non-empty).
 

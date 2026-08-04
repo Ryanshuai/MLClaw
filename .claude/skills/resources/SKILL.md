@@ -7,7 +7,7 @@ description: "Use this skill to discover and configure compute resources \u2014 
 
 Search the local machine for credentials, models, and data in common default locations. Can be invoked standalone or triggered by other skills when a resource is needed.
 
-Ask one question at a time — multiple questions at once overwhelms users.
+Ask one question at a time — multiple questions at once overwhelms users. **And only what only they know** — a value you can read is not a question, and a value nobody has is recorded absent rather than asked for: CLAUDE.md "Decide what evidence can decide".
 
 Follow `lifecycle/references/skill-graph.md` -> "Workflow State Protocol": push on entry, update step as you progress, pop on completion.
 

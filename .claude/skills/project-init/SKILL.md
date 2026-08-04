@@ -7,7 +7,7 @@ description: "Use this skill to create a new MLClaw project. Triggers when the u
 
 One-time project setup. Creates directory structure, `project.json`, and stage config templates.
 
-Ask one question at a time — multiple questions at once overwhelms users.
+Ask one question at a time — multiple questions at once overwhelms users. **And only what only they know** — a value you can read is not a question, and a value nobody has is recorded absent rather than asked for: CLAUDE.md "Decide what evidence can decide".
 
 Follow `lifecycle/references/skill-graph.md` -> "Workflow State Protocol": push on entry, update step as you progress, pop on completion.
 

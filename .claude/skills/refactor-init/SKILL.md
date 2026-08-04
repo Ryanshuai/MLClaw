@@ -7,7 +7,7 @@ description: "Use this skill to set up a research code repository for refactorin
 
 Clone a research code repository, analyze its structure, classify modules, extract paper benchmark targets, and configure the verification pipeline.
 
-Ask one question at a time — multiple questions at once overwhelms users.
+Ask one question at a time — multiple questions at once overwhelms users. **And only what only they know** — a value you can read is not a question, and a value nobody has is recorded absent rather than asked for: CLAUDE.md "Decide what evidence can decide".
 
 Follow `lifecycle/references/skill-graph.md` -> "Workflow State Protocol": push on entry, update step as you progress, pop on completion.
 
