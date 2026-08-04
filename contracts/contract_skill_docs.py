@@ -63,6 +63,41 @@ class ASkillThatRestatesTheAskingRuleCarriesItsCounterpart(unittest.TestCase):
                            "fires, the check above has stopped testing anything")
 
 
+class AQuestionIsFiledNotBlockedOn(unittest.TestCase):
+    """CLAUDE.md -> "Key design principles": "File the question; do not block on
+    it", and `/ask-human`, whose `ask.py open` is the mechanism.
+
+    The target is unattended operation on a server. There, a question is not an
+    expense, it is a deadlock — nothing answers, and an interview-shaped skill
+    stops at question 3 of 9 having produced nothing. Every init skill in this
+    repo is written as an interview, so the rule that lets one terminate with
+    questions outstanding is what makes any of them runnable without a human.
+
+    Checked because the rule is only worth anything if it names the mechanism: a
+    version of it that said "use your judgement" would leave the same deadlock in
+    place with better prose. `ask.py open`, `--why`, and the do-the-rest-first
+    ordering are the operative parts, and `--verify` is the "a value you can read
+    is never a question" bucket restated one level down.
+    """
+
+    def test_the_rule_names_the_mechanism_and_the_ordering(self):
+        for needle, why in [
+            ("ask.py open", "the rule has to name the verb that files a question"),
+            ("--why", "a filed question must say what is blocked on it"),
+            ("--verify", "the readable-value bucket, one level down"),
+            ("unattended", "the reason blocking is a deadlock rather than a cost"),
+            ("does **not** depend on the answer", "do the rest first, then file"),
+        ]:
+            self.assertIn(needle, CLAUDE_MD, why)
+
+    def test_ask_open_still_has_the_flags_the_rule_tells_people_to_pass(self):
+        """A rule citing flags that have been renamed is worse than no rule: it
+        reads as an instruction and fails at the shell."""
+        src = (ROOT / "lifecycle" / "scripts" / "ask-human" / "ask.py").read_text()
+        for flag in ("--asked", "--why", "--verify", "--to"):
+            self.assertIn(flag, src, f"ask.py no longer offers {flag}")
+
+
 class ConfirmBeforeSavingIsAboutTheRecord(unittest.TestCase):
     """CLAUDE.md -> "Key design principles": "Confirm before saving … **This is
     about the record, not the work that produces it**".

@@ -32,6 +32,17 @@ MLClaw replaces MLflow/W&B/TensorBoard with conversation-driven ML lifecycle man
 
   **Asking has a cost nothing else in this file names.** Every unnecessary question spends the user's attention, and their attention is what decides whether the ten rules below get read on the day they matter. A skill that stops to ask about a package install has taught its reader to skim — and the next thing skimmed is a checkpoint deletion.
 
+- **File the question; do not block on it.** The `Ask` bucket says whose answer it is, not that you stop and wait for it. **This runs unattended on a server**, where a question is not expensive — it is a *deadlock*: nothing answers, and the skill sits at question 3 of 9 having produced nothing. Every skill here is written as an interview, and an interview cannot run with nobody in the room. So:
+
+  1. do everything that does **not** depend on the answer, first;
+  2. `ask.py open --to <who> --asked "<verbatim>" --why "<what is blocked>"` — the question becomes a record that outlives the session and is surfaced at every conversation start, stale at 7 days;
+  3. mark **at the field** what is outstanding, so the config says which values are open rather than being silently half-written;
+  4. carry on.
+
+  `--verify` is the bucket rule one level down: *a command that could answer this without a person*. If you can write one, run it instead of filing — and its absence is exactly why `/ask-human` refuses to call an answer `verified`.
+
+  Block only where proceeding under any assumption would be unsafe or would make the work useless if wrong. **A halted interview and a finished record with three open asks look nothing alike to whoever picks this up**: the first is nothing, the second is most of the work plus a worklist.
+
 ## Never silently
 
 Ten rules that outrank convenience. They are here, in the always-loaded file, because the moment they matter most is when no skill is running — a user says "clean up the old checkpoints", "which run was best", or "the labels came back, load them in", nothing loads, and an obliging agent does the wrong thing without anything raising. Mechanism and rationale: `lifecycle/references/run-mechanics.md -> "Record integrity"`.
