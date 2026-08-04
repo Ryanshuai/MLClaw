@@ -30,9 +30,13 @@ import subprocess
 import unittest
 from datetime import datetime, timezone
 
-from helpers import TempDirCase, run_script
+from helpers import TempDirCase, load_script, run_script
 
 SCRIPT = "repro/repro.py"
+# Most checks here drive the CLI. The code axis is probed in-process because the
+# thing under test is one function's verdict on a hand-built record, and routing
+# it through `check` would need a whole project fixture to assert one field.
+repro = load_script(SCRIPT)
 
 
 class ReproCase(TempDirCase):
@@ -603,3 +607,69 @@ class TimestampsAreUTCWithAnOffset(ReproCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AFrameworkStagesCodeAxisIsNotAMissingTree(ReproCase):
+    """`layout.md` -> "Code Source Resolution", the `framework` mode; and
+    `.claude/skills/repro/references/axes.md` -> "code".
+
+    `probe_code` read a null `origin_commit` as "the tree that ran was never
+    identified". For a stage whose `code_source` is `framework` there was never a
+    tree — the code is an installed package and the null is BY CONSTRUCTION. That
+    is exactly the confusion `code.kind` was added to prevent, and the axis was
+    the one place still making it: a perfectly pinned framework run reported
+    `unverifiable` with advice about a git tree that does not exist.
+
+    Its contract is `install <pkg>==<version>`, so what pins it is the version —
+    which makes this axis's answer a version comparison, and `intact` a real
+    verdict rather than a courtesy.
+    """
+
+    def framework_run(self, pinned="8.4.40", ran="8.4.40"):
+        run = {"run_id": "run_A", "stage": "evaluation", "status": "completed",
+               "mode": "production", "scope": {"samples": 100},
+               "env": {"packages": {}},
+               "metrics": {"best": {"primary_metric": "m", "primary_metric_value": 0.5}}}
+        run["code"] = {"kind": "framework", "framework": "ultralytics",
+                       "framework_version": pinned, "repo": None, "branch": None,
+                       "origin_commit": None, "repo_subdir": None,
+                       "dirty_patch_path": None, "dirty_files_count": None,
+                       "untracked_skipped": [], "reproducible": True, "warnings": []}
+        if ran:
+            run.setdefault("env", {}).setdefault("packages", {})["ultralytics"] = ran
+        return run
+
+    def test_a_pinned_framework_is_intact_not_unverifiable(self):
+        ax = repro.probe_code(self.project, self.framework_run(), "evaluation")
+        self.assertEqual(ax["verdict"], "intact")
+        self.assertIn("no tree by design", ax["detail"])
+        self.assertNotIn("origin_commit", ax["detail"],
+                         "it must not report a missing SHA for a stage that has none")
+
+    def test_the_pin_disagreeing_with_what_ran_is_drift(self):
+        """The version is the whole contract here, so a record pinning one and an
+        env recording another is the framework branch's equivalent of a SHA that
+        does not resolve — and it must not read as intact."""
+        ax = repro.probe_code(self.project, self.framework_run(ran="8.5.0"), "evaluation")
+        self.assertEqual(ax["verdict"], "drifted")
+        self.assertIn("8.5.0", ax["detail"])
+
+    def test_a_framework_record_with_no_version_is_unverifiable(self):
+        run = self.framework_run()
+        run["code"]["framework_version"] = None
+        ax = repro.probe_code(self.project, run, "evaluation")
+        self.assertEqual(ax["verdict"], "unverifiable")
+
+    def test_it_still_says_what_a_version_cannot_see(self):
+        """`reproducible: true` on the framework branch is honest about rebuilding
+        the code and blind to a local edit to the installed package. The axis has
+        to carry that, or `intact` overstates the contract."""
+        ax = repro.probe_code(self.project, self.framework_run(), "evaluation")
+        self.assertIn("local edit", json.dumps(ax))
+
+    def test_a_git_run_with_no_sha_is_still_unverifiable(self):
+        """The new branch must not become a way past the old verdict."""
+        run = self.framework_run()
+        run["code"] = {"origin_commit": None}
+        ax = repro.probe_code(self.project, run, "evaluation")
+        self.assertEqual(ax["verdict"], "unverifiable")
