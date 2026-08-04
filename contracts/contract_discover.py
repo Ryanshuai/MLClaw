@@ -1776,3 +1776,112 @@ class TheBriefIsReadInTheOrderThatKeepsItHonest(DiscoverCase):
         rc, out, _ = run_script(SCRIPT, "brief", "--project", self.project)
         self.assertEqual(rc, 1)
         self.assertIn("no sweep to write up", out["refused"])
+
+
+class ALinkIsAConvenienceNotAFinding(DiscoverCase):
+    """`searches.md` -> "The two axes, and why they are not the same"; CLAUDE.md ->
+    "Never silently": never let somebody's word become a checked fact.
+
+    The brief is markdown so a reader can open things, and that immediately raises
+    two questions the axes already answer. A lead has two URLs, not one: where the
+    THING is, and where the CLAIM came from. Collapsing them sends somebody to a
+    wiki page when they asked to see the bucket.
+
+    And a derived link is a guess about a console, not a fact about the data — so
+    it is derived at RENDER time and never stored, and it is marked. A record that
+    stored a console route would go wrong when a vendor reorganises their URLs
+    while reading like part of the finding. The path is the record; the worst a
+    dead link can do is waste a click, and only as long as nobody mistakes it for
+    the status.
+    """
+
+    def brief_text(self):
+        rc, _out, err = run_script(SCRIPT, "brief", "--project", self.project)
+        self.assertEqual(rc, 0, err)
+        with open(self.path("ws", "proj", "discovery", "brief.md")) as fh:
+            return fh.read()
+
+    def test_the_thing_and_the_claim_get_separate_links(self):
+        self.record("s3://b/x/", "--url", "https://console/thing",
+                    "--evidence-url", "https://wiki/page")
+        lead = self.leads()[0]
+        self.assertEqual(lead["url"], "https://console/thing")
+        self.assertEqual(lead["evidence_url"], "https://wiki/page")
+        t = self.brief_text()
+        self.assertIn("https://console/thing", t)
+        self.assertIn("https://wiki/page", t)
+
+    def test_a_derived_link_is_not_written_into_the_record(self):
+        """Storing it would put a claim about somebody's web routes inside a record
+        of what exists, and the two rot on completely different schedules."""
+        self.record("s3://b/x/")
+        self.assertIsNone(self.leads()[0]["url"])
+        self.assertIn("s3.console.aws.amazon.com", self.brief_text())
+
+    def test_a_derived_link_is_marked_and_a_given_one_is_not(self):
+        """A guessed console route that 404s must not read like a verified
+        location. The dagger is the whole distinction."""
+        self.record("s3://b/derived/")
+        self.record("s3://b/given/", "--url", "https://exact/place")
+        t = self.brief_text()
+        self.assertIn("†", t)
+        self.assertIn("link built by this script", t)
+        given = [l for l in t.splitlines() if "https://exact/place" in l]
+        self.assertTrue(given)
+        self.assertNotIn(")†", given[0], "a link somebody typed is not a guess")
+
+    def test_an_object_and_a_prefix_get_different_console_routes(self):
+        """Sending an object to the prefix view lands on an empty listing, which
+        reads exactly like the data being gone — the one confusion this whole skill
+        is built to prevent, reintroduced by a URL."""
+        mod = load_script(SCRIPT)
+        obj, _d = mod.lead_url({"on": "s3", "path": "s3://b/k/file.tar.gz"}, None)
+        pre, _d = mod.lead_url({"on": "s3", "path": "s3://b/k/"}, None)
+        self.assertIn("/s3/object/b?prefix=k/file.tar.gz", obj)
+        self.assertIn("/s3/buckets/b?prefix=k/", pre)
+
+    def test_no_region_is_asserted_in_an_s3_link(self):
+        """`resources.json -> aws.region` is one global setting and a bucket has
+        its own. The sweep that exercised this had us-west-2 configured and hit a
+        bucket named `…-repo-ohio`; a guessed region lands on the wrong console."""
+        mod = load_script(SCRIPT)
+        url, _d = mod.lead_url({"on": "s3", "path": "s3://b-ohio/k/"},
+                               {"aws": {"region": "us-west-2"}})
+        self.assertNotIn("us-west-2", url)
+        self.assertIn("s3.console.aws.amazon.com", url)
+
+    def test_nothing_is_invented_for_a_source_with_no_stable_url(self):
+        """A remote path over ssh has no URL a browser opens, and ClearML's web
+        host is a different subdomain from its API host. A document whose links are
+        half dead is one nobody clicks twice."""
+        mod = load_script(SCRIPT)
+        for lead in ({"on": "server:box", "path": "/mnt/data"},
+                     {"on": "tracking:clearml", "path": "org"},
+                     {"on": "doc", "path": "a wiki page"},
+                     {"on": "person", "path": "ask Li"}):
+            with self.subTest(on=lead["on"]):
+                self.assertEqual(mod.lead_url(lead, None), (None, False))
+
+    def test_a_lead_id_links_to_its_own_row(self):
+        """The blocking list names ids and the row carries the evidence — two
+        screens apart in a real brief."""
+        self.resources()
+        self.record("s3://some-bucket/x/")
+        self.probe()
+        t = self.brief_text()
+        self.assertIn('<a id="lead_0001"></a>', t)
+        self.assertIn("(#lead_0001)", t)
+
+    def test_the_evidence_column_is_rendered_at_all(self):
+        """`--evidence` is mandatory and was not in the table, so the one field
+        that separates a path a script read from a line on a wiki was invisible in
+        the document people actually read."""
+        self.record("s3://b/x/", st="code", ev="train.py:44 DATA_ROOT")
+        t = self.brief_text()
+        self.assertIn("claim came from", t)
+        self.assertIn("train.py:44 DATA_ROOT", t)
+        self.assertIn("code:", t)
+
+    def test_a_paren_in_a_path_cannot_break_out_of_the_link(self):
+        self.record("s3://b/we(ird)/", )
+        self.assertNotIn("ird)/)", self.brief_text())

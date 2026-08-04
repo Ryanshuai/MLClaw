@@ -453,6 +453,12 @@ def cmd_record(a) -> None:
         # allowed and is reported as a gap rather than guessed at: inferring the
         # subject from a path would make the coverage table confidently wrong.
         "subject": a.subject,
+        # Two URLs on two axes, same split as `on` versus `source_type`: where the
+        # THING is, and where the CLAIM came from. One link cannot be both, and a
+        # brief that conflated them would send a reader to a wiki page when they
+        # asked to see the bucket.
+        "url": a.url,
+        "evidence_url": a.evidence_url,
         # Not optional. A lead with no evidence is a rumour, and six months on
         # nobody can tell which of these came from a config file that ran and
         # which came from a wiki page somebody wrote from memory.
@@ -2014,6 +2020,72 @@ def usable_sources(project):
     return names
 
 
+def lead_url(lead, res):
+    """-> (url, derived) for a lead, or (None, False) when nothing can be built.
+
+    **Derived at render time, never stored.** A console URL is a fact about
+    somebody's web UI, not about the data, and baking one into `leads.json` means
+    a record that goes wrong when a vendor reorganises their routes — while
+    reading like part of the finding. The path is the record; a link is a
+    convenience laid over it.
+
+    `derived` is returned so the brief can mark it. A URL somebody typed in
+    (`--url`) points where they meant; one this function built is a guess about a
+    console that may 404, and those must not look alike to a reader deciding
+    whether a lead is worth chasing.
+
+    Only three derivations, and the restraint is deliberate: `s3`, `local` and
+    `tracking:wandb` have unambiguous, stable public URL shapes. ClearML's web
+    host is a different subdomain from its API host, MLflow's UI depends on how it
+    is deployed, and a remote path over ssh has no URL a browser opens — guessing
+    at those produces dead links, and a document whose links are half dead is one
+    nobody clicks twice.
+    """
+    if lead.get("url"):
+        return lead["url"], False
+    on, path = lead.get("on") or "", lead.get("path") or ""
+
+    if on == "s3" and path.startswith("s3://"):
+        rest = path[len("s3://"):]
+        bucket, _, key = rest.partition("/")
+        if not bucket:
+            return None, False
+        # No region in the URL, deliberately. `resources.json -> aws.region` is one
+        # global setting and a bucket has its own — the sweep that exercised this
+        # had `us-west-2` configured and hit a bucket named `…-repo-ohio`, which is
+        # us-east-2. Knowing a bucket's region takes an API call this render does
+        # not make, so the regionless console route is used and AWS resolves it.
+        # Asserting a region we guessed buys a slightly faster page load and risks
+        # a link that lands on the wrong console.
+        host = "s3.console.aws.amazon.com"
+        qs = ""
+        if key and not key.endswith("/"):
+            # An object, not a prefix. The console needs a different route, and
+            # sending an object to the prefix view lands on an empty listing —
+            # which reads exactly like the data being gone.
+            return f"https://{host}/s3/object/{bucket}?prefix={key}{qs}", True
+        return f"https://{host}/s3/buckets/{bucket}?prefix={key}{qs}", True
+
+    if on == "local":
+        return "file://" + os.path.abspath(os.path.expanduser(path)), True
+
+    if on == "tracking:wandb":
+        loc = path.split(":", 1)[1] if path.lower().startswith("wandb:") else path
+        loc = loc.strip("/")
+        if loc and loc.count("/") <= 1:
+            return f"https://wandb.ai/{loc}", True
+
+    return None, False
+
+
+def md_link(text, url):
+    """A markdown link with the label kept as code, or bare code when there is no
+    URL. `)` in a path would end the link early, so it is escaped."""
+    if not url:
+        return f"`{text}`"
+    return f"[`{text}`]({url.replace(')', '%29')})"
+
+
 BRIEF = "brief.md"
 
 
@@ -2043,6 +2115,17 @@ def cmd_brief(a) -> None:
     if not rec:
         refuse(f"no sweep to write up: {leads_path(project)} does not exist yet")
     leads = rec.get("leads") or []
+    res, _rp = workspace_resources(project)
+    link = {}
+    for l in leads:
+        url, derived = lead_url(l, res)
+        link[l["lead_id"]] = (url, derived)
+
+    def anchor(lead_id):
+        """A lead id that jumps to its row. The blocking list names ids and the
+        row carries the evidence — two screens apart in a long brief."""
+        return f"[`{lead_id}`](#{lead_id})"
+
     cov = coverage(leads, usable_sources(project))
     anom = anomalies(leads)
     by = {s: [l for l in leads if l["status"] == s] for s in STATUSES}
@@ -2066,7 +2149,9 @@ def cmd_brief(a) -> None:
     else:
         for x in anom:
             tag = "**URGENT**" if x["severity"] == "urgent" else "watch"
-            L += [f"- {tag} · `{x['kind']}` · {x['path']}",
+            u = link.get(x["lead_id"], (None, False))[0]
+            L += [f"- {tag} · `{x['kind']}` · {anchor(x['lead_id'])} · "
+                  f"{md_link(x['path'], u)}",
                   f"  - observed: {x['observed']}",
                   f"  - means: {x['means']}"]
         L += [""]
@@ -2101,7 +2186,7 @@ def cmd_brief(a) -> None:
     else:
         for w in wl:
             L += [f"- `{w['blocker']}` — {len(w['leads'])} lead(s): "
-                  f"{', '.join(w['leads'])}"]
+                  f"{', '.join(anchor(i) for i in w['leads'])}"]
         L += ["",
               "Each row is one thing to go and get. `unreachable` is **never** "
               "`gone`: none of these is evidence that anything is missing.", ""]
@@ -2140,14 +2225,33 @@ def cmd_brief(a) -> None:
         L += [f"**Nothing has been sized yet** — 0 of {len(leads)} location(s). "
               f"That is not a statement about how much data there is.", ""]
     for l in by["gone"]:
-        L += [f"- **GONE** `{l['path']}` — claimed as {l.get('what') or '?'}; "
-              f"evidence was {l.get('evidence')}"]
+        u = link.get(l["lead_id"], (None, False))[0]
+        ev = (f"[{l.get('evidence')}]({l['evidence_url']})"
+              if l.get("evidence_url") else l.get("evidence"))
+        L += [f"- **GONE** {md_link(l['path'], u)} — claimed as "
+              f"{l.get('what') or '?'}; evidence was {ev}"]
     if by["gone"]:
         L += [""]
-    L += ["| what | where | status | size |", "|---|---|---|---|"]
+    L += ["| id | what | where | status | size | claim came from |",
+          "|---|---|---|---|---|---|"]
     for l in leads:
-        L += [f"| {l.get('what') or '—'} | `{l['path']}` | {l['status']} | "
-              f"{human(l['bytes']) if l.get('bytes') is not None else '—'} |"]
+        u, derived = link.get(l["lead_id"], (None, False))
+        # A dagger on a link this script built rather than one somebody typed. A
+        # guessed console route that 404s must not read like a verified location.
+        mark = "†" if (u and derived) else ""
+        ev = l.get("evidence") or "—"
+        ev = f"[{ev}]({l['evidence_url']})" if l.get("evidence_url") else ev
+        L += [f"| <a id=\"{l['lead_id']}\"></a>`{l['lead_id']}` | "
+              f"{l.get('what') or '—'} | {md_link(l['path'], u)}{mark} | "
+              f"{l['status']} | "
+              f"{human(l['bytes']) if l.get('bytes') is not None else '—'} | "
+              f"{l.get('source_type')}: {ev} |"]
+    if any(link[i][0] and link[i][1] for i in link):
+        L += ["",
+              "† link built by this script from the path (an S3 console route, a "
+              "`file://`, a W&B project). It is a convenience, not part of the "
+              "finding — the path is the record, and a console that has since "
+              "been reorganised gives a dead link, never a wrong status."]
     L += ["",
           "## Reading — filled in by hand",
           "",
@@ -2348,6 +2452,12 @@ def main() -> None:
                    dest="source_type", help="where you heard about it")
     r.add_argument("--subject", default="unclassified", choices=SUBJECTS,
                    help="which of the four searches this lead belongs to")
+    r.add_argument("--url", default=None,
+                   help="where a person can open the THING (a console, a UI). "
+                        "Derived for s3 / local / tracking:wandb when omitted")
+    r.add_argument("--evidence-url", dest="evidence_url", default=None,
+                   help="where a person can open the CLAIM — the wiki page, the "
+                        "commit, the ticket")
     r.add_argument("--evidence", required=True,
                    help="the doc, file:line, commit or person this came from")
     r.add_argument("--what", default=None, help="what it is claimed to be")
