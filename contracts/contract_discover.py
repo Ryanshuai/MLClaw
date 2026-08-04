@@ -1402,6 +1402,19 @@ class TheRecordIsKeptNotJustWritten(DiscoverCase):
         self.assertTrue(self.git("ls-files", "--error-unmatch", "--",
                                  "discovery/leads.json").returncode == 0)
 
+    def test_the_brief_is_saved_with_the_register(self):
+        """They are one sweep in two forms. Committing the register without the
+        write-up hands somebody a lead list with no reading of it; committing the
+        write-up without the register is worse — a document describing a sweep the
+        repo does not contain."""
+        self.init_repo()
+        self.record("s3://b/x/", "--subject", "data")
+        run_script(SCRIPT, "brief", "--project", self.project)
+        self.save()
+        files = sorted(self.git("show", "--name-only", "--format=", "HEAD")
+                       .stdout.split())
+        self.assertEqual(files, ["discovery/brief.md", "discovery/leads.json"])
+
     def test_saving_touches_nothing_but_the_record(self):
         """The property that makes this safe to run at all. Both a modified
         tracked file and an untracked one must survive untouched — the first is
@@ -1488,3 +1501,278 @@ class TheRecordIsKeptNotJustWritten(DiscoverCase):
         self.save()
         self.assertFalse(self.report()["record_unsaved"])
         self.assertNotIn("UNSAVED", self.table())
+
+
+class TheSweepSaysWhichCellsItNeverLookedIn(DiscoverCase):
+    """`searches.md` -> "Sources, ranked by what a mention is worth" and "What each
+    subject needs found"; CLAUDE.md -> "Never silently": never report data you
+    could not look at.
+
+    That file specifies the sweep as a table — source families down one side, four
+    subjects across — and nothing computed it, so the record could not answer the
+    question a reader of a sweep actually has. Not "what did you find" but **"which
+    cells did you never look in"**. A flat findings list reads identically after one
+    search and after four, which is the same unfalsifiability `sources` exists to
+    fix, one level up: `sources` says what COULD be swept, this says what WAS.
+
+    The record could not express it either, because a lead had no `subject`. That
+    axis is the enabling change and it is deliberately not inferred from the path —
+    a guessed subject makes the table confidently wrong, which is worse than an
+    `unclassified` row.
+    """
+
+    def brief(self):
+        rc, out, err = run_script(SCRIPT, "brief", "--project", self.project)
+        self.assertEqual(rc, 0, err)
+        with open(self.path("ws", "proj", "discovery", "brief.md")) as fh:
+            return out, fh.read()
+
+    def test_a_lead_records_which_search_it_belongs_to(self):
+        self.record("s3://b/x/", "--subject", "weights")
+        self.assertEqual(self.leads()[0]["subject"], "weights")
+
+    def test_an_unstated_subject_is_unclassified_never_guessed(self):
+        """Inferring `data` from a path that looks like a dataset would put a lead
+        in a cell nobody chose, and the table would then be evidence for coverage
+        that was never decided."""
+        self.record("s3://b/looks-like-a-dataset/")
+        self.assertEqual(self.leads()[0]["subject"], "unclassified")
+        cov = self.report()["coverage"]
+        self.assertEqual(cov["unclassified"], 1)
+
+    def test_the_grid_crosses_source_against_subject(self):
+        self.record("s3://b/a/", "--subject", "data", st="doc")
+        self.record("s3://b/b/", "--subject", "weights", st="code",
+                    ev="train.py:12")
+        cells = {(g["source_type"], g["subject"]): g["leads"]
+                 for g in self.report()["coverage"]["grid"]}
+        self.assertEqual(cells[("doc", "data")], 1)
+        self.assertEqual(cells[("code", "weights")], 1)
+
+    def test_an_unswept_source_is_only_reported_when_it_is_reachable(self):
+        """Reporting `git_history` as unswept on a tree that is not a git repo is
+        noise, and a coverage report that cries wolf gets ignored — which costs
+        more than it ever saved."""
+        self.record("s3://b/x/", "--subject", "data", st="code", ev="t.py:1")
+        unswept = [g["source_type"] for g in
+                   self.report()["coverage"]["sources_available_but_unswept"]]
+        self.assertNotIn("code", unswept, "no stage has a code/ directory")
+        self.assertNotIn("git_history", unswept)
+        self.assertIn("doc", unswept, "a wiki is always available and unswept here")
+
+    def test_unswept_sources_come_back_in_rank_order(self):
+        """The ranking IS the priority. Nothing from `code` is a different
+        sentence from nothing from `doc`, and a list in arbitrary order makes the
+        reader re-derive that every time."""
+        self.record("s3://b/x/", "--subject", "data")
+        gaps = self.report()["coverage"]["sources_available_but_unswept"]
+        self.assertEqual([g["rank"] for g in gaps], sorted(g["rank"] for g in gaps))
+
+    def test_the_credentials_search_counts_as_covered_by_the_worklist(self):
+        """searches.md says that search "is generated by the other searches
+        failing", so its output is the access worklist, not leads. Calling the
+        credentials row "a search nobody ran" while leads sit blocked on a missing
+        key is simply false — and this check exists because the first version did
+        exactly that."""
+        self.resources()
+        self.record("s3://some-bucket/x/", "--subject", "data")
+        self.probe()                      # no credentials -> a worklist entry
+        cov = self.report()["coverage"]
+        self.assertTrue(cov["credentials_via_worklist"])
+        self.assertNotIn("credentials", cov["subjects_with_nothing"])
+
+    def test_with_no_blockers_an_empty_credentials_row_is_a_real_gap(self):
+        """The other direction, or the check above would pass on code that never
+        reports the gap at all."""
+        self.record("s3://b/x/", "--subject", "data")
+        cov = self.report()["coverage"]
+        self.assertFalse(cov["credentials_via_worklist"])
+        self.assertIn("credentials", cov["subjects_with_nothing"])
+
+
+class AnomaliesAreComputedNotNoticed(DiscoverCase):
+    """CLAUDE.md -> "Never silently", and `searches.md` -> "Cross-cutting rules".
+
+    The things worth a second look in a sweep are mechanical, and leaving them to
+    be noticed means they are noticed by whoever happens to read carefully. Two
+    objects with the same name and the same byte count in different prefixes; a
+    location that was verified and is now gone; a page that has already been wrong
+    about one of its claims. The Kontoor handover page states the duplication
+    problem itself and then says "sizes and dates are the only way to tell copies
+    apart" — which is a job for a script.
+
+    The limit is the other half of the contract: a detector reports what it
+    OBSERVED and what that would MEAN, and stops. Whether it matters here is
+    judgment, which is why `brief.md` ends with a section no script writes.
+    """
+
+    def kinds(self):
+        return {a["kind"] for a in self.report()["anomalies"]}
+
+    def test_verified_then_gone_is_urgent(self):
+        """The most urgent thing this tool can find: data that existed when we
+        looked and does not now."""
+        d = self.path("vanishing")
+        os.makedirs(d, exist_ok=True)
+        with open(os.path.join(d, "f.bin"), "w") as fh:
+            fh.write("x")
+        self.record(d)
+        self.probe()
+        self.assertEqual(self.leads()[0]["status"], "verified")
+        import shutil
+        shutil.rmtree(d)
+        self.probe("--all")
+        flips = [a for a in self.report()["anomalies"]
+                 if a["kind"] == "status_flip"]
+        self.assertEqual(len(flips), 1)
+        self.assertEqual(flips[0]["severity"], "urgent")
+        self.assertIn("does not now", flips[0]["means"])
+
+    def test_gone_then_verified_is_reported_as_the_probe_being_wrong(self):
+        """The reverse flip is not good news. An earlier `absent` that was wrong
+        means every conclusion drawn from it is suspect, and that the probe may be
+        reporting absence too eagerly."""
+        d = self.path("appearing")
+        self.record(d)
+        self.probe()
+        self.assertEqual(self.leads()[0]["status"], "gone")
+        os.makedirs(d, exist_ok=True)
+        self.probe("--all")
+        flips = [a for a in self.report()["anomalies"]
+                 if a["kind"] == "status_flip"]
+        self.assertEqual(flips[0]["severity"], "watch")
+        self.assertIn("needs revisiting", flips[0]["means"])
+
+    def test_a_source_a_probe_contradicted_is_flagged_for_its_other_claims(self):
+        """One wrong path does not make a page useless; it changes what the rest
+        of it is worth. Nothing else in the record carries that."""
+        ev = "Confluence 123 -> the dataset table"
+        self.record(self.path("nope"), ev=ev)
+        self.record(self.path("also-nope"), ev=ev)
+        os.makedirs(self.path("also-nope"), exist_ok=True)
+        self.probe()
+        doubted = [a for a in self.report()["anomalies"]
+                   if a["kind"] == "source_now_doubted"]
+        self.assertEqual(len(doubted), 1)
+        self.assertIn("1 of 2", doubted[0]["observed"])
+
+    def test_one_wrong_claim_from_a_single_claim_source_is_not_doubt(self):
+        """A source with one claim that was wrong tells you nothing about a
+        pattern, and flagging it would fire on every `gone` there is."""
+        self.record(self.path("nope"), ev="a one-off note")
+        self.probe()
+        self.assertNotIn("source_now_doubted", self.kinds())
+
+    def test_a_verified_empty_location_falls_between_the_statuses(self):
+        """Not `gone` — the path is there — and not a finding either. It would
+        read as a success unless something says otherwise."""
+        d = self.path("empty-but-there")
+        os.makedirs(d, exist_ok=True)
+        self.record(d)
+        self.probe()
+        self.assertEqual(self.leads()[0]["status"], "verified")
+        self.assertIn("verified_but_empty", self.kinds())
+
+    def test_urgent_sorts_before_watch(self):
+        """A list where the deletion is third is a list that gets skimmed."""
+        d = self.path("gonesoon")
+        os.makedirs(d, exist_ok=True)
+        with open(os.path.join(d, "f"), "w") as fh:
+            fh.write("x")
+        e = self.path("empty2")
+        os.makedirs(e, exist_ok=True)
+        self.record(d)
+        self.record(e)
+        self.probe()
+        import shutil
+        shutil.rmtree(d)
+        self.probe("--all")
+        sev = [a["severity"] for a in self.report()["anomalies"]]
+        self.assertEqual(sev, sorted(sev, key=lambda s: 0 if s == "urgent" else 1))
+        self.assertEqual(sev[0], "urgent")
+
+    def test_a_quiet_sweep_reports_no_anomalies_rather_than_inventing_one(self):
+        d = self.path("fine")
+        os.makedirs(d, exist_ok=True)
+        with open(os.path.join(d, "f"), "w") as fh:
+            fh.write("data")
+        self.record(d)
+        self.probe()
+        self.assertEqual(self.report()["anomalies"], [])
+
+
+class TheBriefIsReadInTheOrderThatKeepsItHonest(DiscoverCase):
+    """SKILL.md -> "Step 3 — `report`, which states the gaps first", applied to the
+    document a person is actually handed.
+
+    `leads.json` is the record and the table is a view; neither is a write-up. The
+    section order is the argument: what is odd, then what to look at next, then who
+    is blocking, then — last — what was found. A findings list read first becomes an
+    inventory and the caveats under it get skipped, which is how a missing dataset
+    is discovered in month four.
+
+    And the last section is empty on purpose. Every computed section can only
+    report what it measured; generated prose that reads like judgment misrepresents
+    where the judgment came from.
+    """
+
+    def brief_text(self):
+        rc, _out, err = run_script(SCRIPT, "brief", "--project", self.project)
+        self.assertEqual(rc, 0, err)
+        with open(self.path("ws", "proj", "discovery", "brief.md")) as fh:
+            return fh.read()
+
+    def test_the_sections_are_ordered_gaps_before_findings(self):
+        self.record("s3://b/x/", "--subject", "data")
+        t = self.brief_text()
+        for earlier, later in (("What is odd", "What to look at next"),
+                               ("What to look at next", "Who is blocking"),
+                               ("Who is blocking", "Coverage"),
+                               ("Coverage", "What was found"),
+                               ("What was found", "Reading")):
+            self.assertLess(t.index(earlier), t.index(later),
+                            f"{earlier!r} must come before {later!r}")
+
+    def test_it_says_it_is_not_exhaustive_before_any_finding(self):
+        self.record("s3://b/x/")
+        t = self.brief_text()
+        self.assertIn("Not exhaustive, ever", t)
+        self.assertLess(t.index("Not exhaustive"), t.index("What was found"))
+
+    def test_the_judgment_section_is_empty_and_says_why(self):
+        """A script that filled this in would be asserting that a measurement is
+        an interpretation."""
+        self.record("s3://b/x/")
+        t = self.brief_text()
+        self.assertIn("Empty until somebody writes it", t)
+
+    def test_a_lower_bound_is_named_as_one(self):
+        d = self.path("some")
+        os.makedirs(d, exist_ok=True)
+        with open(os.path.join(d, "f"), "w") as fh:
+            fh.write("xyz")
+        self.record(d)
+        self.record("s3://b/unreachable/")   # never probed -> not sized
+        self.probe("--id", "lead_0001")
+        self.assertIn("lower bound", self.brief_text())
+
+    def test_the_grid_renders_every_ranked_source_including_empty_rows(self):
+        """An empty row is the finding. Omitting rows with no leads would make the
+        table show only what was swept, which is the original problem."""
+        self.record("s3://b/x/", "--subject", "data")
+        t = self.brief_text()
+        for src in ("code", "git_history", "tracking", "s3", "doc", "person"):
+            self.assertIn(f"`{src}`", t)
+
+    def test_regenerating_is_safe_and_overwrites(self):
+        self.record("s3://b/x/")
+        first = self.brief_text()
+        self.record("s3://b/y/")
+        second = self.brief_text()
+        self.assertNotEqual(first, second)
+        self.assertIn("2 lead(s)", second)
+
+    def test_writing_up_nothing_is_refused(self):
+        rc, out, _ = run_script(SCRIPT, "brief", "--project", self.project)
+        self.assertEqual(rc, 1)
+        self.assertIn("no sweep to write up", out["refused"])
