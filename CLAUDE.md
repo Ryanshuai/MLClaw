@@ -21,7 +21,16 @@ MLClaw replaces MLflow/W&B/TensorBoard with conversation-driven ML lifecycle man
 - **One question at a time**: never dump multiple questions on the user. Ask one, record answer, ask next.
 - **Scripts are fallback-safe**: if any Python script fails, do the same work manually with Bash/Read/Write tools. Never let a script bug block the workflow.
 - **JSON configs are the source of truth**: fixed keys, you fill values. Templates at `lifecycle/` top level and `lifecycle/<stage>/`, filled instances in user projects. `lifecycle/scripts/` and `lifecycle/references/` are the tool's own machinery and docs — they live under `lifecycle/` because they define the same model, but nothing copies them into a project.
-- **Confirm before saving**: always show what you're about to write, wait for user confirmation. Never auto-overwrite existing values.
+- **Confirm before saving**: always show what you're about to write, wait for user confirmation. Never auto-overwrite existing values. **This is about the record, not the work that produces it** — extracting an archive to read it, taking a listing, installing the pinned package are not saves.
+- **Decide what evidence can decide.** The two rules above tell you how to ask and say nothing about what is yours to settle, so every gap defaults to a question and the skills read as needing permission for a `pip install`. They do not. Three buckets, and the middle one is the only one that goes to the user:
+
+  | | |
+  |---|---|
+  | **Just do it** | anything recoverable and inward-facing whose answer is *readable*: install the version `code_source.path` pins, extract the archive, take the listing, walk the tree, open the checkpoint, create the directory, re-probe a lead. **A value you can read is never a question.** Say what you did and what it showed |
+  | **Ask** | a value only the user has — which metric is primary, whether a delta matters enough to act on, what a label means, which of two genuinely-forking routes to take. And **every irreversible or outward-facing action**: a delete, anything sent to an external party, a push, money |
+  | **Neither** | a value *nobody* has. Record it absent — `null`, `claim`, `unverifiable`, `not measured` — and never ask a person for a fact so that it can be written down as one. That is what the four statuses are for, and "Never let somebody's word become a checked fact" is this bucket seen from the record's side |
+
+  **Asking has a cost nothing else in this file names.** Every unnecessary question spends the user's attention, and their attention is what decides whether the ten rules below get read on the day they matter. A skill that stops to ask about a package install has taught its reader to skim — and the next thing skimmed is a checkpoint deletion.
 
 ## Never silently
 
