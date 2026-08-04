@@ -1885,3 +1885,160 @@ class ALinkIsAConvenienceNotAFinding(DiscoverCase):
     def test_a_paren_in_a_path_cannot_break_out_of_the_link(self):
         self.record("s3://b/we(ird)/", )
         self.assertNotIn("ird)/)", self.brief_text())
+
+
+class ALeadIsAmendedNotEdited(DiscoverCase):
+    """CLAUDE.md -> "Contracts": a record written now and read later by someone who
+    can no longer verify it. And "Never silently": never let somebody's word become
+    a checked fact — including your own earlier word.
+
+    A probe records what a machine saw. Nothing recorded what a PERSON later found
+    out, and three real cases arrived at once: a path had been mistyped, a directory
+    turned out to be inside a container so the probe was looking at the wrong
+    filesystem, and half the images in an archive had no annotation.
+
+    The obvious implementation is to edit the lead, and it destroys exactly what the
+    record exists for. The case that proves it: a lead was recorded against a
+    mistyped S3 prefix, probed `gone` — correct about a path nobody had claimed —
+    and that `gone` read as confirming a document's claim that the real prefix was
+    empty. Correcting the path in place would leave a record that looks like it was
+    always right, and a later reader would have no way to know a conclusion had once
+    been drawn from the wrong thing. So the wrong lead stays, annotated, pointing at
+    the lead that supersedes it.
+    """
+
+    def note(self, lead_id, text, kind="finding", *extra):
+        return run_script(SCRIPT, "note", "--project", self.project,
+                          "--id", lead_id, "--note", text, "--kind", kind, *extra)
+
+    def test_a_note_appends_and_overwrites_nothing(self):
+        self.record("s3://b/x/", ev="the original evidence")
+        self.note("lead_0001", "first thing found")
+        self.note("lead_0001", "second thing found")
+        lead = self.leads()[0]
+        self.assertEqual([n["note"] for n in lead["notes"]],
+                         ["first thing found", "second thing found"])
+        self.assertEqual(lead["evidence"], "the original evidence",
+                         "the original claim must survive being annotated")
+        self.assertEqual(lead["path"], "s3://b/x/")
+
+    def test_a_note_is_dated(self):
+        """Undated, an annotation cannot be placed relative to the probe it
+        contradicts — which is the only thing that makes it interpretable."""
+        self.record("s3://b/x/")
+        self.note("lead_0001", "found later")
+        n = self.leads()[0]["notes"][0]
+        self.assertRegex(n["at"], r"^\d{4}-\d\d-\d\dT[\d:]+\+00:00$")
+
+    def test_a_correction_is_a_different_kind_from_a_finding(self):
+        """They are read differently and must not collapse: a correction says an
+        earlier reading was drawn from the wrong thing, so anything concluded from
+        it is suspect. A finding merely adds."""
+        self.record("s3://b/x/")
+        self.note("lead_0001", "the path was wrong", "correction")
+        self.assertEqual(self.leads()[0]["notes"][0]["kind"], "correction")
+
+    def test_a_superseded_lead_says_so_on_itself(self):
+        """Stated on the lead, not only in a write-up, so anything reading the
+        register sees the entry has been replaced."""
+        self.record("s3://b/wrong/")
+        self.record("s3://b/right/")
+        self.note("lead_0001", "mistyped", "correction", "--supersedes", "lead_0002")
+        self.assertEqual(self.leads()[0]["superseded_by"], "lead_0002")
+
+    def test_a_note_does_not_change_the_status(self):
+        """Only a probe moves a status. A person writing "actually it is fine"
+        would otherwise turn their word into a checked fact — the one thing this
+        skill's four statuses exist to prevent."""
+        self.record(self.path("nope"))
+        self.probe()
+        self.assertEqual(self.leads()[0]["status"], "gone")
+        self.note("lead_0001", "I think this is actually fine", "context")
+        self.assertEqual(self.leads()[0]["status"], "gone")
+
+    def test_annotating_an_unknown_lead_is_refused_and_lists_what_exists(self):
+        self.record("s3://b/x/")
+        rc, out, _ = self.note("lead_9999", "nope")
+        self.assertEqual(rc, 1)
+        self.assertIn("no lead", out["refused"])
+        self.assertEqual(out["known"], ["lead_0001"])
+
+    def test_corrections_reach_the_brief_before_the_findings(self):
+        """An annotation nobody reads is the same failure as an uncommitted record.
+        A correction changes how everything below it should be read, so it cannot
+        sit in the JSON only."""
+        self.record("s3://b/wrong/")
+        self.record("s3://b/right/")
+        self.note("lead_0001", "recorded one level too deep", "correction",
+                  "--supersedes", "lead_0002")
+        run_script(SCRIPT, "brief", "--project", self.project)
+        with open(self.path("ws", "proj", "discovery", "brief.md")) as fh:
+            t = fh.read()
+        self.assertIn("Corrections recorded on leads", t)
+        self.assertIn("recorded one level too deep", t)
+        self.assertLess(t.index("Corrections recorded"), t.index("What was found"))
+        self.assertIn("SUPERSEDED BY", t)
+
+    def test_a_plain_finding_shows_in_the_row_without_crying_correction(self):
+        self.record("s3://b/x/")
+        self.note("lead_0001", "counted 1,895 images and 1,888 annotations")
+        run_script(SCRIPT, "brief", "--project", self.project)
+        with open(self.path("ws", "proj", "discovery", "brief.md")) as fh:
+            t = fh.read()
+        self.assertIn("counted 1,895 images", t)
+        self.assertNotIn("Corrections recorded on leads", t)
+
+
+class RegeneratingTheBriefDoesNotEatTheJudgment(DiscoverCase):
+    """SKILL.md -> "Step 3 — `brief`, which is the deliverable": every section above
+    the last one is computed, the last one is written by hand.
+
+    The brief's own header tells the reader "do not edit above the last section",
+    which is an instruction to write in the last one — and the first version then
+    overwrote the whole file on every run. So the document invited somebody to spend
+    an hour on the only part that required judgment and destroyed it the next time
+    anybody regenerated, silently, having just pointed them at that spot.
+
+    Regenerating has to be safe or nobody runs it twice, and a stale brief is worse
+    than none: it describes a sweep that has since moved on.
+    """
+
+    def brief(self):
+        rc, _o, err = run_script(SCRIPT, "brief", "--project", self.project)
+        self.assertEqual(rc, 0, err)
+        return self.path("ws", "proj", "discovery", "brief.md")
+
+    def write_reading(self, text):
+        p = self.brief()
+        with open(p) as fh:
+            t = fh.read()
+        head, _, _ = t.partition("## Reading — filled in by hand")
+        with open(p, "w") as fh:
+            fh.write(head + "## Reading — filled in by hand\n\n" + text + "\n")
+
+    def test_a_hand_written_reading_survives_regeneration(self):
+        self.record("s3://b/x/", "--subject", "data")
+        self.write_reading("The Kontoor set is 1,895 images, not ~1,000.")
+        self.record("s3://b/y/", "--subject", "data")      # something changed
+        with open(self.brief()) as fh:
+            t = fh.read()
+        self.assertIn("The Kontoor set is 1,895 images", t)
+        self.assertIn("2 lead(s)", t, "the computed part must still refresh")
+
+    def test_the_placeholder_is_not_carried_over_as_if_it_were_content(self):
+        """Otherwise the untouched placeholder gets pinned in forever and the
+        section stops being able to report that nobody has written it."""
+        self.record("s3://b/x/")
+        self.brief()
+        self.record("s3://b/y/")
+        with open(self.brief()) as fh:
+            t = fh.read()
+        self.assertEqual(t.count("Empty until somebody writes it"), 1)
+        self.assertNotIn("carried over", t)
+
+    def test_a_carried_section_says_it_is_carried(self):
+        self.record("s3://b/x/")
+        self.write_reading("judgment goes here")
+        with open(self.brief()) as fh:
+            t = fh.read()
+        self.assertIn("never regenerated", t)
