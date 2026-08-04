@@ -61,6 +61,31 @@ What this skill *does* look for itself, because `/discover` has no reason to:
 
 ## Step 1: Analyze Code
 
+**First decide whether there is code to analyze.** There are two shapes and this step is written for the first:
+
+| Shape | What you inherited | Where the eval logic is |
+|---|---|---|
+| **a repo** | somebody's project | files under the code directory — read them |
+| **a framework** | a built artifact plus a package (`.deb` → `.pt`, a released checkpoint, a handed-over model) | inside an installed library; the entry point is its CLI |
+
+For the second, `code_source.source` is **`framework`** and `code_source.path` holds the pinned spec (`ultralytics==8.4.40`). `layout.md` → "Code Source Resolution" has the mode; what matters here is that **the questions below still all have answers, they are just read from different places**:
+
+| Determine | From a repo | From a framework |
+|---|---|---|
+| `entry_command` | the eval entry point | the CLI verb plus its args (`yolo val model=… data=… imgsz=…`) |
+| `framework` + version | `requirements.txt` | `code_source.path`, resolved **in the environment the run will use** — `importlib.metadata.version` there, not here |
+| `dataset` info, classes | dataset code and config | the **checkpoint**, via `/discover introspect` — `train_args.data`, plus the class list from `metadata.yaml` or the checkpoint's `names` |
+| preprocessing | `dataset.py` | the framework's documented defaults **for that version**, plus whatever the artifact records (`imgsz`, `conf`, letterbox mode) |
+| metrics | the printing code | the CLI's own output format for that version |
+
+Three things to get right on the framework branch, because each is a way for the record to lie:
+
+- **Do not offer `git init`.** There is no tree; site-packages is not the user's to initialize. The call is `code_snapshot.py … --framework <pkg>==<version>`, and it refuses an unpinned spec — a package name is not a reproduction contract.
+- **Every default is now load-bearing.** A framework CLI has on the order of a hundred arguments and a version pin says nothing about which the invocation relied on. So `config.json → param_injection` carries weight it does not carry for a repo, where the code records its own defaults. Fill it from the *resolved* args, not the ones you typed.
+- **A framework default is `evidence`, not a guess — but only with its version.** Write `ultralytics 8.4.40 default` and never a bare `framework default`: these move between minor releases, and an unversioned citation is a value nobody can check. Where a default cannot be established, leave the field empty — `input.json → preprocessing`'s own rule: "Leave a field empty rather than filling a framework default: a blank gets asked about, a wrong constant gets used."
+
+Then continue below; everything from Step 1b on is the same for both shapes.
+
 Read all code files (*.py, *.sh, *.yaml, *.yml, *.json, *.toml) under the code directory.
 
 For pattern recognition guidance (entry points, dataset loading, ground truth formats, metric extraction), read `references/detection-patterns.md`.

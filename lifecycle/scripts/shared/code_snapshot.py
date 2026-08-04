@@ -45,8 +45,34 @@ listed in `untracked_skipped` and `reproducible` flips to false — a snapshot
 that silently drops a file is the exact failure this script exists to prevent,
 so it is reported rather than hidden.
 
+**Some stages have no code tree at all.** When the thing being evaluated is a
+deployed artifact and the "eval code" is an installed framework's CLI
+(`yolo val model=… data=…`), there is nothing to `git init`: the code lives in
+site-packages and is owned by the package manager. Refusing there would be
+correct about the tree and wrong about the world — the run is perfectly
+reproducible, just under a DIFFERENT CONTRACT. `--framework <pkg>==<version>`
+records that contract instead:
+
+    git tree   ->  git checkout <sha> && git apply <patch>
+    framework  ->  <env_manager> install <pkg>==<version>
+
+`kind` says which one the record is, and it is the whole point of the field. A
+`framework` record has `origin_commit: null` **by construction**, and without
+`kind` a later reader cannot tell that from a capture that failed. (A record with
+no `kind` at all predates this and is a git-tree record.)
+
+The framework contract is weaker in one specific way and the warning says so:
+**a local edit is invisible.** A monkeypatched site-packages file or a stray
+`sitecustomize.py` leaves no trace, where a git tree would at least produce a
+dirty patch. A pinned version is therefore necessary and not sufficient, which is
+also why an unversioned `--framework` is refused rather than recorded.
+
+`code_dir` stays required even in framework mode, so run-mechanics' "the same call
+applies to all run skills — no per-skill variant" keeps holding. It is not read.
+
 Output is a JSON dict ready to merge into run.json -> code:
 {
+  "kind": "git" | "framework",     # WHICH reproduction contract this record is
   "repo": "<git url, or the repo root path when there is no origin>",
   "branch": "<branch or null>",
   "origin_commit": "<SHA>",
@@ -69,14 +95,16 @@ independent facts.
 
 Exit codes, per CLAUDE.md -> "Script Integration":
   0  snapshot captured; warnings, if any, on stderr
-  1  refused — not a git work tree, or a repo with no commits. The script
-     worked and the answer is no. Do not hand-write a `code` block instead;
-     offer `git init` plus an initial commit.
+  1  refused — not a git work tree, or a repo with no commits, or a
+     `--framework` with no pinned version. The script worked and the answer is
+     no. Do not hand-write a `code` block instead; offer `git init` plus an
+     initial commit — or, when the stage genuinely has no tree, `--framework`.
   2  broke — bad arguments, or a code_dir that is missing or unreadable.
      Fall back to doing the work by hand.
 
 Usage:
     python code_snapshot.py <code_dir> <run_dir> [--max-untracked-mb N]
+                            [--framework <pkg>==<version>]
 """
 import argparse
 import json
@@ -352,8 +380,66 @@ def capture(code_dir, run_dir, max_untracked_mb=DEFAULT_MAX_UNTRACKED_MB):
         "dirty_patch_path": dirty_patch_path,
         "dirty_files_count": len(tracked) + len(included),
         "untracked_skipped": skipped,
+        "kind": "git",
         "reproducible": not skipped and (dirty_patch_path is not None or (not tracked and not included)),
         "warnings": warnings,
+    }
+
+
+FRAMEWORK_BLIND_SPOT = (
+    "a framework record pins the package and CANNOT see a local edit: a "
+    "monkeypatched site-packages file or a stray sitecustomize.py leaves no "
+    "trace here, where a git tree would have produced a dirty patch. The pin is "
+    "necessary and not sufficient"
+)
+
+
+def capture_framework(spec, run_dir):
+    """-> the `code` block for a stage whose code is an installed package.
+
+    Refuses an unpinned spec. `ultralytics` names the framework; only
+    `ultralytics==8.4.40` is a reproduction contract, and recording the first as
+    though it were the second produces a run that reads as reproducible and is
+    not. Same bar as the SHA a git record refuses to invent.
+
+    The version is taken from the caller, never resolved here: the version that
+    matters is the one in the environment the run will execute in, and this
+    script does not know which interpreter that is. Guessing from its own
+    `sys.path` would record a fact about the wrong machine.
+    """
+    if not os.path.isdir(os.path.expanduser(run_dir)):
+        raise SnapshotUsageError(f"run_dir does not exist: {run_dir}")
+    name, sep, version = str(spec).partition("==")
+    name, version = name.strip(), version.strip()
+    if not name:
+        raise SnapshotUsageError("--framework needs a package name")
+    if not sep or not version:
+        raise SnapshotError(
+            f"--framework {spec!r} has no pinned version. `{name}` names a "
+            f"framework; `{name}==<version>` is a reproduction contract. Resolve "
+            f"it in the environment the run will use (pip show / importlib."
+            f"metadata.version) and pass that."
+        )
+    return {
+        "kind": "framework",
+        "framework": name,
+        "framework_version": version,
+        # Null by construction, and `kind` is what says so. A framework stage has
+        # no repo, no branch and no SHA — there is nothing that failed here.
+        "repo": None,
+        "branch": None,
+        "origin_commit": None,
+        "repo_subdir": None,
+        "dirty_patch_path": None,
+        # NULL, NOT ZERO. "There is no tree" and "the tree was clean" are
+        # different facts, and 0 here would assert the second — the same rule as
+        # a byte count that was never measured.
+        "dirty_files_count": None,
+        "untracked_skipped": [],
+        # The contract does rebuild the code: install that version. True is the
+        # honest value, and the warning carries what it cannot cover.
+        "reproducible": True,
+        "warnings": [FRAMEWORK_BLIND_SPOT],
     }
 
 
@@ -369,10 +455,15 @@ def main():
     ap.add_argument("code_dir")
     ap.add_argument("run_dir")
     ap.add_argument("--max-untracked-mb", type=float, default=DEFAULT_MAX_UNTRACKED_MB)
+    ap.add_argument("--framework", default=None, metavar="PKG==VERSION",
+                    help="this stage has no code tree — its code is an installed "
+                         "package and its entry point that package's CLI. Records "
+                         "the install-a-version contract instead of SHA + patch.")
     args = ap.parse_args()
 
     try:
-        snap = capture(args.code_dir, args.run_dir, args.max_untracked_mb)
+        snap = (capture_framework(args.framework, args.run_dir) if args.framework
+                else capture(args.code_dir, args.run_dir, args.max_untracked_mb))
     except SnapshotUsageError as e:
         # Broken input, not a verdict — the caller should fall back to doing
         # the snapshot by hand.
