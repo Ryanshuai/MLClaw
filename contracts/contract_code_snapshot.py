@@ -310,3 +310,109 @@ class RecordStatesEachFactOnce(GitRepoCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AStageWithNoTreeHasADifferentContractNotAMissingOne(GitRepoCase):
+    """`layout.md` -> "Code Source Resolution", the `framework` mode; and
+    run-mechanics.md -> "Code snapshot (Step 2 detail)", the no-tree branch.
+
+    When what you inherit is a built artifact plus a package — a `.deb` holding a
+    `.pt`, a released checkpoint, a model somebody handed you — the eval "code" is
+    an installed framework's CLI. There is nothing to `git init`: site-packages is
+    owned by the package manager. Refusing there is correct about the tree and
+    wrong about the world, because the run IS reproducible, under a different
+    contract:
+
+        git tree   ->  git checkout <sha> && git apply <patch>
+        framework  ->  <env_manager> install <pkg>==<version>
+
+    The danger this class guards is not the missing tree, it is the record. A
+    framework record's `origin_commit` is null by construction; a git record whose
+    capture failed also has a null. If those two read the same, a reader six months
+    on cannot tell "there was nothing to capture" from "we failed to capture", and
+    only the first is reproducible. `kind` is the field that separates them, which
+    is why it is asserted on BOTH branches here.
+    """
+
+    def framework(self, spec):
+        return snap.capture_framework(spec, self.path("run"))
+
+    def setUp(self):
+        super().setUp()
+        os.makedirs(self.path("run"), exist_ok=True)
+
+    def test_a_pinned_framework_is_captured_not_refused(self):
+        rec = self.framework("ultralytics==8.4.40")
+        self.assertEqual(rec["kind"], "framework")
+        self.assertEqual(rec["framework"], "ultralytics")
+        self.assertEqual(rec["framework_version"], "8.4.40")
+        self.assertTrue(rec["reproducible"],
+                        "installing that version does rebuild the code")
+
+    def test_kind_is_on_the_git_branch_too(self):
+        """Without this the field is useless: `kind` absent would have to mean
+        both "a git record" and "an old record", and the whole point is telling a
+        constructed null from a failed one."""
+        self.make_repo()
+        self.assertEqual(snap.capture(self.repo, self.path("run"))["kind"], "git")
+
+    def test_the_nulls_are_by_construction_and_say_so(self):
+        rec = self.framework("ultralytics==8.4.40")
+        for field in ("repo", "branch", "origin_commit", "repo_subdir",
+                      "dirty_patch_path"):
+            self.assertIsNone(rec[field], f"{field} must be null on this branch")
+        self.assertEqual(rec["kind"], "framework",
+                         "and `kind` is what makes those nulls readable")
+
+    def test_dirty_files_count_is_null_not_zero(self):
+        """"There is no tree" and "the tree was clean" are different facts. A 0
+        asserts the second. Same rule as a byte count that was never measured —
+        null means not measured and never means zero."""
+        self.assertIsNone(self.framework("ultralytics==8.4.40")["dirty_files_count"])
+
+    def test_an_unpinned_framework_is_refused(self):
+        """A package name is not a reproduction contract. Recording `ultralytics`
+        as though it were `ultralytics==8.4.40` produces a run that reads as
+        reproducible and is not — the same bar as the SHA a git record refuses to
+        invent. Exit 1: the script worked and the answer is no."""
+        with self.assertRaises(snap.SnapshotError):
+            self.framework("ultralytics")
+        with self.assertRaises(snap.SnapshotError):
+            self.framework("ultralytics==")
+
+    def test_a_nameless_spec_is_a_caller_bug_not_a_refusal(self):
+        with self.assertRaises(snap.SnapshotUsageError):
+            self.framework("==8.4.40")
+
+    def test_the_blind_spot_rides_along_as_a_warning(self):
+        """The pin cannot see a local edit — a monkeypatched site-packages file or
+        a stray sitecustomize.py leaves no trace, where a tree would have produced
+        a patch. `reproducible: true` next to no caveat would overstate the
+        contract, so the caveat is not optional."""
+        rec = self.framework("ultralytics==8.4.40")
+        self.assertEqual(len(rec["warnings"]), 1)
+        self.assertIn("local edit", rec["warnings"][0])
+
+    def test_the_cli_takes_this_branch_and_still_wants_a_code_dir(self):
+        """run-mechanics.md: "The same call applies to all run skills — no
+        per-skill variant." Keeping `code_dir` positional is what preserves that,
+        so the flag must work alongside it without the directory being a repo."""
+        plain = self.path("not_a_repo")
+        os.makedirs(plain, exist_ok=True)
+        out = subprocess.run(
+            ["python", snap.__file__, plain, self.path("run"),
+             "--framework", "ultralytics==8.4.40"],
+            capture_output=True, text=True)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn('"kind": "framework"', out.stdout)
+
+    def test_without_the_flag_that_same_directory_is_still_refused(self):
+        """The new branch must not become a way past the old refusal. A stage that
+        genuinely has a tree and forgot to `git init` gets the same answer it
+        always did."""
+        plain = self.path("not_a_repo2")
+        os.makedirs(plain, exist_ok=True)
+        out = subprocess.run(["python", snap.__file__, plain, self.path("run")],
+                             capture_output=True, text=True)
+        self.assertEqual(out.returncode, 1)
+        self.assertIn("not a git working tree", out.stdout)

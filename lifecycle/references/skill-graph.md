@@ -116,7 +116,7 @@ Two reasons the sweep is not `/train-init`'s, and be precise about the first: **
 | Requirement | How to check |
 |-------------|-------------|
 | project.json exists | file exists at `{PROJECT}/project.json` |
-| code available | `code_source` is configured AND code directory has files |
+| code available | `code_source` is configured AND code directory has files — **or** `code_source.source` is `framework`, where an empty code directory is the correct state and the pinned spec in `code_source.path` is the code. Do not offer `git init` on that branch: there is no tree, and `code_snapshot.py --framework` is the call. See `layout.md` → "Code Source Resolution" |
 | infer-init done | `{PROJECT}/stages/inference/config.json → entry_command` is non-empty |
 | eval-init done | `{PROJECT}/stages/evaluation/config.json → entry_command` is non-empty |
 | train-init done | `{PROJECT}/stages/training/config.json → entry_command` is non-empty |

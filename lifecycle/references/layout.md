@@ -36,7 +36,22 @@ Each stage in `project.json` has a `code_source` block:
 | `local` | Read code directly from `path` (external directory, no copy). Acts as a soft link. |
 | `github` | Clone repo from `path` (URL) into `code_path`. Track `branch` and `commit`. |
 | `server` | SCP code from remote `path` into `code_path`. Uses `credentials` for SSH. |
+| `framework` | **There is no tree.** The code is an installed package and the entry point is its CLI; `path` holds the pinned spec (`ultralytics==8.4.40`). `code_path` stays empty. |
 | `null` | Code already lives in `code_path` (manually placed). |
+
+**`framework` is the taking-over-a-deployed-artifact case, and it is not a degenerate `null`.** The other four modes all say *where the tree came from*; this one says there is no tree to come from. It arises whenever what you inherit is a built artifact plus a framework rather than somebody's repo — a `.deb` holding a `.pt`, a released checkpoint, a model somebody handed you — and in that situation `git init` has nothing to initialize, because the code is in site-packages and owned by the package manager.
+
+It changes the reproduction contract rather than losing it:
+
+| | Contract | What pins it |
+|---|---|---|
+| a tree | `git checkout <sha> && git apply <patch>` | `run.json → code.origin_commit` + the dirty patch |
+| a framework | `<env_manager> install <pkg>==<version>` | `run.json → code.framework_version`, and `code.kind` says which contract the record *is* |
+
+Two consequences that must not be papered over:
+
+- **The version pin cannot see a local edit.** A monkeypatched site-packages file or a stray `sitecustomize.py` leaves no trace, where a tree would have produced a dirty patch. `code_snapshot.py --framework` carries this as a standing warning; it is why the pin is necessary and not sufficient.
+- **Every default becomes load-bearing.** A framework CLI has on the order of a hundred arguments (`yolo val` does), and a version pin says nothing about which ones the invocation relied on. So `config.json → param_injection` and the per-run `config_snapshot.json` carry weight here that they do not carry for a repo, where the code itself records its defaults.
 
 **Unified code-dir rule** — every skill's cwd / read path is exactly one expression:
 
@@ -51,6 +66,7 @@ code_dir = stages/<stage>/code/_source if exists else stages/<stage>/code
 | `local` | Symlink `stages/<stage>/code/_source → expanduser(code_source.path)`. The user's external repo stays the source of truth — edits in the IDE are visible immediately. | `code/_source` (the symlink) |
 | `github` | `git clone code_source.path` into `stages/<stage>/code/`, then remove `.git` so files are tracked under project git. | `code/` (no `_source`) |
 | `server` | `scp` from remote `path` into `stages/<stage>/code/`. | `code/` (no `_source`) |
+| `framework` | nothing — there is no tree to place. | `code/`, empty and stays empty |
 | `null` | Code was placed manually under `code/`. | `code/` (no `_source`) |
 
 **Why a symlink (not a copy) for `local`**: ML users iterate in their own repo with their own IDE/git. Copying creates two trees and bidirectional sync friction; symlink keeps a single source of truth. The lockdown of "what code did this run actually use" is solved separately at run-time by `code_snapshot.py` (SHA + dirty patch — see Run Skill Internal Dependencies).
