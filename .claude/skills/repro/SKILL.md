@@ -79,7 +79,7 @@ Per axis: `intact` / `drifted` / `gone` / `unverifiable`. Read `references/axes.
 ```bash
 python lifecycle/scripts/repro/repro.py open --project {PROJECT} \
     --run training/run_20260315_120000 --name lr1e4 \
-    --probe 'datasets/coco@probe_50' --band-trials 3 \
+    --probe 'datasets/coco@probe_50' \
     --remeasure-only                       # or: --measure-via retrain --i-accept-the-cost
 ```
 
@@ -93,7 +93,7 @@ Everything that could be chosen to flatter the result is fixed here, before a si
 
 `open` refuses a run that is not `completed`, has no metric value, or has `mode: null` — that last one because metrics are comparable only within the same `mode` and an equivalent `scope`, so a null mode cannot be matched by any trial.
 
-## Step 3: Measure the band — the same thing, three times
+## Step 3: Measure the band — how many times depends on what a time costs
 
 Launch `--band-trials` runs through `/eval-run` (or `/train-run`) that change **nothing**. Register each:
 
@@ -103,7 +103,19 @@ python lifecycle/scripts/repro/repro.py trial --project {PROJECT} \
 python lifecycle/scripts/repro/repro.py band --project {PROJECT} --session <sid>
 ```
 
-**This is the step people skip, and skipping it is why reproduction arguments never end.** A -0.3% delta is either this pipeline's own noise or a real divergence, and one run cannot tell you which. `band` measures the interval the repeats actually produced and asks whether the recorded value lies inside it. No distribution is assumed and none is needed: "would this pipeline have produced that number again" is answered by whether it did. Under 3 unpinned trials it refuses — two points are a range, not a band.
+**This is the step people skip, and skipping it is why reproduction arguments never end.** A -0.3% delta is either this pipeline's own noise or a real divergence, and one run cannot tell you which. `band` measures the interval the repeats actually produced and asks whether the recorded value lies inside it. No distribution is assumed and none is needed: "would this pipeline have produced that number again" is answered by whether it did.
+
+**But three of them is not one price.** Three eval trials are two minutes; three retrains are three times the original run — and that bill covers an ambiguity that may never arise, which **only the first trial can reveal**. So `--band-trials` defaults to `eval` → 3, `retrain` → **1**, and a one-trial session is not a session without a band:
+
+```bash
+python lifecycle/scripts/repro/repro.py band --project {PROJECT} --session <sid> \
+    --from-history '[...the target's per-epoch metric over its converged tail...]' \
+    --history-what 'epochs 101-140; mosaic closed at 100'
+```
+
+The target run's own converged tail is a band, and it is free — usually already sitting in the checkpoint or the training log. It is **weaker in one exact way and that way decides everything**: same trajectory, same seed, same data order, so it is a *lower bound* on run-to-run spread. Inside it → sound, the delta is noise-sized. Outside it → **`inconclusive`, never `diverged`** — and that is the one case worth buying repeats for. Rules, refusals, and the cross-check when both bands exist: `references/verdicts.md` → "A band has a source".
+
+**Whenever you have the tail, pass it even if the band came from trials** — `band` uses it for a check nothing else can make: whether the recorded target number is the tail's *max*. A best-checkpoint save is a selection, and judged against it a fresh converged run reads as short by about the tail's spread, always in the same direction, with nothing raising. The caveat names the tail mean, which is the number to judge against.
 
 **Set `lineage.repro_of` on every trial run** to `<stage>/<run_id>` of the target. Not `fork_of` — a fork intends to differ and carries a `variation_summary` of what it changed, while a trial intends to be identical and its empty diff is the point; conflating them makes every reproduction read as an experiment. Not `parents` either: a trial consumes no artifact of the target, it re-measures the same quantity.
 
