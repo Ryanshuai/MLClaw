@@ -117,11 +117,14 @@ FINAL_VERDICTS = (
     "not_reproducible",                  # an axis is gone; nothing was run
 )
 
-# Verdicts that assert the number came back. They share the evidence bar: a
+# Verdicts that assert THE NUMBER CAME BACK. All four share one evidence bar: a
 # measured band saying `reproduced`, and the probe actually run if one was
-# declared. Only the axis requirement differs between them.
-ASSERTS_REPRODUCTION = ("reproduced", "reproduced_with_drift",
-                        "remeasured", "remeasured_with_drift")
+# declared. What differs is the axis requirement, and — since the split — what the
+# number coming back is evidence OF. Deliberately not named for reproduction: two
+# of its four members deny exactly that, and a constant whose name overstates its
+# members is how the conflation got in.
+ASSERTS_THE_NUMBER_CAME_BACK = ("reproduced", "reproduced_with_drift",
+                                "remeasured", "remeasured_with_drift")
 
 # --------------------------------------------------------------------------- #
 # One word was doing two jobs, and they have opposite bars
@@ -747,6 +750,37 @@ def cmd_open(a):
                    "match. Re-measuring the checkpoint through eval answers the "
                    "same question for the price of one eval")
 
+    # The symmetric gate, and the reason this skill has a strict standard at all.
+    # `retrain` costs money, so it is gated on somebody typing that they accept
+    # the cost. `eval` against a TRAINING target costs almost nothing and buys a
+    # weaker answer, so it is gated on somebody typing that they accept THAT — or
+    # the default path of a skill called `/repro` quietly answers a question
+    # nobody asked and stamps a verdict that sounds like the one they wanted.
+    #
+    # Same discipline as `/data-label`'s `--spec | --no-spec`: the absence has to
+    # be something a person typed rather than something that just didn't happen.
+    stage_of_target = a.run.split("/")[0]
+    if (a.measure_via == "eval" and stage_of_target not in ("evaluation", "inference")
+            and not a.remeasure_only):
+        refuse(f"the target is a {stage_of_target} run and measure_via is `eval`, so "
+               f"this session will not reproduce anything",
+               target=a.run,
+               why="running inference over a val set re-measures the artifact the "
+                   "training produced. It re-runs no part of the training, so a "
+                   "hyperparameter or dataset recorded wrongly, and a recipe that "
+                   "would no longer produce this model, are all invisible to it. "
+                   "The best verdict reachable is `remeasured_with_drift`",
+               your_two_options={
+                   "--remeasure-only": "accept the weaker question: does this "
+                                       "artifact still score what the record says. "
+                                       "Cheap, and often what you actually want",
+                   "--measure-via retrain --i-accept-the-cost":
+                       "reproduce the training itself. Costs what the original run "
+                       "cost and answers a fuzzier question, because "
+                       "nondeterminism makes the best possible answer a band",
+               },
+               fix="pass one of them. Which question this is cannot be defaulted")
+
     # Same rule and same shape as create_run.py's `allocate_run_dir`: the stamp
     # has one-second resolution, so two sessions opened in the same second would
     # share a directory and the second write would destroy the first record.
@@ -802,9 +836,25 @@ def cmd_open(a):
         "caveats": [],
     }
     save_session(project, sid, s)
+    # SKILL.md Step 1's discipline, applied to the other ceiling: "say that up
+    # front rather than at close". A caller who learns at close that the best word
+    # available was never the one they wanted has already spent the trials.
+    remeasure = is_remeasure_only(s)
+    worst = max((SEVERITY[v] for v in s["axes_at_open"].values()), default=0)
+    clean = "remeasured" if remeasure else "reproduced"
+    ceiling = clean if worst == 0 else f"{clean}_with_drift"
     out = {"session_id": sid, "opened": True,
            "target": s["target"], "measure_via": s["measure_via"],
            "probe_declared": bool(a.probe),
+           "verdict_ceiling": ceiling,
+           "reproduces_the_procedure": not remeasure,
+           "ceiling_why": (
+               ("the target is a training run measured through eval, so the training "
+                "is not re-run and no verdict here is a reproduction; "
+                if remeasure else "")
+               + (f"axes not intact at open: "
+                  f"{', '.join(k for k, v in s['axes_at_open'].items() if v != 'intact')}"
+                  if worst else "every axis intact at open")),
            "axes_at_open": s["axes_at_open"],
            "next": f"run {a.band_trials} unpinned trial(s) through "
                    f"{'/eval-run' if a.measure_via == 'eval' else '/train-run'}, "
@@ -1074,7 +1124,7 @@ def cmd_close(a):
                    "recover later",
                fix=f"close as {a.verdict.replace('remeasured', 'reproduced')!r}")
 
-    if a.verdict in ASSERTS_REPRODUCTION:
+    if a.verdict in ASSERTS_THE_NUMBER_CAME_BACK:
         if s.get("metric_verdict") != "reproduced":
             refuse(f"metric verdict is {s.get('metric_verdict')!r}",
                    fix="band says the recorded value is not inside the measured "
@@ -1199,6 +1249,11 @@ def main():
                         "surviving checkpoint; retrain re-runs training")
     o.add_argument("--i-accept-the-cost", action="store_true",
                    help="required for --measure-via retrain")
+    o.add_argument("--remeasure-only", action="store_true",
+                   help="required for --measure-via eval against a TRAINING target: "
+                        "acknowledges that the training is not being re-run, so the "
+                        "verdict ceiling is `remeasured_with_drift` and not any kind "
+                        "of reproduction")
     o.add_argument("--direction", choices=("max", "min"), default="max")
     o.add_argument("--probe", default=None,
                    help="fixed probe inputs for the prediction check, ideally "

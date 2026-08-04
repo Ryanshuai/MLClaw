@@ -17,6 +17,8 @@ description: >
 
 # /repro — Can this still be reproduced, and if not, what moved
 
+**Running inference over a val set is not a reproduction, and this skill refuses to call it one.** Re-measuring a training run's artifact re-runs nothing about the training — a hyperparameter or dataset recorded wrongly, and a recipe that would no longer produce this model, are all invisible to it. That session is real and often what you want, but it closes as `remeasured*` and needs `--remeasure-only` typed at `open`, exactly as its expensive twin needs `--i-accept-the-cost`. Neither combination is the default, because which question this is cannot be defaulted. `references/verdicts.md` → "Re-measuring is not reproducing".
+
 A run's record rots along five axes at once and reads as pristine the whole way down. Every piece of the reproduction contract is already written somewhere; **nothing has ever checked that it still holds.** `code_snapshot.py` writes `origin_commit` plus a dirty patch and calls that a reproduction contract — no verb re-reads it to ask whether the commit still resolves. `/data-freeze` pins membership, `/data-retire` stamps `data_retired` when the bytes go — nothing joins that back to the runs that cited it. `env.packages` is captured per run and only ever compared inside `/train-run`.
 
 This skill is the join, plus the loop that turns a delta into a conclusion.
@@ -77,8 +79,11 @@ Per axis: `intact` / `drifted` / `gone` / `unverifiable`. Read `references/axes.
 ```bash
 python lifecycle/scripts/repro/repro.py open --project {PROJECT} \
     --run training/run_20260315_120000 --name lr1e4 \
-    --probe 'datasets/coco@probe_50' --band-trials 3
+    --probe 'datasets/coco@probe_50' --band-trials 3 \
+    --remeasure-only                       # or: --measure-via retrain --i-accept-the-cost
 ```
+
+`open` reports `verdict_ceiling` and `reproduces_the_procedure` — **read them before spending the trials.** Learning at `close` that the best available word was never the one you wanted means the runs are already gone.
 
 Everything that could be chosen to flatter the result is fixed here, before a single trial runs:
 
