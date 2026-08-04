@@ -107,6 +107,10 @@ METRIC_VERDICTS = ("reproduced", "inconclusive", "diverged")
 FINAL_VERDICTS = (
     "reproduced",                        # inside the band, every axis intact, predictions agree
     "reproduced_with_drift",             # inside the band, but >=1 axis drifted
+    # The same two facts for a target whose PROCEDURE was never re-run. See
+    # REMEASURE_ONLY below -- this pair exists because one word was doing two jobs.
+    "remeasured",
+    "remeasured_with_drift",
     "metric_ok_predictions_diverged",    # the dangerous one -- never call this reproduced
     "diverged",                          # outside the band, cause attributed
     "diverged_unattributed",             # outside the band, loop exhausted, no axis explains it
@@ -116,7 +120,47 @@ FINAL_VERDICTS = (
 # Verdicts that assert the number came back. They share the evidence bar: a
 # measured band saying `reproduced`, and the probe actually run if one was
 # declared. Only the axis requirement differs between them.
-ASSERTS_REPRODUCTION = ("reproduced", "reproduced_with_drift")
+ASSERTS_REPRODUCTION = ("reproduced", "reproduced_with_drift",
+                        "remeasured", "remeasured_with_drift")
+
+# --------------------------------------------------------------------------- #
+# One word was doing two jobs, and they have opposite bars
+# --------------------------------------------------------------------------- #
+#
+# `measure_via: eval` is the default "including for training runs", and the cost
+# argument for that is sound: re-measuring a surviving checkpoint answers "is the
+# recorded number real" for the price of one eval, where retraining costs what the
+# original cost. What was NOT sound is calling the result `reproduced`.
+#
+# Re-measuring a training run's artifact re-runs nothing about the training. It
+# cannot see a hyperparameter recorded wrongly, a dataset recorded wrongly, or a
+# recipe that would no longer produce this model -- the artifact is a GIVEN, and
+# every one of those could be false while the number comes back perfectly. So:
+#
+#   target is an eval run,   via eval     -> a FULL reproduction. The run being
+#                                            reproduced WAS a measurement, so
+#                                            re-measuring is re-running it
+#   target is a training run, via eval    -> a re-measurement. Says nothing about
+#                                            whether the recipe still works
+#   target is a training run, via retrain -> a reproduction of the training
+#
+# Two words, same spelling, opposite bars -- the exact defect `/discover`'s
+# searches.md names for `verified` on a result lead. It matters here because
+# skill-graph.md makes a closed `reproduced*` session the ONLY thing that moves an
+# inherited checkpoint's `origin.confidence` off `claimed`, so the weaker fact was
+# buying the stronger promotion.
+REMEASURE_ONLY = {"remeasured", "remeasured_with_drift"}
+
+
+def is_remeasure_only(session) -> bool:
+    """True when this session's procedure was never re-run.
+
+    Keyed on the TARGET's stage rather than on a flag, because that is the fact
+    that decides it: an eval run re-measured is an eval run re-run.
+    """
+    target_stage = ((session.get("target") or {}).get("run") or "").split("/")[0]
+    return (session.get("measure_via") == "eval"
+            and target_stage not in ("evaluation", "inference"))
 
 
 # --------------------------------------------------------------------------
@@ -1003,6 +1047,33 @@ def cmd_close(a):
     # evidence bar. Hanging the probe check on `reproduced` alone let
     # `reproduced_with_drift` close with a declared probe that was never run --
     # a verdict claiming reproduction while the stronger check went unperformed.
+    # Which FAMILY of verdict this session is entitled to, before any of the
+    # evidence checks below. A training run measured through eval has had its
+    # artifact re-measured and its procedure not re-run, and the two must not
+    # share a word: skill-graph.md makes a closed `reproduced*` the only thing
+    # that promotes an inherited checkpoint's `origin.confidence`, so letting the
+    # weaker fact wear the stronger word sells the promotion at the wrong price.
+    remeasure_only = is_remeasure_only(s)
+    if remeasure_only and a.verdict in ("reproduced", "reproduced_with_drift"):
+        refuse(f"this session re-measured an artifact; it did not reproduce a "
+               f"procedure, so it cannot close as {a.verdict!r}",
+               target=(s.get("target") or {}).get("run"),
+               measure_via=s.get("measure_via"),
+               why="the target is a training run and measure_via is `eval`, so "
+                   "nothing about the training was re-run. A wrong hyperparameter, "
+                   "a wrong dataset, or a recipe that would no longer produce this "
+                   "model are all invisible to this session — the artifact was a "
+                   "given and only its number was checked",
+               fix=f"close as {a.verdict.replace('reproduced', 'remeasured')!r}, "
+                   f"or re-open with measure_via=retrain "
+                   f"--i-accept-the-cost to reproduce the training itself")
+    if not remeasure_only and a.verdict in REMEASURE_ONLY:
+        refuse(f"{a.verdict!r} understates this session",
+               why="the procedure WAS re-run, so the stronger word is the accurate "
+                   "one and recording the weaker one loses a fact nobody can "
+                   "recover later",
+               fix=f"close as {a.verdict.replace('remeasured', 'reproduced')!r}")
+
     if a.verdict in ASSERTS_REPRODUCTION:
         if s.get("metric_verdict") != "reproduced":
             refuse(f"metric verdict is {s.get('metric_verdict')!r}",
@@ -1023,20 +1094,25 @@ def cmd_close(a):
                        "register it with `trial --predictions-agree` / "
                        "`--predictions-differ`")
 
-    if a.verdict == "reproduced":
+    # The drift downgrade applies to whichever family this session is in: the
+    # weaker word and the drift caveat are independent axes, and a `remeasured`
+    # over a drifted env is exactly as much a weaker fact as a `reproduced` is.
+    clean_word = "remeasured" if remeasure_only else "reproduced"
+    if a.verdict == clean_word:
+        drift_word = f"{clean_word}_with_drift"
         if drifted:
-            refuse(f"cannot call this reproduced: {', '.join(drifted)} drifted",
-                   fix="verdict reproduced_with_drift -- the number came back, but "
+            refuse(f"cannot call this {clean_word}: {', '.join(drifted)} drifted",
+                   fix=f"verdict {drift_word} -- the number came back, but "
                        "not from the same conditions, and that is a weaker fact "
                        "that has to keep saying so")
         if unverifiable:
-            refuse(f"cannot call this reproduced: {', '.join(unverifiable)} is "
+            refuse(f"cannot call this {clean_word}: {', '.join(unverifiable)} is "
                    f"unverifiable",
                    why="an axis nobody could check is not an axis that matched. "
                        "code.reproducible false in particular means the rebuilt "
                        "tree is not the tree that ran, so a matching number is "
                        "evidence and not proof",
-                   fix="verdict reproduced_with_drift, and the caveat travels with it")
+                   fix=f"verdict {drift_word}, and the caveat travels with it")
 
     if a.verdict == "diverged" and not (a.attributed_to or s.get("attributed_to")):
         refuse("verdict diverged needs --attributed-to <axis>",
