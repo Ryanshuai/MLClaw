@@ -313,13 +313,20 @@ def cmd_sources(a) -> None:
             why=f"not found at {rpath} — no server, S3 or vendor is registered "
                 f"yet, so none of them can be swept", fix="/resources")
     else:
+        # Report the credential the PROBE will use, not merely that one exists
+        # somewhere. These two answers used to be computed differently — this row
+        # read `resources.json` while `probe_s3` inherited whatever the CLI
+        # resolved — so the checklist could call s3 usable on the strength of a key
+        # nothing then used, and the sweep reported no access over readable data.
         aws = res.get("aws") or {}
-        has_aws = bool(aws.get("access_key_id") or os.environ.get("AWS_ACCESS_KEY_ID")
+        _env, where, registered = aws_env(res)
+        has_aws = bool(registered or os.environ.get("AWS_ACCESS_KEY_ID")
                        or os.path.isfile(os.path.expanduser("~/.aws/credentials")))
         add("s3", "probe", has_aws, bucket=aws.get("s3_bucket") or None,
-            why=None if has_aws else
-                "no AWS credentials — every s3:// lead stays UNREACHABLE, which "
-                "is not the same as empty",
+            credential=where,
+            why=(f"probes will use {where}" if has_aws else
+                 "no AWS credentials — every s3:// lead stays UNREACHABLE, which "
+                 "is not the same as empty"),
             blocked_by="credential", fix=None if has_aws else "/resources")
         for key, srv in (res.get("servers") or {}).items():
             if key.startswith("_"):
@@ -575,14 +582,55 @@ def last_meaningful(text, limit=300):
     return (lines[-1] if lines else "")[:limit]
 
 
-def probe_s3(path, budget_s):
+def aws_env(res):
+    """-> (env, where, registered). The credential `resources.json` DECLARES.
+
+    This function exists because it was missing, and the failure it caused is the
+    kind this whole skill is about. `probe_server` reads `resources.json ->
+    servers`; `probe_s3` used to shell out to a bare `aws s3 ls` and inherit
+    whatever the CLI resolved ambiently. So the registry could hold a working key
+    while the probe used a different one and reported `unreachable`, and
+    `cmd_sources` — which DOES read `aws.access_key_id` to decide the s3 row is
+    usable — would say "s3: usable" about a credential nothing then used.
+
+    Two different keys, one for the checklist and one for the probe, is how a
+    sweep reports "no access" over data it can read. It never becomes a false
+    `gone`, which is why it survived: the answer stayed safe while being wrong.
+
+    Registry beats ambient deliberately. `resources.json` is the declaration every
+    run skill reads through, so a probe resolving something else is answering
+    about a different world than the one a run will execute in.
+    """
+    aws = (res or {}).get("aws") or {}
+    key, secret = aws.get("access_key_id"), aws.get("secret_access_key")
+    if not (key and secret):
+        return (None, "no aws credential in resources.json — using whatever the "
+                "CLI resolves ambiently (env, ~/.aws, instance role)", False)
+    env = dict(os.environ)
+    env["AWS_ACCESS_KEY_ID"] = key
+    env["AWS_SECRET_ACCESS_KEY"] = secret
+    # An ambient profile or a session token left over from a different key would
+    # override or invalidate the pair we just set, which reintroduces the exact
+    # bug: the probe silently answering about a credential nobody chose.
+    env.pop("AWS_PROFILE", None)
+    env.pop("AWS_SESSION_TOKEN", None)
+    if aws.get("region"):
+        env["AWS_DEFAULT_REGION"] = aws["region"]
+    # Last four only. `leads.json` is git-tracked, and the rule in searches.md is
+    # that a record holds a credential's NAME and LOCATION, never its material —
+    # four characters is how IAM itself disambiguates keys in a listing.
+    return env, f"resources.json -> aws.access_key_id (…{key[-4:]})", True
+
+
+def probe_s3(path, res, budget_s):
     if not path.startswith("s3://"):
         return "unreachable", "not an s3:// path", None, {"blocker": "s3:bad_uri"}
+    env, where, registered = aws_env(res)
     try:
         # `--summarize --recursive` is the only way to get a real total, and it
         # is also what makes this the slow probe. Bounded like the local walk.
         p = subprocess.run(["aws", "s3", "ls", "--recursive", "--summarize", path],
-                           capture_output=True, text=True,
+                           capture_output=True, text=True, env=env,
                            timeout=max(60.0, budget_s * 4))
     except FileNotFoundError:
         return ("unreachable", "the aws CLI is not installed", None,
@@ -595,15 +643,34 @@ def probe_s3(path, budget_s):
         return "unreachable", f"{type(exc).__name__}: {exc}", None, {}
     if p.returncode != 0:
         err = (p.stderr or "").strip()
-        # An auth failure and an empty prefix are opposite conclusions and both
-        # can exit non-zero. Only credential and access wording is allowed to
-        # mean "could not look".
+        # An empty prefix exits NON-ZERO. `aws s3 ls` returns 1 when it matched
+        # nothing, which is indistinguishable from failure by exit code alone —
+        # and that is why `--summarize` is worth its cost: it prints
+        # "Total Objects: 0" only when the listing actually RAN. Sentinel present
+        # and stderr empty is therefore a real reading, and this is the one place
+        # in the S3 probe where `gone` is earned rather than guessed. The same
+        # both-signals discipline as the ssh probe, inverted: there a zero exit
+        # needs a sentinel to be believed, here a non-zero exit needs one to be
+        # forgiven.
+        if not err and "Total Objects: 0" in (p.stdout or ""):
+            return ("gone",
+                    f"the prefix listed successfully and holds no objects "
+                    f"[credential: {where}]", None, {"blocker": None})
+        # Beyond that, an auth failure and an empty prefix are opposite
+        # conclusions and both exit non-zero. Only credential and access wording
+        # is allowed to mean "could not look".
         low = err.lower()
         if any(k in low for k in ("credential", "accessdenied", "access denied",
                                   "expired", "unable to locate", "forbidden",
                                   "invalidaccesskey")):
-            return ("unreachable", last_meaningful(err), None,
-                    {"blocker": "s3:access_denied"})
+            # Two different asks, so two different blockers. A registered key that
+            # is refused needs a POLICY change from whoever owns the bucket; no
+            # registered key needs a key. Collapsing them sends somebody to
+            # request access they already have — and the worklist groups on the
+            # blocker, so this is the line that decides what they go and ask for.
+            return ("unreachable", f"{last_meaningful(err)} [credential: {where}]",
+                    None, {"blocker": "s3:denied_with_registered_key" if registered
+                           else "s3:no_usable_credential"})
         if "nosuchbucket" in low.replace(" ", ""):
             return "gone", last_meaningful(err), None, {}
         return ("unreachable", f"aws exit {p.returncode}: {last_meaningful(err)}",
@@ -1416,7 +1483,8 @@ def cmd_probe(a) -> None:
         if on == "local":
             status, detail, sample, size = probe_local(lead["path"], a.budget_seconds)
         elif on == "s3":
-            status, detail, sample, size = probe_s3(lead["path"], a.budget_seconds)
+            status, detail, sample, size = probe_s3(lead["path"], res,
+                                                    a.budget_seconds)
         elif on.startswith("tracking:"):
             status, detail, sample, size = probe_tracking(
                 on, lead["path"], a.budget_seconds)

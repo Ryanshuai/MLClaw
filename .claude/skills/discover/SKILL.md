@@ -63,10 +63,22 @@ there" would have you chasing datasets that are perfectly fine, and would make t
 invisible in the noise.
 
 The probe code is deliberately fussy about this. Permission-denied on a local directory is
-`unreachable`, not `gone`. An `aws s3 ls` failure is only `gone` when the wording says the bucket or
-prefix genuinely has nothing in it; anything mentioning credentials, expiry or access is
-`unreachable`. An ssh probe requires **both** a zero exit and a sentinel, because a shell that dies
-mid-command returns zero and an empty listing.
+`unreachable`, not `gone`. Anything mentioning credentials, expiry or access is `unreachable`. An
+ssh probe requires **both** a zero exit and a sentinel, because a shell that dies mid-command
+returns zero and an empty listing.
+
+S3 needs the same care in the other direction: `aws s3 ls` exits **non-zero when it matched
+nothing**, so exit code alone cannot separate "empty" from "failed". `--summarize` is what resolves
+it — `Total Objects: 0` is printed only when the listing actually ran, so sentinel present *and*
+stderr empty is a real reading of `gone`. Without that branch a prefix that is genuinely empty could
+never be reported, and a document's claim that something is empty could never be confirmed.
+
+**S3 credentials come from `resources.json → aws`, and the probe says which key answered.** Not from
+whatever the CLI resolves ambiently — those can be different IAM users, and when they are, the sweep
+reports no access over data it can read. When a probe is refused, read the blocker: it distinguishes
+`s3:denied_with_registered_key` (**the registered key lacks the permission — this is a policy ask to
+the bucket owner**) from `s3:no_usable_credential` (nobody has registered a key). Sending someone to
+request access they already hold is how a worklist stops being believed.
 
 ## Step 1 — `sources`, before looking anywhere
 
