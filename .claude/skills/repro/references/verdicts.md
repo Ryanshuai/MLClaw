@@ -21,7 +21,33 @@ The question is **is `target` inside `[min, max]`**. Nothing is assumed about th
 
 `inconclusive` is not a hedge, it is the loop's engine. Three repeats of a stable pipeline produce a tight interval, and a real value can sit a hair outside one by chance. Widening the interval with more repeats either swallows the target (`reproduced`) or leaves it further out in relative terms (`diverged`). This is what "run it repeatedly until there is a conclusion" means concretely.
 
-Under 3 unpinned trials `band` refuses. **Two points are a range, not a band** — with n=2 the interval is whatever those two runs happened to do, and calling that noise is a guess dressed as a measurement.
+Under 3 unpinned trials `band` refuses — unless a band comes from somewhere else, which is the next section. **Two points are a range, not a band**: with n=2 the interval is whatever those two runs happened to do, and calling that noise is a guess dressed as a measurement.
+
+### A band has a source, and the source decides which way it can answer
+
+Three eval trials cost two minutes. Three retrains cost three times the original run. Demanding the same number of both makes the expensive route pay up front for an ambiguity that may never arise — and **only the first trial can reveal whether it does**. So `--band-trials` defaults to what one costs (`eval` → 3, `retrain` → **1**), and the gap is filled by a second, weaker band.
+
+| `band.source` | Built from | Reach |
+|---|---|---|
+| `trials` | ≥3 unpinned repeats of the whole procedure | **run-to-run spread.** Answers both ways |
+| `run_history` | the target run's own **converged tail** — its per-epoch metric over the epochs after the schedule settled | **a lower bound.** Confirms; can never refute |
+
+The tail is the *same* weights trajectory scored at nearby epochs: same seed, same data order, same init. It therefore does not contain the variation that makes two fresh runs differ — kernel selection under `deterministic: false`, dataloader order, initialisation. So it is a lower bound on run-to-run spread, and a lower bound is one-directional:
+
+- **trial inside it** → sound. `delta ≤ lower_bound ≤ true noise`, so the delta *is* noise-sized whatever the true spread turns out to be. → `reproduced`
+- **trial outside it** → **`inconclusive`, never `diverged`.** True noise may be wider than this band can see. → *this* is the case that buys repeats, and the only one.
+
+With `run_history` the thing tested is the **fresh trial**, not the target — the interval already came from the target's own run — so `band` refuses a history band with no trial registered. It also refuses fewer than 5 history points: a handful is a range with extra steps, not a distribution. And it records `--history-what` (which epochs, and why those), because *which* epochs count as converged is a judgement, and a band whose window nobody wrote down cannot be checked later.
+
+A declared tolerance is deliberately **not** a band source. `declared_tolerance` already holds a typed number and already states that it does not decide the verdict; giving it a path to become a band would undo that in one flag.
+
+When both exist, `trials` decides and the tail is kept beside it as `also_measured`. That cross-check earns its place: **run-to-run spread cannot be smaller than within-run spread**, so a trials band narrower than the tail means the repeats held something fixed that the original run did not, and the interval they produced is too narrow to judge on. `band` says so.
+
+### The recorded number may be the tail's max, and that bias runs one way
+
+A best-checkpoint save picks the **best** epoch. If the target metric equals the extreme of its own converged tail, the recorded number is a selection, not a converged value — and a fresh run that lands on the tail **mean** has matched it while reading as short by roughly the tail's spread. Every time, in the same direction, with nothing anywhere raising.
+
+Whenever a tail is supplied — even when the band came from trials — `band` checks for this and writes a caveat naming the tail mean. That is the number a reproduction should be judged against; the recorded one is the luckiest epoch.
 
 ### The declared tolerance is a foil, not a threshold
 
@@ -96,9 +122,9 @@ Target: `training/run_20260315_120000`, `val_mAP = 48.5`, five months old.
 check                         data intact · code intact · env DRIFTED · params intact · artifacts intact
                               → reproducible_with_drift (ceiling stated up front)
 
-open --probe datasets/coco@probe_50 --band-trials 3
+open --probe datasets/coco@probe_50   (eval → band_target_trials 3)
 trial ×3 (nothing pinned)     48.42 · 48.55 · 48.48
-band                          [48.42, 48.55]  spread 0.13  target 48.5 INSIDE
+band                          source trials · [48.42, 48.55] spread 0.13 · target 48.5 INSIDE
                               → metric_verdict: reproduced
                               ⚠ declared ±0.5% (=±0.2425) is 1.9× WIDER than real noise —
                                 it would have passed a divergence twice the size of noise

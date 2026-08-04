@@ -877,3 +877,222 @@ class TheDefaultPathCannotQuietlyAnswerAWeakerQuestion(ReproCase):
         self.assertEqual(code, 0, f"{out} {err}")
         self.assertTrue(out["reproduces_the_procedure"],
                         "retraining a training target IS reproducing it")
+
+
+class ABandsSourceDecidesWhichWayItCanAnswer(ReproCase):
+    """CLAUDE.md -> "Never silently" (never let somebody's word become a checked
+    fact), and run-mechanics.md -> "Record integrity".
+
+    Two bands wear the same name and have different evidentiary reach. A band from
+    repeated unpinned trials is run-to-run spread and answers both ways. A band from
+    the target run's own converged tail is the SAME trajectory scored at nearby
+    epochs -- same seed, same data order, same init -- so it cannot contain the
+    variation that makes two fresh runs differ. It is a lower bound, and a lower
+    bound confirms without refuting.
+
+    Letting the second one say `diverged` is the vocabulary-collapse defect again:
+    a weaker fact wearing a stronger word, with nothing anywhere raising.
+
+    The reason the weak band exists at all is cost. Three eval trials are two
+    minutes; three retrains are three times the original run. Forcing the same
+    trial count on both makes the expensive route pay up front for an ambiguity
+    that may never arise -- and which only the first trial can reveal.
+    """
+
+    def one_trial_session(self, trial_value, run="training/run_A"):
+        code, out, err = self.open_session(run=run)
+        self.assertEqual(code, 0, f"open failed: {out} {err}")
+        sid = out["session_id"]
+        ref = self.trial_run("run_B0", trial_value)
+        c, o, e = self.repro("trial", "--project", self.project,
+                             "--session", sid, "--run", ref)
+        self.assertEqual(c, 0, f"trial failed: {o} {e}")
+        return sid
+
+    # ---- the default number of trials follows what one costs ---------------- #
+
+    def test_retrain_plans_for_one_trial_and_eval_for_three(self):
+        code, out, err = self.open_session("--remeasure-only")
+        self.assertEqual(code, 0, f"{out} {err}")
+        self.assertEqual(out["band_target_trials"], 3,
+                         "an eval trial is cheap; there is no reason to skimp")
+        code, out, err = self.open_session("--measure-via", "retrain",
+                                           "--i-accept-the-cost")
+        self.assertEqual(code, 0, f"{out} {err}")
+        self.assertEqual(out["band_target_trials"], 1,
+                         "a retrain trial costs the original run, so three of them "
+                         "is a 3x bill for a case that may not occur")
+
+    def test_a_one_trial_plan_says_where_its_band_comes_from(self):
+        """Planning for one trial must not read as planning for no band. The
+        session's own `next` has to name the free one, or the caller reaches
+        `band`, gets refused, and concludes the cheap route was never viable."""
+        code, out, _ = self.open_session("--measure-via", "retrain",
+                                        "--i-accept-the-cost")
+        self.assertIn("--from-history", out["next"])
+        self.assertIn("inconclusive", out["next"],
+                      "and it has to say which single outcome justifies buying "
+                      "the extra trials")
+
+    def test_zero_trials_is_refused(self):
+        code, out, _ = self.open_session("--band-trials", "0", "--remeasure-only")
+        self.assertEqual(code, 1)
+        self.assertIn("re-run nothing", json.dumps(out))
+
+    # ---- the asymmetry, which is the whole point --------------------------- #
+
+    def test_a_tail_band_can_confirm(self):
+        """Inside a lower bound is sound: delta <= lower_bound <= true noise."""
+        sid = self.one_trial_session(48.50)
+        code, out, err = self.repro("band", "--project", self.project,
+                                    "--session", sid,
+                                    "--from-history", json.dumps(
+                                        [48.40, 48.45, 48.52, 48.61, 48.47, 48.55]),
+                                    "--history-what", "epochs 95-100")
+        self.assertEqual(code, 0, f"{out} {err}")
+        self.assertEqual(out["band"]["source"], "run_history")
+        self.assertTrue(out["band"]["lower_bound"])
+        self.assertFalse(out["band"]["can_refute"])
+        self.assertEqual(out["metric_verdict"], "reproduced")
+
+    def test_a_tail_band_can_never_refute(self):
+        """The one that matters. A trial far outside the target's within-run
+        wobble is `inconclusive`, NOT `diverged`: run-to-run spread may be wider
+        than this band can see, so the delta is not yet shown to be real."""
+        sid = self.one_trial_session(12.0)
+        code, out, err = self.repro("band", "--project", self.project,
+                                    "--session", sid,
+                                    "--from-history", json.dumps(
+                                        [48.40, 48.45, 48.52, 48.61, 48.47]))
+        self.assertEqual(code, 0, f"{out} {err}")
+        self.assertEqual(out["metric_verdict"], "inconclusive",
+                         "a lower bound on noise cannot establish that a delta "
+                         "exceeds noise, however large the delta looks")
+        self.assertIn("LOWER BOUND", out["why"])
+        self.assertIn("Only repeats can", out["why"])
+
+    def test_the_refuting_case_is_the_only_one_that_buys_trials(self):
+        sid = self.one_trial_session(12.0)
+        _, out, _ = self.repro("band", "--project", self.project, "--session", sid,
+                               "--from-history", json.dumps(
+                                   [48.40, 48.45, 48.52, 48.61, 48.47]))
+        self.assertIn("cannot refute", out["next"])
+        self.assertIn("ONLY case", out["next"])
+
+    def test_a_trials_band_still_refutes(self):
+        """The strong route must not be weakened by the weak one existing."""
+        _, far = self.session_with_band((45.1, 45.3, 45.2))
+        self.assertEqual(far["metric_verdict"], "diverged")
+        self.assertEqual(far["band"]["source"], "trials")
+        self.assertTrue(far["band"]["can_refute"])
+        self.assertFalse(far["band"]["lower_bound"])
+
+    def test_trials_win_when_both_are_available(self):
+        """A run-to-run band is strictly stronger, so it decides -- but the free
+        one is kept beside it rather than dropped."""
+        code, out, _ = self.open_session()
+        sid = out["session_id"]
+        for i, v in enumerate((45.1, 45.3, 45.2)):
+            self.repro("trial", "--project", self.project, "--session", sid,
+                       "--run", self.trial_run(f"run_B{i}", v))
+        code, out, err = self.repro("band", "--project", self.project,
+                                    "--session", sid, "--from-history",
+                                    json.dumps([48.40, 48.45, 48.52, 48.61, 48.47]))
+        self.assertEqual(code, 0, f"{out} {err}")
+        self.assertEqual(out["band"]["source"], "trials")
+        self.assertEqual(out["metric_verdict"], "diverged")
+        self.assertEqual(out["band"]["also_measured"]["source"], "run_history")
+
+    # ---- what the band is built from has to be a distribution -------------- #
+
+    def test_a_handful_of_history_points_is_refused(self):
+        sid = self.one_trial_session(48.50)
+        code, out, _ = self.repro("band", "--project", self.project,
+                                  "--session", sid,
+                                  "--from-history", json.dumps([48.4, 48.5, 48.6]))
+        self.assertEqual(code, 1)
+        self.assertIn("not a distribution", json.dumps(out))
+
+    def test_a_history_band_with_nothing_measured_against_it_is_refused(self):
+        """With `run_history` the thing tested is the fresh trial, because the
+        interval already came from the target. No trial, nothing to judge."""
+        code, out, _ = self.open_session()
+        sid = out["session_id"]
+        code, out, _ = self.repro("band", "--project", self.project,
+                                  "--session", sid, "--from-history",
+                                  json.dumps([48.4, 48.45, 48.5, 48.55, 48.6]))
+        self.assertEqual(code, 1)
+        self.assertIn("nothing to judge", json.dumps(out))
+
+    def test_no_trials_and_no_history_names_both_ways_out(self):
+        code, out, _ = self.open_session()
+        sid = out["session_id"]
+        code, out, _ = self.repro("band", "--project", self.project, "--session", sid)
+        self.assertEqual(code, 1)
+        self.assertIn("--from-history", json.dumps(out))
+        self.assertIn("never refute", json.dumps(out))
+
+    # ---- the selection effect, which runs one way ------------------------- #
+
+    def test_a_target_that_is_its_own_tail_max_is_flagged(self):
+        """A best-checkpoint pick is the MAX of a wobbling tail. Judged against
+        it, a fresh converged run reads as short -- every time, same direction,
+        nothing raising. The session has to carry that."""
+        sid = self.one_trial_session(48.50)
+        # 48.5 is the target value the fixture records, and here it is also the
+        # tail's max: exactly the shape of a best-epoch save.
+        code, out, err = self.repro("band", "--project", self.project,
+                                    "--session", sid, "--from-history",
+                                    json.dumps([48.20, 48.31, 48.44, 48.38, 48.50]))
+        self.assertEqual(code, 0, f"{out} {err}")
+        self.assertTrue(out["band"]["target_is_tail_extreme"])
+        joined = " ".join(out["caveats_added"])
+        self.assertIn("best-checkpoint pick", joined)
+        self.assertIn("bias always runs that way", joined)
+        s = json.load(open(os.path.join(self.project, "repro", sid, "session.json")))
+        self.assertTrue(any("best-checkpoint pick" in c for c in s["caveats"]),
+                        "and it has to reach `caveats`, where the verdict is read")
+
+    def test_a_target_inside_its_tail_is_not_flagged(self):
+        sid = self.one_trial_session(48.50)
+        code, out, _ = self.repro("band", "--project", self.project,
+                                  "--session", sid, "--from-history",
+                                  json.dumps([48.20, 48.31, 48.90, 48.38, 48.55]))
+        self.assertEqual(code, 0)
+        self.assertFalse(out["band"]["target_is_tail_extreme"])
+
+    def test_a_trials_band_narrower_than_the_within_run_wobble_is_flagged(self):
+        """Run-to-run spread cannot be smaller than within-run spread. When it
+        looks smaller, the repeats held something fixed that the original did
+        not -- and the interval they produced is too narrow to judge on."""
+        code, out, _ = self.open_session()
+        sid = out["session_id"]
+        for i, v in enumerate((48.49, 48.50, 48.51)):
+            self.repro("trial", "--project", self.project, "--session", sid,
+                       "--run", self.trial_run(f"run_B{i}", v))
+        code, out, err = self.repro("band", "--project", self.project,
+                                    "--session", sid, "--from-history",
+                                    json.dumps([47.0, 47.6, 48.2, 48.8, 49.4]))
+        self.assertEqual(code, 0, f"{out} {err}")
+        self.assertTrue(any("NARROWER" in c for c in out["caveats_added"]))
+
+    def test_history_from_a_file_is_accepted_and_what_it_is_gets_recorded(self):
+        """Which epochs count as converged is a judgement; a band whose window
+        nobody wrote down cannot be checked later."""
+        sid = self.one_trial_session(48.50)
+        self.write("tail.json", json.dumps([48.40, 48.45, 48.52, 48.61, 48.47]))
+        code, out, err = self.repro(
+            "band", "--project", self.project, "--session", sid,
+            "--from-history", self.path("tail.json"),
+            "--history-what", "epochs 101-140; mosaic closed at 100")
+        self.assertEqual(code, 0, f"{out} {err}")
+        self.assertEqual(out["band"]["history_what"],
+                         "epochs 101-140; mosaic closed at 100")
+
+    def test_unreadable_history_breaks_rather_than_refuses(self):
+        """Exit 2, not 1: a malformed argument is the script breaking, not the
+        answer being no. CLAUDE.md -> "Script Integration"."""
+        sid = self.one_trial_session(48.50)
+        code, out, _ = self.repro("band", "--project", self.project,
+                                  "--session", sid, "--from-history", "{not json")
+        self.assertEqual(code, 2)

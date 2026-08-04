@@ -104,6 +104,42 @@ KEY_ENV_FIELDS = ("cuda", "cudnn", "nvidia_driver", "gpu", "gpu_count", "python"
 TERMINAL_SESSION = ("closed",)
 
 METRIC_VERDICTS = ("reproduced", "inconclusive", "diverged")
+
+# --------------------------------------------------------------------------- #
+# A band has a source, and the source decides which way it can answer
+# --------------------------------------------------------------------------- #
+#
+# `trials` is run-to-run spread: repeat the whole procedure N times with nothing
+# pinned and read the interval. It is the strong one and it can answer BOTH ways --
+# inside means noise, far outside means divergence.
+#
+# `run_history` is the target run's own converged tail: the same weights trajectory
+# scored at N nearby epochs. Same seed, same data order, same init, so it does NOT
+# contain the sources of variation that make two fresh runs differ -- kernel
+# selection under `deterministic: false`, dataloader order, initialisation. It is
+# therefore a LOWER BOUND on run-to-run spread, and a lower bound is one-directional:
+#
+#     inside it   -> sound. delta <= lower_bound <= true noise, so the delta IS
+#                    noise-sized. This confirms.
+#     outside it  -> `inconclusive`, NEVER `diverged`. True noise may be wider than
+#                    this band can see, so the delta is not yet shown to be real.
+#
+# That asymmetry is the whole point: a free band can confirm but cannot refute. It
+# exists because the alternative -- demanding three repeats before any answer -- makes
+# the cheap case pay the expensive case's price. Three eval trials cost two minutes;
+# three retrains cost three times the original run. Same number, 500x the bill.
+#
+# A declared tolerance is deliberately NOT a band source. `declared_tolerance`
+# already holds it and already states that it does not decide the verdict; giving a
+# typed number a way to become a band would undo that in one flag.
+BAND_SOURCES = ("trials", "run_history")
+
+MIN_TRIALS_FOR_BAND = 3
+MIN_HISTORY_FOR_BAND = 5   # four points is a range with extra steps, not a distribution
+
+# What one trial costs, which is what the default number of them has to follow.
+# `open` resolves --band-trials from this when the caller does not say.
+DEFAULT_BAND_TRIALS = {"eval": 3, "retrain": 1}
 FINAL_VERDICTS = (
     "reproduced",                        # inside the band, every axis intact, predictions agree
     "reproduced_with_drift",             # inside the band, but >=1 axis drifted
@@ -781,6 +817,18 @@ def cmd_open(a):
                },
                fix="pass one of them. Which question this is cannot be defaulted")
 
+    # The default number of repeats follows what one repeat COSTS. A single number
+    # for both routes makes the cheap case free and the expensive case a 3x bill for
+    # a case that may never arise -- and the only way to learn whether it arises is
+    # to run the first trial. See BAND_SOURCES for what fills the gap: the target's
+    # own converged tail is a free lower-bound band, enough to confirm, and repeats
+    # get bought only when the answer needs refuting.
+    band_trials = (a.band_trials if a.band_trials is not None
+                   else DEFAULT_BAND_TRIALS[a.measure_via])
+    if band_trials < 1:
+        refuse(f"--band-trials {band_trials} plans for no measurement at all",
+               why="a reproduction with zero trials has re-run nothing")
+
     # Same rule and same shape as create_run.py's `allocate_run_dir`: the stamp
     # has one-second resolution, so two sessions opened in the same second would
     # share a directory and the second write would destroy the first record.
@@ -824,7 +872,15 @@ def cmd_open(a):
                               "real divergence.",
         "declared_tolerance": {"relative_pct": a.tolerance_pct,
                                "absolute": a.tolerance_abs},
-        "band_target_trials": a.band_trials,
+        "band_target_trials": band_trials,
+        "_comment_band_trials": (
+            "How many unpinned repeats this session plans for, and it follows what one "
+            "costs -- not one number for both routes. Three eval trials are two "
+            "minutes; three retrains are three times the original run. Planning for 1 "
+            "does not mean going without a band: `band --from-history` builds one from "
+            "the target's own converged tail for free. That band is a lower bound, so "
+            "it can confirm and never refute, and the refuting case is the only one "
+            "that has to buy repeats."),
         "axes_at_open": {k: v["verdict"] for k, v in report["axes"].items()},
         "axes_detail_at_open": report["axes"],
         "trials": [],
@@ -856,9 +912,16 @@ def cmd_open(a):
                   f"{', '.join(k for k, v in s['axes_at_open'].items() if v != 'intact')}"
                   if worst else "every axis intact at open")),
            "axes_at_open": s["axes_at_open"],
-           "next": f"run {a.band_trials} unpinned trial(s) through "
+           "band_target_trials": band_trials,
+           "next": f"run {band_trials} unpinned trial(s) through "
                    f"{'/eval-run' if a.measure_via == 'eval' else '/train-run'}, "
-                   f"register each with `repro.py trial`, then `repro.py band`",
+                   f"register each with `repro.py trial`, then `repro.py band`"
+                   + (f" --from-history <the target's converged tail> -- "
+                      f"{band_trials} trial(s) is below the {MIN_TRIALS_FOR_BAND} a "
+                      f"run-to-run band needs, so the band comes from the target's own "
+                      f"wobble. It can confirm but not refute; if it lands "
+                      f"`inconclusive`, THAT is when more trials are worth their price"
+                      if band_trials < MIN_TRIALS_FOR_BAND else ""),
            "written_to": os.path.relpath(
                os.path.join(session_dir(project, sid), "session.json"), project)}
     if collision:
@@ -933,26 +996,104 @@ def cmd_trial(a):
     return 0
 
 
+def read_history_values(spec):
+    """-> list[float]. A JSON array, inline or in a file.
+
+    The caller supplies the target run's own converged-tail values. This function
+    does not go looking for them: which epochs count as converged is a judgement
+    about that run (where its schedule changed, when augmentation closed), and a
+    guess at it would silently widen or narrow every band built from it.
+    """
+    raw = spec
+    if os.path.exists(os.path.expanduser(spec)):
+        with open(os.path.expanduser(spec)) as fh:
+            raw = fh.read()
+    try:
+        vals = json.loads(raw)
+    except Exception as exc:
+        broke(f"--from-history is neither a readable file nor valid JSON ({exc})",
+              hint="pass a JSON array of the metric's values over the target's "
+                   "converged tail, or a path to a file holding one")
+    if not isinstance(vals, list) or not all(
+            isinstance(v, (int, float)) and not isinstance(v, bool) for v in vals):
+        broke("--from-history must be a JSON array of numbers",
+              hint="one value per epoch of the target's converged tail")
+    return [float(v) for v in vals]
+
+
 def cmd_band(a):
     project = os.path.expanduser(a.project)
     s, _ = load_session(project, a.session)
     base = [t for t in s["trials"] if not t["pinned"]]
-    if len(base) < 3:
-        refuse(f"{len(base)} unpinned trial(s) -- a band needs at least 3",
-               why="two points are a range, not a band. Whether a delta is noise "
-                   "is a property of this pipeline, and one repeat cannot show it",
-               fix=f"run {3 - len(base)} more trial(s) with nothing pinned")
+    hist = read_history_values(a.from_history) if a.from_history else None
 
-    vals = sorted(t["value"] for t in base)
+    # A trials band is strictly stronger, so it wins whenever it exists. History
+    # supplied alongside it is kept as a cross-check, not discarded: a trials band
+    # NARROWER than the target's own within-run wobble is a signal that something
+    # about the repeats was pinned when it should not have been.
+    source = "trials" if len(base) >= MIN_TRIALS_FOR_BAND else (
+        "run_history" if hist is not None else None)
+
+    if source is None:
+        if hist is None:
+            refuse(f"{len(base)} unpinned trial(s) and no history -- "
+                   f"a band needs {MIN_TRIALS_FOR_BAND} trials or a converged tail",
+                   why="two points are a range, not a band. Whether a delta is noise "
+                       "is a property of this pipeline, and one repeat cannot show it",
+                   your_two_options={
+                       "run more trials": f"{MIN_TRIALS_FOR_BAND - len(base)} more "
+                                          f"with nothing pinned -- run-to-run spread, "
+                                          f"answers both ways",
+                       "--from-history": "the target's own converged tail, if its "
+                                         "per-epoch metric history survives. Free, but "
+                                         "a LOWER BOUND: it can confirm, never refute"})
+        refuse("no band could be built", why="unreachable")
+
+    if source == "run_history":
+        if len(hist) < MIN_HISTORY_FOR_BAND:
+            refuse(f"{len(hist)} history value(s) -- a tail band needs at least "
+                   f"{MIN_HISTORY_FOR_BAND}",
+                   why="a handful of points is a range, not a distribution, and the "
+                       "whole value of this band is that it describes a wobble",
+                   fix="pass more of the target's converged tail, or run "
+                       f"{MIN_TRIALS_FOR_BAND} trials instead")
+        if not base:
+            refuse("a history band has nothing to judge -- no trial has been registered",
+                   why="the band says how big this pipeline's noise is; something has "
+                       "to be measured against it. With `run_history` that something "
+                       "is the fresh trial, not the target: the interval already came "
+                       "from the target's own run",
+                   fix="register the reproduction with `repro.py trial`, then re-band")
+
+    if source == "trials":
+        vals = sorted(t["value"] for t in base)
+        n, tested, tested_what = len(base), s["target"]["value"], "target"
+    else:
+        vals = sorted(hist)
+        n, tested = len(hist), sorted(t["value"] for t in base)[-1]
+        tested_what = "trial"
+
     lo, hi = vals[0], vals[-1]
     spread = hi - lo
-    tv = s["target"]["value"]
+    tv = tested
     inside = lo <= tv <= hi
     nearest_edge_gap = 0.0 if inside else min(abs(tv - lo), abs(tv - hi))
 
     if inside:
         verdict = "reproduced"
-        why = f"the recorded {tv} lies inside the interval {len(base)} repeats produced"
+        why = (f"the recorded {tv} lies inside the interval {n} repeats produced"
+               if source == "trials" else
+               f"the trial's {tv} lies inside the target's own converged wobble "
+               f"[{lo:.6g}, {hi:.6g}]. A lower bound on noise, so a delta inside it "
+               f"is noise-sized whatever the true run-to-run spread is")
+    elif source == "run_history":
+        # The asymmetry, enforced. See BAND_SOURCES: this band cannot see kernel
+        # selection, dataloader order or init, so outside it is not yet outside noise.
+        verdict = "inconclusive"
+        why = (f"the trial's {tv} sits {nearest_edge_gap:.6g} outside the target's "
+               f"within-run tail [{lo:.6g}, {hi:.6g}]. That tail is a LOWER BOUND on "
+               f"run-to-run spread -- same seed, same data order, same init -- so this "
+               f"cannot say the delta is real. Only repeats can")
     elif spread > 0 and nearest_edge_gap <= spread:
         verdict = "inconclusive"
         why = (f"{tv} sits {nearest_edge_gap:.6g} outside [{lo:.6g}, {hi:.6g}], which "
@@ -963,10 +1104,55 @@ def cmd_band(a):
         why = (f"{tv} sits {nearest_edge_gap:.6g} outside [{lo:.6g}, {hi:.6g}], "
                f"further than the measured spread ({spread:.6g})")
 
-    band = {"n": len(base), "min": lo, "max": hi, "mean": sum(vals) / len(vals),
-            "spread": spread, "target": tv, "target_inside": inside,
+    band = {"source": source, "n": n, "min": lo, "max": hi,
+            "mean": sum(vals) / len(vals), "spread": spread,
+            "tested": tested_what, "tested_value": tv,
+            "target": s["target"]["value"], "target_inside": inside,
             "nearest_edge_gap": nearest_edge_gap, "measured_at": now_utc(),
-            "from_trials": [t["n"] for t in base]}
+            "from_trials": [t["n"] for t in base],
+            "lower_bound": source == "run_history",
+            "can_refute": source == "trials"}
+    if source == "run_history":
+        band["history_what"] = a.history_what
+
+    extra_caveats = []
+
+    # The selection effect, and it is one-directional. A best-checkpoint pick is the
+    # MAX of a wobbling tail, so comparing a fresh converged run against it charges
+    # the reproduction for the original's luckiest epoch -- every time, in the same
+    # direction, with nothing anywhere raising. This is the one check that needs the
+    # history even when the band came from trials, so it runs on any supplied tail.
+    if hist is not None and len(hist) >= MIN_HISTORY_FOR_BAND:
+        target_v = s["target"]["value"]
+        h_lo, h_hi = min(hist), max(hist)
+        h_mean = sum(hist) / len(hist)
+        direction = s["target"].get("direction", "max")
+        extreme = h_hi if direction == "max" else h_lo
+        if abs(target_v - extreme) <= 1e-9:
+            band["target_is_tail_extreme"] = True
+            extra_caveats.append(
+                f"the target metric {target_v:.6g} is the {'max' if direction == 'max' else 'min'} "
+                f"of its own {len(hist)}-point converged tail (mean {h_mean:.6g}, range "
+                f"[{h_lo:.6g}, {h_hi:.6g}]) -- a best-checkpoint pick, not a converged "
+                f"value. A reproduction landing on the tail MEAN has matched this run; "
+                f"judged against the recorded number it reads as short by "
+                f"{abs(extreme - h_mean):.6g}, and the bias always runs that way")
+        else:
+            band["target_is_tail_extreme"] = False
+
+    # Both available: keep the free one as a cross-check rather than dropping it.
+    if source == "trials" and hist is not None and len(hist) >= MIN_HISTORY_FOR_BAND:
+        h_spread = max(hist) - min(hist)
+        band["also_measured"] = {"source": "run_history", "n": len(hist),
+                                 "min": min(hist), "max": max(hist),
+                                 "spread": h_spread, "what": a.history_what}
+        if h_spread > spread:
+            extra_caveats.append(
+                f"the trials band ({spread:.6g}) is NARROWER than the target's own "
+                f"within-run wobble ({h_spread:.6g}). Run-to-run spread cannot be "
+                f"smaller than within-run spread, so something was held fixed across "
+                f"the repeats that the original run did not hold fixed -- check what "
+                f"the trials actually varied before trusting this interval")
 
     dec = s.get("declared_tolerance") or {}
     tol_abs = dec.get("absolute")
@@ -989,13 +1175,20 @@ def cmd_band(a):
 
     s["band"] = band
     s["metric_verdict"] = verdict
-    if tol_note and tol_note not in s["caveats"]:
-        s["caveats"].append(tol_note)
+    for c in ([tol_note] if tol_note else []) + extra_caveats:
+        if c not in s["caveats"]:
+            s["caveats"].append(c)
     save_session(project, a.session, s)
 
     out = {"session_id": a.session, "band": band, "metric_verdict": verdict,
-           "why": why, "declared_tolerance_note": tol_note}
-    if verdict == "inconclusive":
+           "why": why, "declared_tolerance_note": tol_note,
+           "caveats_added": extra_caveats}
+    if verdict == "inconclusive" and source == "run_history":
+        out["next"] = (f"this band cannot refute. To settle it, run "
+                       f"{MIN_TRIALS_FOR_BAND - len(base)} more unpinned trial(s) for a "
+                       f"run-to-run band -- and that is the ONLY case where the extra "
+                       f"trials are worth their price")
+    elif verdict == "inconclusive":
         out["next"] = (f"run {len(base)} more unpinned trial(s) and re-band -- the "
                        f"interval is not yet wide enough to answer either way")
     elif verdict == "diverged":
@@ -1261,7 +1454,13 @@ def main():
     o.add_argument("--tolerance-pct", type=float, default=0.5,
                    help="declared expectation only; the band decides the verdict")
     o.add_argument("--tolerance-abs", type=float, default=None)
-    o.add_argument("--band-trials", type=int, default=3)
+    o.add_argument("--band-trials", type=int, default=None,
+                   help="how many unpinned repeats to plan for. Default follows what "
+                        "one costs: %s. A retrain trial costs the original run, so "
+                        "three of them is three times the bill for a case that may "
+                        "not occur -- pay for the second and third only if the first "
+                        "lands ambiguous. See `band --from-history`"
+                        % ", ".join(f"{k}={v}" for k, v in DEFAULT_BAND_TRIALS.items()))
     o.set_defaults(fn=cmd_open)
 
     t = sub.add_parser("trial", help="register a completed run as a trial")
@@ -1286,6 +1485,17 @@ def main():
     b = sub.add_parser("band", help="measure the noise band from unpinned trials")
     b.add_argument("--project", required=True)
     b.add_argument("--session", required=True)
+    b.add_argument("--from-history", default=None,
+                   help="JSON array (inline or a file path) of the target metric's "
+                        "values over the target run's own CONVERGED tail. Builds a "
+                        "band without repeats -- free, but a lower bound on run-to-run "
+                        "spread, so it can confirm and never refute. Also enables the "
+                        "best-checkpoint selection check")
+    b.add_argument("--history-what", default=None,
+                   help="what those values are, e.g. 'epochs 101-140 of the target's "
+                        "train_results; mosaic closed at 100'. Recorded with the band: "
+                        "which epochs count as converged is a judgement, and a band "
+                        "whose window nobody wrote down cannot be checked later")
     b.set_defaults(fn=cmd_band)
 
     at = sub.add_parser("attribute", help="which axis is implicated, what to pin next")
