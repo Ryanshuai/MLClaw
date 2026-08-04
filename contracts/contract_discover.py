@@ -1147,3 +1147,208 @@ class SourcesListsWhatCouldBeSweptNotJustWhatIsRegistered(DiscoverCase):
         "sources" and nothing else about them is alike."""
         for s in self.sources()["sources"]:
             self.assertIn(s["kind"], ("mine", "probe", "ask"), s)
+
+
+class TheProbeUsesTheCredentialTheRegistryDeclares(DiscoverCase):
+    """CLAUDE.md -> "Skills & Dependencies" (`/resources` is the registry every run
+    skill reads through `${}`), and "Never silently": never report data you could
+    not look at.
+
+    Found by running the skill against a real handover, which is the only way it
+    would have been found: `probe_server` reads `resources.json -> servers`, but
+    `probe_s3` shelled out to a bare `aws s3 ls` and inherited whatever the CLI
+    resolved ambiently. On the machine that surfaced it those were two DIFFERENT
+    IAM users — the registry held a key that could list the buckets, the ambient
+    default could not — so the sweep reported `unreachable` over 12 GB of readable
+    training data and put "go get an S3 key" at the top of the access worklist for
+    a key that was already registered one directory up.
+
+    It never became a false `gone`, which is exactly why it survived: the answer
+    stayed inside the safe band while being wrong about the world. And `cmd_sources`
+    made it invisible from the other side — it DID read `aws.access_key_id`, so the
+    checklist called s3 usable on the strength of a credential nothing then used.
+
+    So two things must hold, and the second is what keeps them from drifting apart
+    again: the probe resolves the registry first, and the checklist reports the same
+    credential the probe will use.
+    """
+
+    def fake_aws(self, mode="ok"):
+        """A stub `aws` on PATH that records which credential reached it.
+
+        The point of the fixture is the recording. Asserting on status alone would
+        pass for the buggy version too — it also returned a plausible answer.
+        """
+        bindir = self.path("bin")
+        os.makedirs(bindir, exist_ok=True)
+        seen = os.path.join(bindir, "seen.txt")
+        body = {
+            # exit 1 with the --summarize sentinel and no stderr: a real empty read
+            "empty": 'echo "Total Objects: 0"; echo "   Total Size: 0"; exit 1',
+            # exit 1 with nothing at all: this code cannot tell what happened
+            "silent": 'exit 1',
+            "denied": ('echo "aws: [ERROR]: An error occurred (AccessDenied) when '
+                       'calling the ListObjectsV2 operation" >&2; exit 254'),
+            "ok": ('echo "2026-06-22 10:52:43  647391178 a.tar.gz"; '
+                   'echo "Total Objects: 1"; echo "   Total Size: 647391178"'),
+        }[mode]
+        with open(os.path.join(bindir, "aws"), "w") as fh:
+            fh.write("#!/bin/sh\n"
+                     f'printf "%s\\n" "${{AWS_ACCESS_KEY_ID:-<none>}}" >> {seen}\n'
+                     f'printf "profile=%s\\n" "${{AWS_PROFILE:-<none>}}" >> {seen}\n'
+                     f"{body}\n")
+        os.chmod(os.path.join(bindir, "aws"), 0o755)
+        old = os.environ.get("PATH", "")
+        os.environ["PATH"] = bindir + os.pathsep + old
+        self.addCleanup(os.environ.__setitem__, "PATH", old)
+        return seen
+
+    def credential_seen(self, seen):
+        with open(seen) as fh:
+            return [l.strip() for l in fh if l.strip()]
+
+    def registered(self, **extra):
+        self.resources(aws={"access_key_id": "AKIAREGISTERED", "region": "us-west-2",
+                            "secret_access_key": "shhh", "s3_bucket": "b", **extra})
+
+    def test_the_registered_key_is_used_not_the_ambient_one(self):
+        seen = self.fake_aws("ok")
+        self.registered()
+        os.environ["AWS_ACCESS_KEY_ID"] = "AKIAAMBIENT"
+        self.addCleanup(os.environ.pop, "AWS_ACCESS_KEY_ID", None)
+        self.record("s3://b/x/")
+        self.probe()
+        self.assertIn("AKIAREGISTERED", self.credential_seen(seen),
+                      "the probe used a credential the registry did not declare")
+        self.assertNotIn("AKIAAMBIENT", self.credential_seen(seen))
+
+    def test_an_ambient_profile_cannot_override_the_registered_pair(self):
+        """A leftover AWS_PROFILE silently wins over an explicit key pair, which
+        reintroduces the whole bug one environment variable at a time."""
+        seen = self.fake_aws("ok")
+        self.registered()
+        os.environ["AWS_PROFILE"] = "some-other-account"
+        self.addCleanup(os.environ.pop, "AWS_PROFILE", None)
+        self.record("s3://b/x/")
+        self.probe()
+        self.assertIn("profile=<none>", self.credential_seen(seen))
+
+    def test_with_no_registered_key_the_ambient_one_is_still_used(self):
+        """Nothing registered is the normal day-one state; falling back is right.
+        What must not happen is falling back SILENTLY when a key was declared."""
+        seen = self.fake_aws("ok")
+        self.resources()
+        os.environ["AWS_ACCESS_KEY_ID"] = "AKIAAMBIENT"
+        self.addCleanup(os.environ.pop, "AWS_ACCESS_KEY_ID", None)
+        self.record("s3://b/x/")
+        self.probe()
+        self.assertIn("AKIAAMBIENT", self.credential_seen(seen))
+
+    def test_the_detail_names_which_credential_answered(self):
+        """Six months on, "AccessDenied" alone does not say whose key was refused —
+        and that is the difference between asking for a key and asking for a policy
+        change."""
+        self.fake_aws("denied")
+        self.registered()
+        self.record("s3://b/x/")
+        self.probe()
+        detail = self.leads()[0]["probes"][-1]["detail"]
+        self.assertIn("resources.json -> aws.access_key_id", detail)
+
+    def test_a_refused_registered_key_is_a_different_ask_from_no_key(self):
+        """The worklist groups on the blocker, so this line decides what somebody
+        goes and requests. A registered key that is refused needs a POLICY change
+        from the bucket owner; no key needs a key. Sending someone to ask for
+        access they already hold is how a worklist stops being believed."""
+        self.fake_aws("denied")
+        self.registered()
+        self.record("s3://b/x/")
+        self.probe()
+        self.assertEqual(self.leads()[0]["probes"][-1]["blocker"],
+                         "s3:denied_with_registered_key")
+
+    def test_no_registered_key_and_denied_asks_for_a_key(self):
+        self.fake_aws("denied")
+        self.resources()
+        self.record("s3://b/y/")
+        self.probe()
+        self.assertEqual(self.leads()[0]["probes"][-1]["blocker"],
+                         "s3:no_usable_credential")
+
+    def test_the_checklist_reports_the_credential_the_probe_will_use(self):
+        """The two used to be computed differently, which is what made the drift
+        invisible from both sides."""
+        self.registered()
+        rc, out, err = run_script(SCRIPT, "sources", "--project", self.project)
+        self.assertEqual(rc, 0, err)
+        row = next(s for s in out["sources"] if s["source"] == "s3")
+        self.assertTrue(row["usable"])
+        self.assertIn("resources.json -> aws.access_key_id", row["credential"])
+        self.assertIn("resources.json", row["why"])
+
+    def test_the_recorded_credential_is_a_location_not_material(self):
+        """searches.md -> "code": a record holds a credential's NAME and LOCATION,
+        never its material. `leads.json` is git-tracked, so a key copied into it is
+        a key committed twice."""
+        self.fake_aws("denied")
+        self.registered()
+        self.record("s3://b/x/")
+        self.probe()
+        blob = json.dumps(self.read_json("ws/proj/discovery/leads.json"))
+        self.assertNotIn("AKIAREGISTERED", blob)
+        self.assertNotIn("shhh", blob)
+
+
+class AnEmptyPrefixIsAReadingAndSilenceIsNot(DiscoverCase):
+    """CLAUDE.md -> "Never silently": never report data you could not look at, and
+    the `on: s3` row
+    of `searches.md`'s probe table: `gone` only when the listing genuinely ran and
+    returned nothing.
+
+    `aws s3 ls` exits NON-ZERO when it matched nothing, which by exit code alone is
+    indistinguishable from failing. That ambiguity is what `--summarize` resolves
+    and is most of what it is worth: "Total Objects: 0" is printed only when the
+    listing executed. Same both-signals discipline as the ssh probe, inverted —
+    there a zero exit needs a sentinel to be believed, here a non-zero exit needs
+    one to be forgiven.
+
+    Both directions matter. Without the sentinel branch a prefix that is genuinely
+    empty can never be reported, so a document's claim that something is empty can
+    never be confirmed. With the branch drawn too wide, any silent failure becomes
+    a deletion report.
+    """
+
+    def fake_aws(self, mode):
+        return TheProbeUsesTheCredentialTheRegistryDeclares.fake_aws(self, mode)
+
+    def test_the_sentinel_with_no_stderr_is_gone(self):
+        self.fake_aws("empty")
+        self.resources()
+        self.record("s3://b/create-datadump/")
+        rc, _out, _ = self.probe()
+        self.assertEqual(rc, 1, "a `gone` finding is a verdict, exit 1")
+        lead = self.leads()[0]
+        self.assertEqual(lead["status"], "gone")
+        self.assertIn("listed successfully", lead["probes"][-1]["detail"])
+        self.assertIsNone(lead["probes"][-1]["blocker"],
+                          "a real reading leaves nobody waiting on access")
+
+    def test_a_bare_nonzero_exit_is_unreachable(self):
+        """No sentinel, no stderr — this code does not know what happened, and
+        "I do not know" must not print as "it was deleted"."""
+        self.fake_aws("silent")
+        self.resources()
+        self.record("s3://b/x/")
+        rc, _out, _ = self.probe()
+        self.assertEqual(rc, 0, "not knowing is not a finding")
+        self.assertEqual(self.leads()[0]["status"], "unreachable")
+
+    def test_a_denial_never_reaches_the_empty_branch(self):
+        """AccessDenied writes to stderr, so the sentinel check must be gated on
+        stderr being empty — otherwise a refusal on an empty-looking response
+        becomes a deletion report."""
+        self.fake_aws("denied")
+        self.resources()
+        self.record("s3://b/x/")
+        self.probe()
+        self.assertEqual(self.leads()[0]["status"], "unreachable")
