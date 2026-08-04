@@ -34,6 +34,7 @@ python $S record  --project <p> --path <loc> --on local|s3|server:<key> \
                   --evidence "<the doc, file:line, commit or person>" [--what "..."]
 python $S probe   --project <p> [--id lead_0003] [--all] [--recheck-days N]
 python $S reconcile --project <p> --stage training
+python $S save    --project <p> [--message "..."]
 python $S report  --project <p>
 ```
 
@@ -270,12 +271,34 @@ verified path and stops.
 **It never writes to a source.** Every verb here reads, and `probe` lists one level rather than
 walking a tree — a discovery sweep that spends four hours on a NAS is a sweep nobody runs twice.
 
-## The record is the handover artifact
+## The record is the handover artifact — `save` is what makes that true
 
 `{PROJECT}/discovery/leads.json` — one living file, not a dated scan, because a lead is long-lived
-and its status changes as access arrives. It is git-tracked, and it is the thing you hand the next
-person instead of a Confluence page: every path, where the claim came from, what was actually found,
-and when it was last checked.
+and its status changes as access arrives. It is the thing you hand the next person instead of a
+Confluence page: every path, where the claim came from, what was actually found, and when it was
+last checked.
+
+**Writing it and keeping it are different things, so `save` is a step, not an implementation
+detail.** The write is crash-safe on one disk; that is all it is. Until the record is committed it
+goes nowhere on a clone, a push or a `git clean` — which is how a handover actually happens. A
+handover artifact that does not survive the handover is the failure this whole skill was written
+against, so `report` says `UNSAVED` until it is done, and **offer the save after any probe that
+changed something.** It is one command and the user confirms it, per "confirm before saving".
+
+```bash
+python $S save --project <p>          # → "discover: 10 lead(s) — 6 verified, 1 gone, 2 unreachable, 1 claim"
+```
+
+Two things it will not do. It commits **only** `discovery/leads.json` — never `git add -A`, because
+sweeping the user's half-finished work into a commit about a dataset sweep is a real harm they would
+find much later. And it refuses (**exit 1**, worked-and-the-answer-is-no) on a non-git tree, on a
+record `.gitignore` excludes, and before there is anything to save. Running it twice is safe and
+makes no empty commit.
+
+**The commit history is itself a finding.** `leads.json` holds only the *current* status, so the one
+thing it cannot show is access arriving — nine `unreachable` in July, six `verified` in August. That
+trend lives in `git log -- discovery/`, which is why the default commit subject is the status counts
+rather than a fixed string.
 
 ## Requires / suggests
 

@@ -1352,3 +1352,139 @@ class AnEmptyPrefixIsAReadingAndSilenceIsNot(DiscoverCase):
         self.record("s3://b/x/")
         self.probe()
         self.assertEqual(self.leads()[0]["status"], "unreachable")
+
+
+class TheRecordIsKeptNotJustWritten(DiscoverCase):
+    """CLAUDE.md -> "Contracts": what earns a check is "a record written now and
+    read later by someone who can no longer verify it". SKILL.md -> "The record is
+    the handover artifact": leads.json "is the thing you hand the next person
+    instead of a Confluence page".
+
+    Writing a file and keeping it are different things, and the gap was invisible
+    from every side. `atomic_write_json` makes the record crash-safe on one disk.
+    `project-init` runs `git init` and commits once. Nothing in between ever
+    committed anything, so every record this tool produces — leads, censuses,
+    handoffs, questions — accumulated untracked. `leads.json` therefore survived a
+    crash and went nowhere on a clone, a push, or a `git clean`, which is how a
+    handover actually happens.
+
+    A handover artifact that does not survive the handover is the exact failure
+    this skill was written against, sitting inside the skill.
+
+    Two properties, and the second is the one that could do harm. The record must
+    be committable in one step; and that step must touch NOTHING ELSE — a record
+    skill running `git add -A` would sweep up whatever the user had in progress
+    and commit it under a message about a dataset sweep.
+    """
+
+    def git(self, *args):
+        import subprocess
+        return subprocess.run(["git", "-C", self.project, *args],
+                              capture_output=True, text=True)
+
+    def init_repo(self):
+        self.git("init", "-q")
+        self.git("config", "user.email", "c@example.com")
+        self.git("config", "user.name", "c")
+        self.git("add", "--", "project.json")
+        self.git("commit", "-qm", "init")
+
+    def save(self, *extra):
+        return run_script(SCRIPT, "save", "--project", self.project, *extra)
+
+    def test_a_swept_record_can_be_committed_in_one_step(self):
+        self.init_repo()
+        self.record("s3://b/x/")
+        rc, out, err = self.save()
+        self.assertEqual(rc, 0, err)
+        self.assertTrue(out["committed"])
+        self.assertTrue(out["sha"])
+        self.assertTrue(self.git("ls-files", "--error-unmatch", "--",
+                                 "discovery/leads.json").returncode == 0)
+
+    def test_saving_touches_nothing_but_the_record(self):
+        """The property that makes this safe to run at all. Both a modified
+        tracked file and an untracked one must survive untouched — the first is
+        the user's edit, the second is their scratch work, and neither belongs in
+        a commit about a discovery sweep."""
+        self.init_repo()
+        self.write_json("ws/proj/project.json", {"name": "proj", "edited": True})
+        with open(self.path("ws", "proj", "WIP.txt"), "w") as fh:
+            fh.write("half-written thing\n")
+        self.record("s3://b/x/")
+        self.save()
+        files = self.git("show", "--name-only", "--format=", "HEAD").stdout.split()
+        self.assertEqual(files, ["discovery/leads.json"],
+                         "the commit reached beyond the record")
+        status = self.git("status", "--short").stdout
+        self.assertIn("project.json", status, "the user's edit was committed")
+        self.assertIn("WIP.txt", status, "the user's scratch file was committed")
+
+    def test_saving_twice_is_safe_and_says_so(self):
+        """Idempotence matters because the honest workflow re-runs it: probe,
+        save, probe again, save again. A second save must not fail and must not
+        make an empty commit."""
+        self.init_repo()
+        self.record("s3://b/x/")
+        self.save()
+        before = self.git("rev-list", "--count", "HEAD").stdout.strip()
+        rc, out, _ = self.save()
+        self.assertEqual(rc, 0)
+        self.assertFalse(out["committed"])
+        self.assertIn("has not changed", out["why"])
+        self.assertEqual(self.git("rev-list", "--count", "HEAD").stdout.strip(),
+                         before, "an empty commit was made")
+
+    def test_the_commit_subject_records_the_status_counts(self):
+        """`git log -- discovery/` should show access ARRIVING — 9 unreachable in
+        July, 6 verified in August. The leads file holds only the current status,
+        so the history of the sweep exists nowhere else."""
+        self.init_repo()
+        self.record(self.path("nope"))
+        self.record("s3://b/x/")
+        self.probe()
+        self.save()
+        subject = self.git("log", "-1", "--format=%s").stdout.strip()
+        self.assertIn("2 lead(s)", subject)
+        self.assertIn("gone", subject)
+
+    def test_a_non_git_tree_is_refused_and_says_what_is_lost(self):
+        """Exit 1, not 2: the script worked and the answer is no. And it must say
+        what the consequence is, because "not a git work tree" alone reads as a
+        technicality rather than as "nothing will carry this to anybody"."""
+        self.record("s3://b/x/")
+        rc, out, _ = self.save()
+        self.assertEqual(rc, 1)
+        self.assertFalse(out["committed"])
+        self.assertIn("not a git work tree", out["why"])
+        self.assertIn("carry it", out["why"])
+
+    def test_saving_before_there_is_anything_to_save_is_refused(self):
+        self.init_repo()
+        rc, out, _ = self.save()
+        self.assertEqual(rc, 1)
+        self.assertIn("no sweep to save", out["refused"])
+
+    def test_a_gitignored_record_is_reported_not_silently_skipped(self):
+        """`.gitignore` excluding the record would make every save a no-op that
+        reported success. Projects legitimately ignore whole directories."""
+        self.init_repo()
+        with open(self.path("ws", "proj", ".gitignore"), "w") as fh:
+            fh.write("discovery/\n")
+        self.record("s3://b/x/")
+        rc, out, _ = self.save()
+        self.assertEqual(rc, 1)
+        self.assertFalse(out["committed"])
+        self.assertTrue(out["skipped_ignored"])
+        self.assertIn(".gitignore", out["why"])
+
+    def test_the_report_says_when_the_record_is_unsaved(self):
+        """The gap has to be visible without anybody thinking to look for it —
+        an untracked record looks exactly like a tracked one on disk."""
+        self.init_repo()
+        self.record("s3://b/x/")
+        self.assertTrue(self.report()["record_unsaved"])
+        self.assertIn("UNSAVED", self.table())
+        self.save()
+        self.assertFalse(self.report()["record_unsaved"])
+        self.assertNotIn("UNSAVED", self.table())

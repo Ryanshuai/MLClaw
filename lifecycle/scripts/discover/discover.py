@@ -61,7 +61,8 @@ import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__))), "shared"))
-from _records import (age_days, atomic_write_json, broke, emit, now_utc, read_json, refuse)  # noqa: E402
+from _records import (age_days, atomic_write_json, broke, emit, git_save,  # noqa: E402
+                      git_tracked, now_utc, read_json, refuse)
 
 # Walking a multi-terabyte tree to total it can take minutes, and a sweep nobody
 # waits for is a sweep nobody runs. So measurement is bounded — and when the
@@ -1553,7 +1554,7 @@ def cmd_probe(a) -> None:
 GLYPH = {"verified": "✓", "gone": "✗", "unreachable": "?", "claim": "·"}
 
 
-def table(leads, recheck_days):
+def table(leads, recheck_days, unsaved=False):
     """One row per lead: what it is, where, how big, how many files.
 
     The `—` in a size column is load-bearing and is never a `0`. Three different
@@ -1611,6 +1612,11 @@ def table(leads, recheck_days):
         if l["status"] == "gone":
             out.append(f"GONE: {l['path']} — claimed as {l.get('what') or '?'}; "
                        f"evidence was {l.get('evidence')}")
+    if unsaved:
+        out.append("UNSAVED: this record is not tracked by git. It survives on "
+                   "this disk and goes nowhere on a clone, a push or a `git "
+                   "clean` — which is how a handover happens. `discover.py save "
+                   "--project <p>`")
     return "\n".join(out)
 
 
@@ -1728,6 +1734,53 @@ def access_worklist(leads):
     return sorted(groups.values(), key=lambda e: (-e["blocks"], e["blocker"]))
 
 
+def save_message(rec):
+    """The commit subject, built from the record so `git log` is a sweep history.
+
+    Counts rather than prose: reading `git log -- discovery/` should show access
+    arriving — 9 unreachable in July, 6 verified in August — which is the one
+    trend the leads file cannot show, since it holds only the current status.
+    """
+    by = {}
+    for l in rec.get("leads") or []:
+        by[l["status"]] = by.get(l["status"], 0) + 1
+    parts = ", ".join(f"{by[k]} {k}" for k in
+                      ("verified", "gone", "unreachable", "claim") if by.get(k))
+    n = len(rec.get("leads") or [])
+    return f"discover: {n} lead(s) — {parts or 'none probed'}"
+
+
+def cmd_save(a) -> None:
+    """Commit the sweep's record, and only the sweep's record.
+
+    This verb exists because writing a file and keeping it are different things,
+    and the gap was invisible: `atomic_write_json` makes `leads.json` crash-safe,
+    `project-init` runs `git init`, and nothing in between ever commits. So the
+    file this skill calls "the thing you hand the next person instead of a
+    Confluence page" sat untracked — surviving on one disk, and going nowhere on
+    a clone, a push, or a `git clean`. A handover artifact that does not survive
+    the handover is the failure mode this whole skill was written against, and it
+    was sitting inside the skill.
+
+    Explicit rather than automatic on every probe, because CLAUDE.md's "confirm
+    before saving" outranks the convenience — and because a commit is the user's
+    history, not this script's scratch space. `report` says when it is overdue.
+    """
+    project = os.path.expanduser(a.project)
+    path = leads_path(project)
+    rec = read_json(path, required=False)
+    if not rec:
+        refuse(f"no sweep to save: {path} does not exist yet. `record` a lead "
+               f"first — there is nothing here that would be lost")
+    report = git_save(project, [path], a.message or save_message(rec))
+    emit({"project": project, "record": path, **report,
+          "note": None if report["committed"] else report["why"]})
+    if not report["committed"] and report["why"] and "already committed" not in report["why"]:
+        # Worked, and the answer is no: nothing was preserved. Exit 1 so a caller
+        # that assumed the record is now safe finds out here.
+        sys.exit(1)
+
+
 def cmd_report(a) -> None:
     project = os.path.expanduser(a.project)
     rec = read_json(leads_path(project), required=False)
@@ -1756,8 +1809,9 @@ def cmd_report(a) -> None:
 
     measured = [l for l in leads if l["status"] == "verified"
                 and l.get("bytes") is not None]
+    unsaved = not git_tracked(project, leads_path(project))
     if not a.json:
-        print(table(leads, a.recheck_days))
+        print(table(leads, a.recheck_days, unsaved))
         return
 
     emit({
@@ -1794,6 +1848,10 @@ def cmd_report(a) -> None:
             "probe_older_than_days": a.recheck_days,
             "stale_probes": [slim(l) for l in stale],
         },
+        # Not a finding about the world — a finding about this file. An untracked
+        # record is one `git clean` or one fresh clone from never having existed,
+        # and it is the one gap here that the sweep itself created.
+        "record_unsaved": unsaved,
         "exhaustive": False,
         "why_not_exhaustive":
             "a sweep finds what somebody wrote down or left a path to. Data that "
@@ -1865,6 +1923,12 @@ def main() -> None:
     rc.add_argument("--stage", required=True,
                     help="training | evaluation | inference | ...")
     rc.set_defaults(fn=cmd_reconcile)
+
+    sv = sub.add_parser("save", help="commit the sweep's record, and only that")
+    sv.add_argument("--project", required=True)
+    sv.add_argument("--message", default=None,
+                    help="commit subject; default is built from the lead counts")
+    sv.set_defaults(fn=cmd_save)
 
     rp = sub.add_parser("report", help="the table: what, where, how big, how many")
     rp.add_argument("--project", required=True)
