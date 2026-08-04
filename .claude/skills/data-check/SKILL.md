@@ -41,7 +41,7 @@ the *completion claim itself*, not a statement about the data.
 
 ## Step 1 — Declare the layout contract (once)
 
-`dataset.json` is filled in dialogue, one question at a time, and the template
+`dataset.json` is filled in dialogue, one question at a time — and only with what only the user knows; anything a census or a listing can read is read, not asked (CLAUDE.md "Decide what evidence can decide"). The template
 (`lifecycle/data/dataset.json`) carries the reasoning for every field. Four of them cannot be
 defaulted, and each has a specific failure waiting behind a guess:
 

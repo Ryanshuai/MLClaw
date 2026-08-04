@@ -7,7 +7,7 @@ description: "Use this skill to generate a refactoring audit report documenting 
 
 Generate a self-contained HTML report documenting the entire refactoring process. The report's core purpose is **reproducibility and rollback** — when someone needs to intervene, they can understand what happened, roll back to any point, and reproduce any state.
 
-Ask one question at a time — multiple questions at once overwhelms users.
+Ask one question at a time — multiple questions at once overwhelms users. **And only what only they know** — a value you can read is not a question, and a value nobody has is recorded absent rather than asked for: CLAUDE.md "Decide what evidence can decide".
 
 Follow `lifecycle/references/skill-graph.md` -> "Workflow State Protocol": push on entry, update step as you progress, pop on completion.
 

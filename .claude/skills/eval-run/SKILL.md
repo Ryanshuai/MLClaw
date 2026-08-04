@@ -15,7 +15,7 @@ description: >
 
 Execute an evaluation run: resolve sources (including ground truth), run the eval, collect metrics, compare against baseline.
 
-**One question at a time** — asking multiple questions at once is overwhelming. Ask one, record, ask next.
+**One question at a time** — asking multiple questions at once is overwhelming. Ask one, record, ask next. **And only what only they know** — a value you can read is not a question, and a value nobody has is recorded absent rather than asked for: CLAUDE.md "Decide what evidence can decide".
 
 **Workflow state, dependency checks, locate project, variable references** — follow `lifecycle/references/skill-graph.md` (state protocol + the requires/suggests table) and `lifecycle/references/layout.md` (Variable Reference Syntax). Stage = `evaluation`, upstream = `/eval-init` (check `config.json -> entry_command` non-empty).
 

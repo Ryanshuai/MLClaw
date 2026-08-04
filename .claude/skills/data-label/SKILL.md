@@ -74,7 +74,7 @@ refusals are listed under "The four refusals" below with what each is actually p
 
 ## Step 1 — Send
 
-One question at a time. What the script cannot infer and you must establish in dialogue:
+One question at a time, and **only what only they know** — a value you can read is not a question, and a value nobody has is recorded absent rather than asked for: CLAUDE.md "Decide what evidence can decide". What the script cannot infer and you must establish in dialogue:
 
 | Ask | Why it can't be defaulted |
 |---|---|
