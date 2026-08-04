@@ -150,13 +150,44 @@ class ReproCase(TempDirCase):
         self.assertEqual(code, 0, f"check should never refuse: {out} {err}")
         return out
 
-    def open_session(self, *extra):
+    def eval_target(self, *, config_snapshot=True, value=48.5):
+        """An EVALUATION-stage target, for the checks about `reproduced*`.
+
+        Since a training run measured through eval is a re-measurement and not a
+        reproduction, `reproduced` is only reachable when the target's own
+        procedure WAS re-run — which for an eval target is what measuring it is.
+        The checks on `reproduced`'s evidence bars therefore need this fixture;
+        pointing them at a training run would test the new family gate instead of
+        the bar each one is named for.
+        """
+        self.write("proj/stages/evaluation/config.json", json.dumps(
+            {"param_injection": {"items": {
+                "lr": {"via": "cli", "overridable": True, "evidence": "t.py:1"}}}}))
+        run = {
+            "run_id": "run_E", "stage": "evaluation", "status": "completed",
+            "mode": "production", "scope": {"samples": 100},
+            "code": {"origin_commit": self.sha, "dirty_patch_path": None,
+                     "dirty_files_count": 0, "reproducible": True},
+            "env": {"cuda": "12.1", "packages": {"torch": "2.1.0"}},
+            "lineage": {"parents": ["datasets/coco@0728"], "fork_of": None},
+            "metrics": {"best": {"primary_metric": "val_mAP",
+                                 "primary_metric_value": value, "epoch": 1}},
+            "outputs": {},
+        }
+        self.write("proj/stages/evaluation/runs/run_E/run.json", json.dumps(run))
+        if config_snapshot:
+            self.write("proj/stages/evaluation/runs/run_E/config_snapshot.json",
+                       json.dumps({"runtime_params": {"lr": 1e-4}}))
+        return "evaluation/run_E"
+
+    def open_session(self, *extra, run="training/run_A"):
         code, out, err = self.repro("open", "--project", self.project,
-                                    "--run", "training/run_A", *extra)
+                                    "--run", run, *extra)
         return code, out, err
 
-    def session_with_band(self, values=(48.42, 48.55, 48.48), *open_args):
-        code, out, err = self.open_session(*open_args)
+    def session_with_band(self, values=(48.42, 48.55, 48.48), *open_args,
+                          run="training/run_A"):
+        code, out, err = self.open_session(*open_args, run=run)
         self.assertEqual(code, 0, f"open failed: {out} {err}")
         sid = out["session_id"]
         for i, v in enumerate(values):
@@ -382,16 +413,16 @@ class ReproducedIsTheStrongestClaim(ReproCase):
     """
 
     def test_reproduced_refuses_while_an_axis_is_unverifiable(self):
-        self.target(config_snapshot=False)
-        sid, _ = self.session_with_band()
+        self.eval_target(config_snapshot=False)
+        sid, _ = self.session_with_band(run="evaluation/run_E")
         code, out, _ = self.repro("close", "--project", self.project,
                                   "--session", sid, "--verdict", "reproduced")
         self.assertEqual(code, 1)
         self.assertIn("reproduced_with_drift", json.dumps(out))
 
     def test_with_drift_is_allowed_and_stamps_the_caveat(self):
-        self.target(config_snapshot=False)
-        sid, _ = self.session_with_band()
+        self.eval_target(config_snapshot=False)
+        sid, _ = self.session_with_band(run="evaluation/run_E")
         code, out, _ = self.repro("close", "--project", self.project,
                                   "--session", sid,
                                   "--verdict", "reproduced_with_drift")
@@ -418,7 +449,8 @@ class ReproducedIsTheStrongestClaim(ReproCase):
     def test_a_closed_session_refuses_more_trials(self):
         """The trials are the evidence. Adding to them after the verdict changes
         what the verdict was based on, retroactively."""
-        sid, _ = self.session_with_band()
+        self.eval_target()
+        sid, _ = self.session_with_band(run="evaluation/run_E")
         self.repro("close", "--project", self.project, "--session", sid,
                    "--verdict", "reproduced_with_drift")
         code, out, _ = self.repro("trial", "--project", self.project,
@@ -444,7 +476,9 @@ class TheProbeIsTheStrongerCheck(ReproCase):
     def test_both_reproduction_verdicts_refuse_an_unrun_probe(self):
         for verdict in ("reproduced", "reproduced_with_drift"):
             with self.subTest(verdict=verdict):
-                sid, _ = self.session_with_band((48.42, 48.55, 48.48), *self.PROBE)
+                self.eval_target()
+                sid, _ = self.session_with_band((48.42, 48.55, 48.48), *self.PROBE,
+                                                run="evaluation/run_E")
                 code, out, _ = self.repro("close", "--project", self.project,
                                           "--session", sid, "--verdict", verdict)
                 self.assertEqual(code, 1, "a declared probe that never ran cannot "
@@ -458,7 +492,9 @@ class TheProbeIsTheStrongerCheck(ReproCase):
                           "no probe run is a third state, not agreement")
 
     def test_disagreeing_predictions_force_their_own_verdict(self):
-        sid, _ = self.session_with_band((48.42, 48.55, 48.48), *self.PROBE)
+        self.eval_target()
+        sid, _ = self.session_with_band((48.42, 48.55, 48.48), *self.PROBE,
+                                       run="evaluation/run_E")
         self.repro("trial", "--project", self.project, "--session", sid,
                    "--run", self.trial_run("run_P", 48.5), "--predictions-differ")
         code, out, _ = self.repro("close", "--project", self.project,
@@ -475,8 +511,9 @@ class TheProbeIsTheStrongerCheck(ReproCase):
         """The bar is "the probe you promised", not "a probe". Requiring one
         unconditionally would make the honest no-probe session unclosable and
         teach people to declare a probe they intend to skip."""
-        sid, _ = self.session_with_band()
-        self.target(config_snapshot=False)
+        self.eval_target()
+        sid, _ = self.session_with_band(run="evaluation/run_E")
+        self.eval_target(config_snapshot=False)
         code, _, _ = self.repro("close", "--project", self.project,
                                 "--session", sid,
                                 "--verdict", "reproduced_with_drift")
@@ -673,3 +710,91 @@ class AFrameworkStagesCodeAxisIsNotAMissingTree(ReproCase):
         run["code"] = {"origin_commit": None}
         ax = repro.probe_code(self.project, run, "evaluation")
         self.assertEqual(ax["verdict"], "unverifiable")
+
+
+class ReMeasuringAnArtifactIsNotReproducingAProcedure(ReproCase):
+    """`.claude/skills/repro/references/verdicts.md` -> "Final verdicts", the
+    `remeasured` pair; and `/discover` `references/searches.md` -> "Where the
+    vocabulary breaks, and it is not cosmetic", which names this exact failure one
+    domain over: "Two words, same spelling, opposite bars."
+
+    `measure_via: eval` is the default "including for training runs", and the cost
+    argument is sound — re-measuring a surviving checkpoint answers "is the
+    recorded number real" for the price of one eval. What was not sound was
+    calling the result `reproduced`. Re-measuring a training run's artifact re-runs
+    nothing about the training: a hyperparameter recorded wrongly, a dataset
+    recorded wrongly, or a recipe that would no longer produce this model are all
+    invisible, because the artifact is a GIVEN and only its number was checked.
+
+    It matters because `skill-graph.md` makes a closed `reproduced*` session the
+    ONLY thing that moves an inherited checkpoint's `origin.confidence` off
+    `claimed`. One word doing two jobs meant the weaker fact was buying the
+    stronger promotion — on exactly the inherited-checkpoint case the field exists
+    for.
+
+    The split is keyed on the TARGET'S STAGE rather than on a flag, because that
+    is the fact that decides it: an eval run re-measured is an eval run re-run.
+    """
+
+    def test_a_training_target_measured_by_eval_cannot_close_as_reproduced(self):
+        sid, _ = self.session_with_band()
+        for verdict in ("reproduced", "reproduced_with_drift"):
+            with self.subTest(verdict=verdict):
+                code, out, _ = self.repro("close", "--project", self.project,
+                                          "--session", sid, "--verdict", verdict)
+                self.assertEqual(code, 1)
+                blob = json.dumps(out)
+                self.assertIn("did not reproduce a procedure", blob)
+                self.assertIn("remeasured", blob, "the refusal must name the "
+                                                  "verdict that IS available")
+
+    def test_the_refusal_offers_both_ways_out(self):
+        """Two of them, because they answer different questions and the caller has
+        to be told which one they are choosing: record the weaker fact, or pay for
+        the stronger one."""
+        sid, _ = self.session_with_band()
+        _, out, _ = self.repro("close", "--project", self.project,
+                               "--session", sid, "--verdict", "reproduced")
+        self.assertIn("retrain", json.dumps(out))
+        self.assertIn("i-accept-the-cost", json.dumps(out))
+
+    def test_remeasured_with_drift_closes(self):
+        sid, _ = self.session_with_band()
+        code, out, err = self.repro("close", "--project", self.project,
+                                    "--session", sid,
+                                    "--verdict", "remeasured_with_drift")
+        self.assertEqual(code, 0, f"{out} {err}")
+
+    def test_the_drift_downgrade_applies_to_the_weaker_family_too(self):
+        """`remeasured` over a drifted axis is exactly as much a weaker fact as
+        `reproduced` is, so the downgrade cannot be attached to one family only —
+        that was how `reproduced_with_drift` originally slipped past the probe
+        check, one verdict over."""
+        self.target(config_snapshot=False)
+        sid, _ = self.session_with_band()
+        code, out, _ = self.repro("close", "--project", self.project,
+                                  "--session", sid, "--verdict", "remeasured")
+        self.assertEqual(code, 1)
+        self.assertIn("remeasured_with_drift", json.dumps(out))
+
+    def test_an_eval_target_still_reaches_the_stronger_word(self):
+        """The gate must not swallow the case where eval IS the procedure. An eval
+        run re-measured has been re-run, so `reproduced` is the accurate word and
+        withholding it would lose a fact."""
+        self.eval_target(config_snapshot=False)
+        sid, _ = self.session_with_band(run="evaluation/run_E")
+        code, out, err = self.repro("close", "--project", self.project,
+                                    "--session", sid,
+                                    "--verdict", "reproduced_with_drift")
+        self.assertEqual(code, 0, f"{out} {err}")
+
+    def test_the_weaker_word_is_refused_when_the_procedure_was_re_run(self):
+        """Symmetry, and it is not pedantry: recording `remeasured` on a session
+        that really did reproduce loses a fact nobody can recover from the record
+        later."""
+        self.eval_target()
+        sid, _ = self.session_with_band(run="evaluation/run_E")
+        code, out, _ = self.repro("close", "--project", self.project,
+                                  "--session", sid, "--verdict", "remeasured")
+        self.assertEqual(code, 1)
+        self.assertIn("understates", json.dumps(out))

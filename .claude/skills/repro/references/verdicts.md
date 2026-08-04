@@ -40,6 +40,8 @@ Either way the note lands in `caveats` and travels with the verdict.
 |---|---|---|
 | `reproduced` | band says `reproduced`, **every** axis `intact`, probe predictions agree | the strongest claim available: same number, same conditions, same outputs |
 | `reproduced_with_drift` | band says `reproduced`, probe run if declared | the number came back, but not from the same conditions. **A weaker fact that has to keep saying so** |
+| `remeasured` | as `reproduced`, but the target's **procedure was never re-run** | the artifact's number came back. Says **nothing** about whether the recipe still produces it |
+| `remeasured_with_drift` | as above, ≥1 axis drifted | both weaker facts at once, and both keep saying so |
 | `metric_ok_predictions_diverged` | band says `reproduced`, predictions differ | the dangerous cell — the average survived and the outputs did not |
 | `diverged` | band says `diverged`, an axis attributed | the number moved and we know what moved it |
 | `diverged_unattributed` | band says `diverged`, every suspect axis pinned | the number moved and nothing MLClaw records explains it. **A conclusion, not a failure to finish** |
@@ -48,6 +50,24 @@ Either way the note lands in `caveats` and travels with the verdict.
 There is no verdict for `inconclusive`. A session that reaches its budget still inconclusive should be left **open** with what it has — closing it would freeze a non-answer into the record as if it were one.
 
 ---
+
+## Re-measuring is not reproducing, and one word was doing both jobs
+
+`measure_via: eval` is the default **including for training runs**, and the cost argument for that is sound: re-measuring a surviving checkpoint answers *is the recorded number real* for the price of one eval, where retraining costs what the original cost. What was not sound was calling the result `reproduced`.
+
+**Re-measuring a training run's artifact re-runs nothing about the training.** A hyperparameter recorded wrongly, a dataset recorded wrongly, a recipe that would no longer produce this model — every one of those is invisible to such a session, because the artifact is a *given* and only its number was checked. So the verdict has to say which question it answered:
+
+| Target | `measure_via` | Verdict family | What it establishes |
+|---|---|---|---|
+| an **eval** or **infer** run | `eval` | `reproduced*` | **a full reproduction** — the run being reproduced *was* a measurement, so re-measuring it is re-running it |
+| a **training** run | `eval` | `remeasured*` | the artifact still scores this. The recipe was not exercised |
+| a **training** run | `retrain` | `reproduced*` | the training itself came back |
+
+The split is keyed on the **target's stage**, not on a flag, because that is the fact that decides it.
+
+**Why the distinction is load-bearing rather than tidy.** `skill-graph.md` makes a closed `reproduced*` session the only thing that moves an inherited checkpoint's `origin.confidence` off `claimed`. With one word for both, the weaker fact bought the stronger promotion — on precisely the inherited-checkpoint case that field exists to guard. This is the same defect `/discover` `references/searches.md` names under "Where the vocabulary breaks, and it is not cosmetic": *two words, same spelling, opposite bars.*
+
+`close` refuses in both directions. `reproduced*` on a re-measurement is refused and told which word is available plus what retraining would cost; `remeasured*` on a session that really did re-run the procedure is refused too, because recording the weaker word loses a fact nobody can recover from the record later.
 
 ## Every refusal `close` raises
 
