@@ -181,6 +181,20 @@ class ReproCase(TempDirCase):
         return "evaluation/run_E"
 
     def open_session(self, *extra, run="training/run_A"):
+        """Opens the way a real caller now has to.
+
+        `open` refuses a training target measured through eval unless somebody
+        types `--remeasure-only`, because that combination reproduces nothing and
+        the default path of a skill called /repro must not quietly answer a
+        weaker question. Supplying it here keeps every check below testing the
+        thing it is named for rather than re-testing that one gate — which
+        `ReMeasuringAnArtifactIsNotReproducingAProcedure` owns.
+        """
+        extra = list(extra)
+        needs = (run.split("/")[0] not in ("evaluation", "inference")
+                 and "retrain" not in extra and "--remeasure-only" not in extra)
+        if needs:
+            extra.append("--remeasure-only")
         code, out, err = self.repro("open", "--project", self.project,
                                     "--run", run, *extra)
         return code, out, err
@@ -798,3 +812,68 @@ class ReMeasuringAnArtifactIsNotReproducingAProcedure(ReproCase):
                                   "--session", sid, "--verdict", "remeasured")
         self.assertEqual(code, 1)
         self.assertIn("understates", json.dumps(out))
+
+
+class TheDefaultPathCannotQuietlyAnswerAWeakerQuestion(ReproCase):
+    """`.claude/skills/repro/SKILL.md` -> Step 2, `measure_via`; and
+    `references/verdicts.md` -> "Re-measuring is not reproducing".
+
+    Splitting the verdict words was half a fix. `measure_via` still DEFAULTED to
+    `eval`, so the default path of a skill called `/repro` — the one a user reaches
+    by typing "复现一下" — ran inference over a val set and stamped a verdict that
+    sounds like the one they asked for. A strict standard that the default route
+    walks around is not a standard.
+
+    So the combination is gated the same way its expensive twin is. `retrain`
+    costs money and needs `--i-accept-the-cost`; `eval` against a training target
+    costs almost nothing and buys a weaker answer, so it needs `--remeasure-only`.
+    Symmetric, and the same discipline as `/data-label`'s `--spec | --no-spec`:
+    **the absence has to be something a person typed rather than something that
+    just didn't happen.**
+
+    The ceiling is also announced at `open` rather than discovered at `close`,
+    which is SKILL.md Step 1's own rule about the drift ceiling applied to this
+    one — a caller who finds out at close has already spent the trials.
+    """
+
+    def raw_open(self, *extra, run="training/run_A"):
+        return self.repro("open", "--project", self.project, "--run", run, *extra)
+
+    def test_a_training_target_via_eval_is_refused_without_the_acknowledgement(self):
+        code, out, _ = self.raw_open()
+        self.assertEqual(code, 1)
+        blob = json.dumps(out)
+        self.assertIn("will not reproduce anything", blob)
+        self.assertIn("--remeasure-only", blob)
+        self.assertIn("retrain", blob, "the refusal must offer the other way out too")
+
+    def test_the_acknowledgement_lets_it_open(self):
+        code, out, err = self.raw_open("--remeasure-only")
+        self.assertEqual(code, 0, f"{out} {err}")
+        self.assertFalse(out["reproduces_the_procedure"])
+
+    def test_the_ceiling_is_stated_at_open_not_discovered_at_close(self):
+        _, out, _ = self.raw_open("--remeasure-only")
+        self.assertTrue(out["verdict_ceiling"].startswith("remeasured"),
+                        f"ceiling was {out['verdict_ceiling']!r}")
+        self.assertIn("not re-run", out["ceiling_why"])
+
+    def test_an_eval_target_needs_no_acknowledgement(self):
+        """The gate must not tax the case where eval IS the procedure."""
+        self.eval_target()
+        code, out, err = self.raw_open(run="evaluation/run_E")
+        self.assertEqual(code, 0, f"{out} {err}")
+        self.assertTrue(out["reproduces_the_procedure"])
+        self.assertTrue(out["verdict_ceiling"].startswith("reproduced"))
+
+    def test_retrain_is_still_gated_on_its_own_flag(self):
+        """Both gates stand: acknowledging the weaker question must not become a
+        way to skip acknowledging the cost, or vice versa."""
+        code, out, _ = self.raw_open("--measure-via", "retrain")
+        self.assertEqual(code, 1)
+        self.assertIn("i-accept-the-cost", json.dumps(out))
+        code, out, err = self.raw_open("--measure-via", "retrain",
+                                       "--i-accept-the-cost")
+        self.assertEqual(code, 0, f"{out} {err}")
+        self.assertTrue(out["reproduces_the_procedure"],
+                        "retraining a training target IS reproducing it")
