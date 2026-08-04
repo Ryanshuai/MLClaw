@@ -182,3 +182,91 @@ def atomic_write_json(path, obj, *, fsync=False, ensure_ascii=False):
             fh.flush()
             os.fsync(fh.fileno())
     os.replace(tmp, path)
+
+
+# --------------------------------------------------------------------------- #
+# Committing a record — the step between writing it and it surviving
+# --------------------------------------------------------------------------- #
+
+def _git(root, *args):
+    """-> (ok, stdout, stderr). No shell, no cwd change."""
+    import subprocess
+    try:
+        p = subprocess.run(["git", "-C", root, *args], capture_output=True,
+                           text=True, timeout=30)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return False, "", f"{type(exc).__name__}: {exc}"
+    return p.returncode == 0, (p.stdout or "").strip(), (p.stderr or "").strip()
+
+
+def git_tracked(root, path):
+    """-> True if git already knows this path. `atomic_write_json` producing a
+    file is not the same as the file being kept."""
+    ok, _out, _err = _git(root, "ls-files", "--error-unmatch", "--", path)
+    return ok
+
+
+def git_save(root, paths, message):
+    """Commit exactly `paths` and nothing else. -> report dict.
+
+    `atomic_write_json` makes a record crash-safe on one disk. It does not make
+    it survive a `git checkout`, a `git clean`, or — the case that matters here —
+    a handover, which happens by pushing or cloning the repo. A record whose whole
+    purpose is to be read later by somebody who can no longer verify it, sitting
+    untracked, is a record that does not go with the project.
+
+    **Path-scoped on purpose, and this is the safety property.** `git add -- <p>`
+    then `git commit -m <msg> -- <p>`: the second form commits the working-tree
+    version of those paths regardless of what else is staged, and leaves every
+    other change alone. A record skill that ran `git add -A` would sweep up
+    whatever the user had in progress and commit it under a message about a
+    dataset sweep — a real harm, and one they would find much later.
+
+    Return shape rather than raising, because the caller decides whether a
+    non-git tree is a refusal or a shrug. Nothing-to-commit is success: running
+    it twice must be safe.
+    """
+    report = {"committed": False, "paths": list(paths), "why": None,
+              "sha": None, "skipped_ignored": []}
+    ok, top, err = _git(root, "rev-parse", "--show-toplevel")
+    if not ok:
+        report["why"] = (f"not a git work tree ({err or 'no toplevel'}) — the "
+                         f"record is on disk but nothing will carry it to "
+                         f"anybody else")
+        return report
+
+    keep = []
+    for p in paths:
+        if not os.path.exists(p):
+            continue
+        # A path excluded by .gitignore cannot be committed, and silently
+        # dropping it would report a save that did not happen. `secrets.json` is
+        # ignored deliberately — this is the branch that says so out loud.
+        ignored, _o, _e = _git(root, "check-ignore", "-q", "--", p)
+        if ignored:
+            report["skipped_ignored"].append(p)
+            continue
+        keep.append(p)
+    if not keep:
+        report["why"] = ("nothing to commit: no record file exists"
+                         if not report["skipped_ignored"] else
+                         "every record path is excluded by .gitignore")
+        return report
+
+    ok, _o, err = _git(root, "add", "--", *keep)
+    if not ok:
+        report["why"] = f"git add failed: {err}"
+        return report
+    ok, _o, _e = _git(root, "diff", "--cached", "--quiet", "--", *keep)
+    if ok:                                   # exit 0 from --quiet == no diff
+        report["why"] = "already committed — the record has not changed"
+        return report
+
+    ok, _o, err = _git(root, "commit", "-m", message, "--", *keep)
+    if not ok:
+        report["why"] = f"git commit failed: {err}"
+        return report
+    _ok, sha, _e = _git(root, "rev-parse", "--short", "HEAD")
+    report["committed"] = True
+    report["sha"] = sha or None
+    return report
