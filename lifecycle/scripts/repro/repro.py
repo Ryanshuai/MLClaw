@@ -351,12 +351,50 @@ def probe_code(project, run, stage):
         git checkout <origin_commit> && git apply <run_dir>/<dirty_patch_path>
     This is the only thing that ever checks it."""
     code = run.get("code") or {}
+
+    # A stage whose code_source is `framework` has no tree, so it has no SHA, and
+    # a null one here is BY CONSTRUCTION rather than a capture that failed. Reading
+    # it as "the tree that ran was never identified" is exactly the confusion
+    # `code.kind` exists to prevent — see layout.md -> "Code Source Resolution".
+    # Its contract is `install <pkg>==<version>`, so what pins it is the package
+    # version, which is the ENV axis's question; the honest verdict here is
+    # whichever of those the version comparison supports, not a statement about a
+    # tree that never existed.
+    if code.get("kind") == "framework":
+        pkg, ver = code.get("framework"), code.get("framework_version")
+        if not (pkg and ver):
+            return axis("unverifiable",
+                        "code.kind is `framework` but the pinned version is missing, "
+                        "so nothing identifies the code that ran",
+                        fix="code_snapshot.py --framework refuses an unpinned spec; "
+                            "this record bypassed it")
+        ran = ((run.get("env") or {}).get("packages") or {}).get(pkg)
+        if ran and ran.split("+")[0] != ver.split("+")[0]:
+            return axis("drifted",
+                        f"the record pins {pkg}=={ver} but env.packages says {ran} "
+                        f"actually ran -- the code that executed is not the code the "
+                        f"contract names",
+                        framework=pkg, pinned=ver, ran=ran,
+                        fix=f"rebuild the env at {pkg}=={ran} to reproduce what ran, "
+                            f"or at =={ver} to honour the pin, and say which")
+        return axis("intact",
+                    f"no tree by design (code_source `framework`); the contract is "
+                    f"`install {pkg}=={ver}`" + (f", and env.packages agrees ({ran})"
+                                                 if ran else ""),
+                    framework=pkg, framework_version=ver,
+                    note=("weaker than a SHA in one specific way and it cannot be "
+                          "checked from here: a pinned version cannot see a local edit "
+                          "to the installed package, where a tree would have produced "
+                          "a dirty patch"))
+
     sha = code.get("origin_commit")
     if not sha:
         return axis("unverifiable", "no origin_commit recorded -- the tree that ran "
                                     "was never identified",
                     fix="nothing to do retroactively; code_snapshot.py refuses "
-                        "non-git trees so this run predates it or bypassed it")
+                        "non-git trees so this run predates it or bypassed it. When "
+                        "the stage genuinely has no tree, the record should carry "
+                        "code.kind `framework` instead")
 
     cdir = code_dir_for(project, stage)
     if not os.path.isdir(cdir):
