@@ -137,6 +137,87 @@ ON_ASK_A_PERSON = ("doc", "person", "cloud_console")
 # this was. That task belongs on the access worklist, so the blocker names it.
 ON_HOST_UNKNOWN = "host_unknown"
 
+# --------------------------------------------------------------------------- #
+# The shape of a path is evidence, and nothing was reading it
+# --------------------------------------------------------------------------- #
+#
+# `host_unknown` was the whole answer for `/workspace/anyware-ai/src/dataset/...`,
+# and it left the worklist saying "find out whose disk this was". A person who has
+# seen a Dockerfile reads that path in one glance and knows two more things:
+#
+#   * `/workspace` is the container convention (Docker, devcontainers, and every
+#     ML image that ships one). So identifying the HOST does not find the path —
+#     it does not exist on the host filesystem. What resolves it is the image, the
+#     compose file, or the bind mount, and sending somebody to ssh in and `ls` is
+#     sending them to look somewhere the path was never at.
+#   * the segment after it is almost always a REPO NAME. That is a lead of a
+#     completely different family, costs one `gh repo view`, and needs no
+#     credential for the machine nobody has identified.
+#
+# On the run this was built from, that second inference produced the training
+# script itself — 34 of its 35 recorded hyperparameters identical to the
+# checkpoint's — and the W&B project and run name the training wrote to. All from
+# one string that the register had already stored and never looked at.
+#
+# So: a shape is not a verdict and never overrides a probe. It changes the FIX,
+# and it emits leads a sweep would otherwise never think to open.
+PATH_SHAPES = (
+    ("/workspace/", "container", (
+        "`/workspace` is the container working-directory convention (Docker, "
+        "devcontainers, most ML images). This path is INSIDE a container, so "
+        "naming the host does not resolve it -- the host filesystem has no such "
+        "path unless something bind-mounted it there"),
+     "the image or compose file that built the container, or the bind mount",
+     "repo_after_prefix"),
+    ("/opt/ml/", "sagemaker", (
+        "`/opt/ml/{input,model,code,output}` is SageMaker's container layout, "
+        "written by the training job and gone when it ended. The durable copy is "
+        "the S3 URI the channel was configured from"),
+     "the SageMaker training job's S3 input/output channels", None),
+    ("/content/", "colab", (
+        "`/content` is Colab's ephemeral VM. It is gone -- but `gone` about the "
+        "VM says nothing about the Drive mount or bucket it was copied from"),
+     "the notebook, and whatever it copied from", None),
+    ("/kaggle/", "kaggle", (
+        "`/kaggle/{input,working}` is a Kaggle kernel. `input` is a dataset "
+        "attachment with a permanent slug; `working` is ephemeral"),
+     "the kernel and its attached dataset slug", None),
+    ("/tmp/", "ephemeral", (
+        "`/tmp` is cleared on reboot and often sooner. A path here is likely "
+        "already gone wherever it was, and finding the host will usually confirm "
+        "a loss rather than recover anything"),
+     "whatever wrote it -- the path itself is not a durable location", None),
+)
+
+
+def path_shape(path):
+    """-> dict | None. What the SHAPE of a path implies about where it lived.
+
+    Deliberately not a status. A shape is read off a string and can be wrong
+    (somebody's host really may have a `/workspace`), so it never contradicts a
+    probe — it redirects the fix and suggests leads.
+    """
+    if not path or not str(path).startswith("/"):
+        return None
+    p = str(path)
+    for prefix, env, why, fix, derive in PATH_SHAPES:
+        if not p.startswith(prefix):
+            continue
+        out = {"environment": env, "why": why, "resolved_by": fix,
+               "confidence": "conventional -- read off the path, not verified"}
+        if derive == "repo_after_prefix":
+            rest = p[len(prefix):].split("/")
+            if rest and rest[0]:
+                out["likely_repo"] = rest[0]
+                out["derived_lead"] = (
+                    f"`{rest[0]}` is almost certainly a REPO NAME. That is a "
+                    f"`code` lead, it needs no access to the unidentified host, "
+                    f"and the repo usually holds the training entry point, the "
+                    f"env setup and the tracking project name -- i.e. most of "
+                    f"what the unreachable path was wanted for")
+        return out
+    return None
+
 # Every `on` below is dispatched. An unbuilt tracking BACKEND is refused by
 # probe_tracking itself rather than by a table here, because the locator is
 # worth keeping even when nothing can read it — same as ingest.py recording
@@ -1029,6 +1110,11 @@ def make_lead(rec, *, path, on, source_type, subject, evidence, what,
         # None means "no known deadline", which is the normal case. A date here
         # says this lead stops being resolvable then — see DEFAULT_EXPIRING_SOON_DAYS.
         "access_expires_at": access_expires_at,
+        # What the path's own SHAPE implies — see PATH_SHAPES. Computed at record
+        # time and stored, because it is derived from the string and the string is
+        # what a later reader has. Never a status: it redirects the fix and names
+        # leads worth opening, and a probe always outranks it.
+        "path_shape": path_shape(path),
     }
 
 
@@ -2077,12 +2163,25 @@ def cmd_probe(a) -> None:
             # and what is missing is the host. So the blocker names the actual
             # task — identify the machine — and lands it on the access worklist,
             # where a credential ask would not have helped.
-            status, detail, sample, size = (
-                "unreachable",
-                f"the path is recorded but no machine is: `on: {on}`. Nothing can "
-                f"be dispatched until somebody says which host this path was on. "
-                f"That identification is the access task, not a key",
-                None, {"blocker": "host_unidentified"})
+            # The shape of the path changes what the fix IS. `/workspace/...` is a
+            # container path: naming the host does not resolve it, because the host
+            # filesystem has no such path. Sending somebody to ssh in and `ls` sends
+            # them to look where the path was never at, and they come back with a
+            # `gone` that means nothing.
+            shape = lead.get("path_shape") or path_shape(lead.get("path"))
+            base = (f"the path is recorded but no machine is: `on: {on}`. Nothing "
+                    f"can be dispatched until somebody says which host this path "
+                    f"was on. That identification is the access task, not a key")
+            extra = {"blocker": "host_unidentified"}
+            if shape:
+                base = (f"the path is recorded but no machine is: `on: {on}` -- and "
+                        f"the path's own shape says naming one would not be enough. "
+                        f"{shape['why']}. What resolves it: {shape['resolved_by']}")
+                extra = {"blocker": f"{shape['environment']}_path_not_host_path",
+                         "path_shape": shape}
+                if shape.get("derived_lead"):
+                    extra["open_this_instead"] = shape["derived_lead"]
+            status, detail, sample, size = ("unreachable", base, None, extra)
         elif kind == "ask":
             # Leave the status alone. Overwriting `claim` with `unreachable` here
             # would say "we could not look" about something a person can simply
