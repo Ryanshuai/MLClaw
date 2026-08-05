@@ -1188,3 +1188,53 @@ class ABandsSourceDecidesWhichWayItCanAnswer(ReproCase):
         code, out, _ = self.repro("band", "--project", self.project,
                                   "--session", sid, "--from-history", "{not json")
         self.assertEqual(code, 2)
+
+
+class AnAxisMayNotAssertACauseTheRecordDoesNotState(ReproCase):
+    """run-mechanics.md -> "Record integrity", and CLAUDE.md -> "Never silently"
+    (never record a metric you did not read — here, a reason you did not read).
+
+    `code.reproducible: false` correctly forbids `intact`. But the detail asserted
+    ONE cause — "a differing file was too large to embed" — because that was the
+    only way `code_snapshot.py` could set the flag. Records arrive from elsewhere
+    too: an imported external run whose launch script was edited and never
+    committed sets the same flag for a completely different reason, and the axis
+    then states, in the field a reader acts on, a fact nobody recorded.
+
+    The verdict was right and the explanation was invented. That combination is
+    worse than a wrong verdict: nothing looks off, so nobody re-checks.
+    """
+
+    def unreproducible_run(self, warnings):
+        run = {"run_id": "run_A", "stage": "training", "status": "completed",
+               "mode": "production", "scope": {"samples": 1},
+               "env": {"packages": {}},
+               "metrics": {"best": {"primary_metric": "m", "primary_metric_value": 1}},
+               "code": {"origin_commit": self.sha, "dirty_patch_path": None,
+                        "dirty_files_count": None, "reproducible": False,
+                        "warnings": warnings}}
+        return repro.probe_code(self.project, run, "training")
+
+    def test_the_recorded_reason_is_surfaced(self):
+        ax = self.unreproducible_run(
+            ["THE SCRIPT THAT RAN IS NOT IN GIT: three TODO blanks were filled at "
+             "launch and never committed"])
+        self.assertEqual(ax["verdict"], "unverifiable")
+        self.assertIn("NOT IN GIT", ax["detail"])
+        self.assertNotIn("too large to embed", ax["detail"],
+                         "the old hardcoded cause must not be asserted over a "
+                         "record that states a different one")
+
+    def test_no_recorded_reason_says_so_rather_than_inventing_one(self):
+        for warnings in ([], None):
+            ax = self.unreproducible_run(warnings)
+            self.assertEqual(ax["verdict"], "unverifiable")
+            self.assertIn("without a warning saying why", ax["detail"])
+            self.assertIsNone(ax.get("recorded_warnings"))
+
+    def test_the_verdict_is_unchanged_whatever_the_reason(self):
+        """The flag's meaning is not up for negotiation: a rebuilt tree that is
+        not the one that ran can never be `intact`."""
+        for warnings in ([], ["anything at all"], ["a", "b"]):
+            self.assertEqual(self.unreproducible_run(warnings)["verdict"],
+                             "unverifiable")

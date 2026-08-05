@@ -550,11 +550,27 @@ def probe_code(project, run, stage, framework_python=None):
         notes["dirty_files_count"] = code.get("dirty_files_count")
 
     if code.get("reproducible") is False:
+        # The VERDICT is right whatever the cause: the record says checkout+apply
+        # rebuilds a tree that is not the one that ran, so this can never be
+        # `intact`. The DETAIL used to assert one specific cause -- an
+        # oversized file the patch could not embed -- because that was the only
+        # way `code_snapshot.py` produced the flag. Records now arrive from other
+        # places (an imported external run whose launch script was edited without
+        # being committed, for one), and asserting a cause the record does not
+        # state is a made-up fact sitting in the field a reader acts on. So the
+        # recorded reason is surfaced when there is one, and the generic clause
+        # only names what the flag MEANS.
+        why = [w for w in (code.get("warnings") or []) if isinstance(w, str)]
         return axis("unverifiable",
-                    "code.reproducible is false -- a differing file was too large to "
-                    "embed, so checkout+apply rebuilds a tree that is NOT the one "
-                    "that ran. This cannot become intact later.",
-                    origin_commit=sha,
+                    "code.reproducible is false -- checkout+apply rebuilds a tree "
+                    "that is NOT the one that ran, so this cannot become intact "
+                    "later. Recorded reason: "
+                    + ("; ".join(w.strip() for w in why) if why else
+                       "none -- the flag was set without a warning saying why, which "
+                       "is itself worth chasing: the next reader cannot tell whether "
+                       "the gap is an oversized patch, an uncommitted edit, or "
+                       "something nobody wrote down"),
+                    origin_commit=sha, recorded_warnings=why or None,
                     untracked_skipped=code.get("untracked_skipped") or [], **notes)
     if code.get("reproducible") is None:
         return axis("unverifiable", "code.reproducible was never recorded",
