@@ -27,6 +27,7 @@ about the four ways a verdict can be wrong in a way that reads as right:
 import json
 import os
 import subprocess
+import sys
 import unittest
 from datetime import datetime, timezone
 
@@ -37,6 +38,10 @@ SCRIPT = "repro/repro.py"
 # thing under test is one function's verdict on a hand-built record, and routing
 # it through `check` would need a whole project fixture to assert one field.
 repro = load_script(SCRIPT)
+# The integrity check is a shared module both /repro and /discover read;
+# `repro.framework_integrity` is the name the axis calls, so that is the
+# one the fakes below replace.
+framework_integrity_mod = sys.modules[repro.framework_integrity.__module__]
 
 
 class ReproCase(TempDirCase):
@@ -690,12 +695,52 @@ class AFrameworkStagesCodeAxisIsNotAMissingTree(ReproCase):
             run.setdefault("env", {}).setdefault("packages", {})["ultralytics"] = ran
         return run
 
-    def test_a_pinned_framework_is_intact_not_unverifiable(self):
+    def test_a_pinned_framework_never_reports_a_missing_sha(self):
+        """The original defect, and it must stay fixed whatever the verdict is.
+        Whether the axis lands `intact` or `unverifiable` now depends on the edit
+        check below — but neither may be reached by way of "no commit recorded",
+        which describes a tree that never existed."""
+        for interp in (None, sys.executable):
+            ax = repro.probe_code(self.project, self.framework_run(), "evaluation",
+                                  framework_python=interp)
+            self.assertIn("no tree by design", ax["detail"])
+            self.assertNotIn("origin_commit", ax["detail"],
+                             "it must not report a missing SHA for a stage that "
+                             "has none")
+
+    def test_an_unchecked_edit_question_is_unverifiable_not_intact(self):
+        """A version pin cannot see an edit to the installed package. That question
+        is answerable — pip's RECORD holds a sha256 per file — so leaving it
+        unasked is `unverifiable`, and the axis has to say which question is open.
+
+        `intact` here would be the fourth verdict's whole reason for existing,
+        thrown away: a question nobody asked reading as a question answered.
+        """
         ax = repro.probe_code(self.project, self.framework_run(), "evaluation")
-        self.assertEqual(ax["verdict"], "intact")
-        self.assertIn("no tree by design", ax["detail"])
-        self.assertNotIn("origin_commit", ax["detail"],
-                         "it must not report a missing SHA for a stage that has none")
+        self.assertEqual(ax["verdict"], "unverifiable")
+        self.assertEqual(ax.get("integrity"), "not_checked")
+        self.assertIn("--framework-python", json.dumps(ax),
+                      "and it has to name what would close it")
+
+    def test_a_package_absent_from_the_asked_interpreter_is_not_a_pass(self):
+        """With an interpreter the check runs, and a package that is not there is
+        `unverifiable` — the same bar one step further out. `not_installed` here
+        must not read as `not_installed` anywhere, which is the unreachable/gone
+        split the discovery engine turns on, wearing different words."""
+        ax = repro.probe_code(self.project,
+                              self.framework_run(pinned="7.2.2", ran="7.2.2"),
+                              "evaluation", framework_python=sys.executable)
+        # The fixture pins `ultralytics`, which is not installed in the suite's
+        # stdlib-only interpreter: the honest verdict is `unverifiable`, and
+        # emphatically not `intact`. That is the same bar one step further out —
+        # a probe that could not run never collapses into a pass.
+        self.assertEqual(ax["verdict"], "unverifiable")
+        self.assertEqual(ax["integrity"]["state"], "not_installed")
+        self.assertIn("NOT a statement about the environment that ran",
+                      ax["integrity"]["means"],
+                      "not-installed-here must not read as not-installed-anywhere, "
+                      "and the meaning has to travel with the reading rather than "
+                      "living in whichever caller happens to print it")
 
     def test_the_pin_disagreeing_with_what_ran_is_drift(self):
         """The version is the whole contract here, so a record pinning one and an
@@ -714,9 +759,56 @@ class AFrameworkStagesCodeAxisIsNotAMissingTree(ReproCase):
     def test_it_still_says_what_a_version_cannot_see(self):
         """`reproducible: true` on the framework branch is honest about rebuilding
         the code and blind to a local edit to the installed package. The axis has
-        to carry that, or `intact` overstates the contract."""
+        to carry that — but it is no longer a limitation to be lived with, so what
+        it carries now is the check that closes it rather than an apology."""
         ax = repro.probe_code(self.project, self.framework_run(), "evaluation")
-        self.assertIn("local edit", json.dumps(ax))
+        self.assertIn("EDITED", json.dumps(ax))
+        self.assertIn("RECORD", json.dumps(ax),
+                      "and it must name the evidence, not just the worry")
+
+    def test_an_edited_package_is_drift_and_says_the_contract_will_not_hold(self):
+        """The blind spot, no longer blind. An installed package modified after
+        install means `install <pkg>==<version>` reproduces something else — the
+        same fact a dirty patch records for a git tree, and nothing else records
+        it here."""
+        run = self.framework_run(pinned="9.9.9", ran="9.9.9")
+        real = framework_integrity_mod.framework_integrity
+
+        def fake(spec, python=None, budget_s=120.0):
+            return {"state": "edited", "installed_version": "9.9.9",
+                    "files_checked": 40, "files_mismatched": 2, "files_missing": 0,
+                    "mismatched_sample": ["pkg/engine/trainer.py"],
+                    "package": "ultralytics", "interpreter": python,
+                    "pinned_version": "9.9.9", "version_matches_pin": True}
+
+        repro.framework_integrity = fake
+        try:
+            ax = repro.probe_code(self.project, run, "evaluation",
+                                  framework_python=sys.executable)
+        finally:
+            repro.framework_integrity = real
+        self.assertEqual(ax["verdict"], "drifted")
+        self.assertIn("will NOT reproduce what ran", ax["detail"])
+        self.assertIn("dirty patch", ax["fix"],
+                      "the fix has to say what is about to be lost, because "
+                      "rebuilding that environment destroys the only copy")
+
+    def test_an_edit_check_that_could_not_run_is_unverifiable(self):
+        """A probe that could not run never collapses into a pass — the fourth
+        verdict's rule, applied to the newest probe in the file."""
+        real = framework_integrity_mod.framework_integrity
+
+        def fake(spec, python=None, budget_s=120.0):
+            return {"state": "unverifiable", "detail": "hashing exceeded 120s",
+                    "package": "ultralytics", "installed_version": None}
+
+        repro.framework_integrity = fake
+        try:
+            ax = repro.probe_code(self.project, self.framework_run(), "evaluation",
+                                  framework_python=sys.executable)
+        finally:
+            repro.framework_integrity = real
+        self.assertEqual(ax["verdict"], "unverifiable")
 
     def test_a_git_run_with_no_sha_is_still_unverifiable(self):
         """The new branch must not become a way past the old verdict."""

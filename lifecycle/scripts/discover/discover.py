@@ -63,6 +63,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__))), "shared"))
 from _records import (age_days, atomic_write_json, broke, emit, git_save,  # noqa: E402
                       git_tracked, now_utc, read_json, refuse)
+from framework_integrity import framework_integrity  # noqa: E402
 
 # Walking a multi-terabyte tree to total it can take minutes, and a sweep nobody
 # waits for is a sweep nobody runs. So measurement is bounded — and when the
@@ -245,12 +246,217 @@ def load_leads(project) -> dict:
     return rec or {"project": project, "created_at": now_utc(), "leads": []}
 
 
+def cmd_verify_framework(a) -> None:
+    """The `framework` code source's contract, checked.
+
+    Records nothing: this is a reading about an interpreter, not a lead about a
+    location, and the record that wants it is the run's repro check.
+    """
+    res = framework_integrity(a.spec, python=a.python, budget_s=a.budget)
+    if res["state"] == "usage":
+        broke(res["detail"], hint="--spec takes <package>==<version>")
+    if res["state"] == "no_interpreter":
+        broke(res["detail"], hint="--python takes the interpreter of the RUN "
+                                  "environment, not MLClaw's own")
+    # `means` comes attached to the reading itself (framework_integrity ->
+    # STATE_MEANS): a second copy here would be a second copy that drifts.
+    res["exit_meaning"] = ("0 -- a reading was taken; read `state`. Absence of a "
+                           "refusal is not a clean bill of health")
+    emit(res)
+
+
+def surface_path(project) -> str:
+    return os.path.join(project, "discovery", "surface.json")
+
+
+def load_surface(project):
+    return read_json(surface_path(project), required=False)
+
+
 def workspace_resources(project):
     """`resources.json` sits at the workspace root, one level above the project.
     Absent is a normal state on day one of a handover and is reported as such
     rather than treated as "there are no sources"."""
     path = os.path.join(os.path.dirname(os.path.abspath(project)), "resources.json")
     return read_json(path, required=False), path
+
+
+# --------------------------------------------------------------------------- #
+# surface — how far the credential actually reaches, which is not what was declared
+# --------------------------------------------------------------------------- #
+#
+# `sources` reported the s3 row as `bucket: <resources.json -> aws.s3_bucket>` — ONE
+# bucket, the declared default for runs. A credential's reach is a different
+# quantity and is usually much larger; on the project this was found in, the key
+# could list twenty. A reader who takes the checklist at its word therefore sweeps
+# one twentieth of the surface and gets a findings list that looks complete.
+#
+# The under-report is what makes it dangerous rather than merely wrong. A row saying
+# "no access" sends somebody to get a key; a row naming one bucket out of twenty
+# reads as the whole world and sends nobody anywhere.
+#
+# So this verb goes and enumerates the reach, and it is the same split as
+# `census.py scan` vs `dataset.json`: `surface` goes out, is DATED, and may be
+# partial; `sources` stays records-only and reads whatever the last surface reading
+# found. The two must not be merged — `sources` is called at conversation start,
+# where four network timeouts before the user's first sentence is not a greeting.
+#
+# The negative results are the point. A bucket the key can SEE but not LIST is a
+# policy ask against whoever owns it, not a key ask, and that distinction only
+# exists if something recorded it. Held in a person's head it is worth nothing a
+# week later; that is how this project lost a twenty-bucket sweep once already.
+
+def s3_buckets_visible(res, budget_s):
+    """-> (list[str] | None, why). Every bucket the credential can enumerate.
+
+    A bare `aws s3 ls` is ListAllMyBuckets, which is an ACCOUNT-level permission and
+    routinely absent on a key that can read specific buckets fine. So `None` here
+    means "could not enumerate", never "the key reaches nothing" — the same
+    unreachable/gone split every probe in this file keeps.
+    """
+    env, where, _registered = aws_env(res)
+    try:
+        p = subprocess.run(["aws", "s3", "ls"], capture_output=True, text=True,
+                           env=env, timeout=max(30.0, budget_s))
+    except FileNotFoundError:
+        return None, "the aws CLI is not installed"
+    except subprocess.TimeoutExpired:
+        return None, f"`aws s3 ls` exceeded its budget [credential: {where}]"
+    except OSError as exc:
+        return None, f"{type(exc).__name__}: {exc}"
+    if p.returncode != 0:
+        err = (p.stderr or "").strip()
+        return None, (f"the credential cannot enumerate buckets "
+                      f"(ListAllMyBuckets denied or absent) — this says nothing "
+                      f"about which buckets it can READ: {err[:200]} "
+                      f"[credential: {where}]")
+    names = []
+    for line in (p.stdout or "").splitlines():
+        parts = line.split()
+        if len(parts) >= 3:
+            names.append(parts[-1])
+    return sorted(set(names)), f"enumerated with {where}"
+
+
+def s3_bucket_listable(bucket, res, budget_s):
+    """-> (state, detail) in listable | access_denied | empty | error.
+
+    One cheap top-level listing per bucket. `access_denied` on a bucket the key can
+    SEE is the reading worth having: the fix is a policy change by the bucket's
+    owner, not a new key, and somebody sent to request a key they already hold comes
+    back a week later with nothing.
+    """
+    env, where, _ = aws_env(res)
+    try:
+        p = subprocess.run(["aws", "s3", "ls", f"s3://{bucket}/"],
+                           capture_output=True, text=True, env=env,
+                           timeout=max(30.0, budget_s))
+    except FileNotFoundError:
+        return "error", "the aws CLI is not installed"
+    except subprocess.TimeoutExpired:
+        return "error", "the top-level listing exceeded its budget"
+    except OSError as exc:
+        return "error", f"{type(exc).__name__}: {exc}"
+    err = (p.stderr or "").strip()
+    if p.returncode == 0:
+        return "listable", f"top level listed [credential: {where}]"
+    low = err.lower()
+    if any(k in low for k in ("accessdenied", "access denied", "forbidden",
+                              "alllaccessdisabled", "all access disabled")):
+        return "access_denied", (f"the credential can SEE this bucket and cannot "
+                                 f"list it — a POLICY ask against its owner, not a "
+                                 f"key ask [credential: {where}]")
+    if any(k in low for k in ("credential", "expired", "unable to locate",
+                              "invalidaccesskey")):
+        return "error", f"credential problem: {err[:200]}"
+    if not err:
+        return "empty", "listed successfully and holds nothing at the top level"
+    return "error", err[:200]
+
+
+def cmd_surface(a) -> None:
+    """Go and measure how far each configured credential reaches. Dated, partial.
+
+    Writes `discovery/surface.json`. Unlike `sources` this one touches the network,
+    which is exactly why they are two verbs.
+    """
+    project = os.path.expanduser(a.project)
+    if not os.path.isdir(project):
+        broke(f"project not found: {project}",
+              hint="--project takes a PATH to the project directory, not a bare name")
+    res, rpath = workspace_resources(project)
+    if res is None:
+        refuse(f"no resources.json at {rpath}",
+               why="there is no credential declared to measure the reach of",
+               fix="/resources")
+
+    aws = res.get("aws") or {}
+    declared = aws.get("s3_bucket") or None
+    buckets, why = s3_buckets_visible(res, a.budget)
+
+    rec = {"project": os.path.abspath(project), "measured_at": now_utc(),
+           "s3": {"declared_bucket": declared,
+                  "enumerated": buckets is not None,
+                  "why": why,
+                  "visible_count": len(buckets) if buckets is not None else None,
+                  "buckets": {}},
+           "_comment": (
+               "How far the credential REACHES, which is not what resources.json "
+               "declares. `declared_bucket` is the default a run writes to; the "
+               "sweepable surface is `buckets`. Dated and possibly partial, like a "
+               "census: `enumerated: false` means the reach is UNKNOWN, never that "
+               "it is nothing. `access_denied` on a visible bucket is a policy ask "
+               "against its owner, not a key ask.")}
+
+    if buckets is None:
+        # The declared bucket is still worth a reading: a key with no
+        # ListAllMyBuckets very often reads its own bucket fine, and reporting
+        # "reach unknown" while never trying the one bucket we were told about
+        # would repeat the under-report in the other direction.
+        if declared:
+            state, detail = s3_bucket_listable(declared, res, a.budget)
+            rec["s3"]["buckets"][declared] = {"state": state, "detail": detail,
+                                              "declared": True}
+    else:
+        for b in buckets:
+            state, detail = s3_bucket_listable(b, res, a.budget)
+            rec["s3"]["buckets"][b] = {"state": state, "detail": detail,
+                                       "declared": b == declared}
+
+    by_state = {}
+    for b, e in rec["s3"]["buckets"].items():
+        by_state.setdefault(e["state"], []).append(b)
+    rec["s3"]["by_state"] = {k: sorted(v) for k, v in sorted(by_state.items())}
+
+    os.makedirs(os.path.dirname(surface_path(project)), exist_ok=True)
+    atomic_write_json(surface_path(project), rec)
+
+    listable = by_state.get("listable", [])
+    denied = by_state.get("access_denied", [])
+    out = {"measured_at": rec["measured_at"],
+           "s3_declared_bucket": declared,
+           "s3_enumerated": buckets is not None,
+           "s3_visible": rec["s3"]["visible_count"],
+           "s3_listable": len(listable),
+           "s3_access_denied": len(denied),
+           "by_state": rec["s3"]["by_state"],
+           "written_to": os.path.relpath(surface_path(project), project)}
+    notes = []
+    if declared and buckets is not None and len(buckets) > 1:
+        notes.append(f"resources.json declares 1 bucket ({declared}); this "
+                     f"credential can see {len(buckets)}. A sweep scoped to the "
+                     f"declared bucket covers {1}/{len(buckets)} of the surface")
+    if denied:
+        notes.append(f"{len(denied)} bucket(s) visible but not listable: "
+                     f"{', '.join(denied)}. This is a POLICY ask against the "
+                     f"owner — do not ask for a new key, the existing one is "
+                     f"already accepted")
+    if buckets is None:
+        notes.append("bucket enumeration failed, so the reach is UNKNOWN, not "
+                     "empty. Any count taken against this surface is a lower "
+                     "bound and must be reported as one")
+    out["notes"] = notes
+    emit(out)
 
 
 # --------------------------------------------------------------------------- #
@@ -377,12 +583,39 @@ def cmd_sources(a) -> None:
         _env, where, registered = aws_env(res)
         has_aws = bool(registered or os.environ.get("AWS_ACCESS_KEY_ID")
                        or os.path.isfile(os.path.expanduser("~/.aws/credentials")))
-        add("s3", "probe", has_aws, bucket=aws.get("s3_bucket") or None,
-            credential=where,
+        # The declared bucket is a run's default, NOT the sweepable surface, and
+        # this row used to report it as `bucket` with nothing to contradict the
+        # reading. A credential routinely reaches many more; scoping a sweep to the
+        # declared one and calling the result a sweep is how twenty buckets became
+        # three. The reach is a network question, so it is `surface`'s, and this row
+        # reports what the last dated reading found or says nothing was ever read.
+        surf = (load_surface(project) or {}).get("s3") or {}
+        reach = sorted(surf.get("buckets") or {})
+        surf_age = age_days(surf.get("measured_at")
+                            or (load_surface(project) or {}).get("measured_at"))
+        s3_extra = {
+            "declared_bucket": aws.get("s3_bucket") or None,
+            "reachable_buckets": reach or None,
+            "reachable_count": len(reach) if reach else None,
+            "surface_measured_days_ago": surf_age,
+            "surface_by_state": surf.get("by_state") or None,
+        }
+        if not reach:
+            s3_extra["surface_warning"] = (
+                "the credential's reach has NEVER been enumerated — the declared "
+                "bucket is a run's default, not the surface. A sweep scoped to it "
+                "may be covering a fraction of what is readable. Run "
+                "`discover.py surface` (network)")
+        elif surf.get("enumerated") is False:
+            s3_extra["surface_warning"] = (
+                "bucket enumeration failed at the last reading, so this list is a "
+                "LOWER BOUND on the reach, not the reach")
+        add("s3", "probe", has_aws, credential=where,
             why=(f"probes will use {where}" if has_aws else
                  "no AWS credentials — every s3:// lead stays UNREACHABLE, which "
                  "is not the same as empty"),
-            blocked_by="credential", fix=None if has_aws else "/resources")
+            blocked_by="credential", fix=None if has_aws else "/resources",
+            **s3_extra)
         for key, srv in (res.get("servers") or {}).items():
             if key.startswith("_"):
                 continue
@@ -2862,6 +3095,25 @@ def main() -> None:
     s = sub.add_parser("sources", help="what can be swept, and what is usable now")
     s.add_argument("--project", required=True)
     s.set_defaults(fn=cmd_sources)
+
+    vf = sub.add_parser("verify-framework",
+                        help="is a pinned package the PUBLISHED artifact, or was it "
+                             "edited in place? Closes code_snapshot's framework "
+                             "blind spot. Offline")
+    vf.add_argument("--spec", required=True, help="<package>==<version>")
+    vf.add_argument("--python", default=None,
+                    help="interpreter of the RUN environment. Defaults to this one, "
+                         "which is almost never the right answer")
+    vf.add_argument("--budget", type=float, default=120.0)
+    vf.set_defaults(fn=cmd_verify_framework)
+
+    sf = sub.add_parser("surface",
+                        help="go and measure how far the credential actually "
+                             "reaches (NETWORK). `sources` reads the result")
+    sf.add_argument("--project", required=True)
+    sf.add_argument("--budget", type=float, default=30.0,
+                    help="per-call timeout floor in seconds")
+    sf.set_defaults(fn=cmd_surface)
 
     it = sub.add_parser("introspect",
                         help="read a checkpoint and report the leads it names")
