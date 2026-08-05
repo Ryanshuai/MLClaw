@@ -7,10 +7,13 @@ description: >
   wants to set up training for a model: what the script needs (data, labels, pretrained weights),
   what it produces (checkpoints, logs, streaming metrics), how it signals completion, which params
   actually take effect, and what landmines the code carries. Produces 4 JSON configs plus a
-  provenance sidecar and a recipe.md handover document. Use for: "analyze training code", "set up
-  training", "configure training stage", "what does this training script log", "take over this repo",
-  "接手训练代码", "分析训练代码", "配置训练", "初始化train". Not for running training (use train-run)
-  or evaluation (use eval-init).
+  provenance sidecar and a recipe.md handover document. Also covers **setting up a fine-tune** —
+  configuring a repo whose training starts from a pretrained or foreign base model, where the base,
+  the frozen/trainable surface (LoRA rank, `target_modules`, `freeze_backbone`) and whether the code
+  actually honors them are all part of what Step 1 has to establish. Use for: "analyze training
+  code", "set up training", "configure training stage", "what does this training script log", "take
+  over this repo", "接手训练代码", "分析训练代码", "配置训练", "初始化train", "配一下微调",
+  "微调要怎么设". Not for running training (use train-run) or evaluation (use eval-init).
 ---
 
 # /train-init — Training Stage Initialization
@@ -124,6 +127,8 @@ Determine:
 - **distributed**: `single_gpu`, `ddp`, `fsdp`, `deepspeed_zero{1,2,3}`, `tensor_parallel`, or `""` if single-process
 - **Resources** → fill `config.json -> resources` (gpu_count, gpu_memory_gb, expected_duration_h)
 - **Artifacts** → pretrained backbone, tokenizer, base ckpt (for fine-tune / training extension)
+  - **If there is a base ckpt, this stage is a fine-tune, and that changes what `output.json` has to carry.** `/train-run` will measure that base on this run's data before launching, so work out *how* now, while the eval path is in front of you, and record it as `output.json -> baseline_measurement`: the command or API call, and the settings dict it must use. `null` is a legitimate answer with a reason — what is not legitimate is leaving it unasked, because at launch time the question surfaces as "skip it, we can measure later", and later never comes. Rationale and the two refusals it feeds: `lifecycle/references/run-mechanics.md` → "Baseline measurement (fine-tune only)".
+  - Fill the settings from what the **base checkpoint itself records**, not from the library's defaults — most frameworks bury evaluation-shaping flags (mask overlap, NMS iou, letterboxing, max detections) in defaults that differ from what the weights were trained under, and a measurement taken at the default produces a plausible number that is not comparable to anything published for those weights.
 - **Inputs** → train images/text + train labels + val images/text + val labels
 - **Ground truth pairing** → directory parallel / coco json / hf datasets / yolo txt
 - **Outputs** → checkpoints (with naming pattern), log files

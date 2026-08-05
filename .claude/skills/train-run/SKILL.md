@@ -4,10 +4,13 @@ description: >
   Use this skill whenever the user wants to execute a training run — launching, monitoring, or finalizing
   a model training job. Trigger for: starting a training run (debug or production mode), checking status
   of an in-progress training job, diagnosing a crashed run, finalizing a completed run (picking best
-  checkpoint, applying retention), forking a previous training with changed hyperparameters, or
-  continuing/resuming training from a prior checkpoint. Also trigger for Chinese requests like
-  "跑训练", "开训", "继续训", "训练崩了看一下", "训练完了". This is the execution skill — not for initial
-  schema setup (use train-init) or comparing runs (use train-compare, when available).
+  checkpoint, applying retention), forking a previous training with changed hyperparameters,
+  continuing/resuming training from a prior checkpoint, and **fine-tuning — launching a run whose
+  initial weights come from a pretrained or foreign base model (a Hugging Face id, a vendor
+  checkpoint, a colleague's `best.pt`), including LoRA / PEFT / adapter and frozen-backbone runs.**
+  Also trigger for Chinese requests like "跑训练", "开训", "继续训", "训练崩了看一下", "训练完了",
+  "微调一下", "在 XX 上微调", "拿这个权重接着训", "跑个 LoRA". This is the execution skill — not for
+  initial schema setup (use train-init) or comparing runs (use train-compare, when available).
 ---
 
 # /train-run — Run Training
@@ -36,13 +39,42 @@ If forking: load the base run's `config_snapshot.json`, `sources.json`, and `lin
 
 If skip: fresh run, `fork_of = null`.
 
-**Continuing training / preempt recovery / fine-tuning** is a common case but does NOT need a separate lineage field. Express it as fork + ckpt-as-init:
+**Continuing training / preempt recovery / fine-tuning from a run in this project** is a common case but does NOT need a separate lineage field. Express it as fork + ckpt-as-init:
 
 1. Fork the prior run (sets `fork_of = prior_run`, copies config)
 2. Set `runtime_params.resume_from` (or your code's equivalent) to point at `prior_run/last.pt` so weights load on launch. Confirm the key exists in `param_injection` with `overridable: true` — a resume flag the code ignores means training silently restarts from scratch, which looks identical to a successful resume until the loss curve gives it away hours later.
 3. Append `prior_run` to `lineage.parents` (since you now consume its ckpt — hard dependency)
 
 The reasoning ("why continue") goes in `description` / `hypothesis`, or in `decisions.jsonl` if running under `/train-tune`.
+
+### Fine-tuning from a base this project did not train
+
+A Hugging Face id, a vendor checkpoint, a colleague's `best.pt`. It runs through the identical launch path, which is exactly why this needs saying: **it does not record the same way, and both of the steps above break silently.**
+
+- `fork_of` is same-stage and carries **no I/O dependency** by definition (`lifecycle/references/run-mechanics.md` → "Lineage"). There is no prior run to fork, so it stays null and the "I extend prior training" fact has nowhere to live.
+- `lineage.parents` *is* the right slot — a fine-tune consumes the base's weights, a hard dependency — but its entry grammar is `<stage>/<run_id>`. **A foreign model is not a run, so it currently has no citable form** and ends up as a string inside `runtime_params`.
+
+Until `models/<id>@<release>` exists (`lifecycle/references/roadmap.md` → "the model identity layer"), **say the gap to the user instead of routing around it** — a missing record capability and a record that says `null` are two different facts, the same distinction the metric rules draw:
+
+> This base is not a run in this project, so MLClaw can record its *path* but not its *identity*. Three consequences, none of which raise on their own: nothing can later check the checkpoint is the artifact its publisher published; `retention.py` does not know anything depends on it, so a correct retention pass can orphan a LoRA/adapter output; and the base's published numbers are a `claim` measured on someone else's `scope`, so they are never this run's baseline.
+
+Then record it as far as the schema allows — base path plus any digest in `sources.json`, its origin in `description`, `parents` left honest — and **mark the gap at the field**. Never synthesize a run id to fill `parents`: a fabricated lineage edge is indistinguishable from a verified one forever after.
+
+### Measure the base before you launch — every fine-tune, no exceptions
+
+The section above ends by saying the base's published numbers "are never this run's baseline." This is what is. **Put the base through the same measurement, on this run's data, before launching**, and write `<RUN_DIR>/output/baseline_before.json`. At finalize, measure the child identically into `baseline_after.json`. Mechanism, file shape, and why *before* rather than at finalize: `lifecycle/references/run-mechanics.md` → "Baseline measurement (fine-tune only)".
+
+It is one val, and both inputs are already resolved — Step 1 just picked the base checkpoint and the data. Skipping it does not cost the run; it costs the only number the run produces that anyone can read, and it costs it permanently, because after the run nobody measures a model they are not shipping.
+
+```bash
+python <mlclaw_root>/lifecycle/scripts/train-run/baseline_delta.py check <RUN_DIR>
+```
+
+`check` refuses (exit 1) on a fine-tune with no before-measurement. That is the answer, not a script bug — pass it through. If the base genuinely cannot be measured (no eval path, base weights unloadable in this env), record why in `run.json -> baseline_delta.waived` and say it in the summary; the run then carries a stated gap instead of a metric with no scale.
+
+Then `compare` the two, and **do not route around its refusals**: it fails when the two measurements were not taken the same way, and separately when either departs from the settings the checkpoint's own recorded training args name. The second is the one that catches a library default standing in for this project's protocol — a class of bug where both numbers are real, the delta is honest, and every absolute figure has silently stopped being comparable to anything published.
+
+**LoRA / PEFT / frozen-backbone params get Step 1's `param_injection` check like anything else, and they are the worst case for skipping it.** A dropped `resume_from` at least bends the loss curve. A wrong `target_modules` does not crash, does not warn, and does not obviously change the curve — it trains a smaller parameter set to a worse optimum, and the recorded config claims otherwise.
 
 ## Resource Validation (step `resource_validation`)
 
