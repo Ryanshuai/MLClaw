@@ -17,6 +17,7 @@ makes it interpretable later, and a report that reads as an inventory.
 """
 import json
 import os
+import subprocess
 import sys
 import unittest
 from datetime import datetime, timedelta, timezone
@@ -2377,6 +2378,35 @@ class TheDeclaredBucketIsNotTheSweepableSurface(DiscoverCase):
         row = self.sources_s3()
         self.assertEqual(row["surface_by_state"]["access_denied"], ["b-denied"])
         self.assertTrue(row["usable"], "the credential works; one bucket refuses it")
+
+    def test_the_surface_reading_is_part_of_the_saved_record(self):
+        """A tracked leads.json beside an untracked surface.json is a findings
+        list whose SCOPE lives on one disk. `record_unsaved` has to catch it —
+        a handover is a clone, and the clone would carry the findings without
+        the coverage they were measured against."""
+        self.resources(aws={"access_key_id": "k", "secret_access_key": "s",
+                            "region": "us-east-1", "s3_bucket": "b-declared"})
+        self.record("s3://b/x", st="s3")
+        subprocess.run(["git", "init", "-q", "."], cwd=self.project,
+                       capture_output=True)
+        for cfg in (("user.email", "t@t"), ("user.name", "t"),
+                    ("commit.gpgsign", "false")):
+            subprocess.run(["git", "config", *cfg], cwd=self.project,
+                           capture_output=True)
+        subprocess.run(["git", "add", "discovery/leads.json"], cwd=self.project,
+                       capture_output=True)
+        subprocess.run(["git", "commit", "-qm", "leads only"], cwd=self.project,
+                       capture_output=True)
+        rc, out, err = run_script(SCRIPT, "report", "--project", self.project,
+                                  "--json")
+        self.assertEqual(rc, 0, err)
+        self.assertFalse(out["record_unsaved"], "leads.json is tracked")
+        self.write_surface({"b-declared": "listable", "b-two": "listable"})
+        rc, out, err = run_script(SCRIPT, "report", "--project", self.project,
+                                  "--json")
+        self.assertEqual(rc, 0, err)
+        self.assertTrue(out["record_unsaved"],
+                        "an untracked surface reading is an unsaved record")
 
     def test_surface_refuses_without_a_registry(self):
         rc, out, _ = run_script(SCRIPT, "surface", "--project", self.project)
