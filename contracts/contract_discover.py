@@ -2578,3 +2578,114 @@ class ThePathsOwnShapeIsEvidence(DiscoverCase):
         rc, out, _ = self.probe()
         self.assertEqual(json.loads(json.dumps(out))["counts"]["gone"], 0,
                          "a shape may never produce a `gone`")
+
+
+class AnEmptyWandbListingIsNotAnAbsence(DiscoverCase):
+    """CLAUDE.md -> "Never silently" (never report data you could not look at),
+    and `searches.md` -> "Probes, by `on` — and the fussiness is the point".
+
+    The comment this replaces claimed an entity with no projects is `gone` "on the
+    same bar as an empty S3 prefix: it answered, and there is nothing in it". The
+    two APIs behave oppositely, and it is measurable: `aws s3 ls` on a bucket that
+    does not exist ERRORS, while `wandb.Api().projects(<nonsense>)` returns `[]`.
+    On a live account a real entity gave 10 projects and
+    `definitely-no-such-entity-9f3a` gave 0 — no error either time.
+
+    So `[]` conflates "empty" with "no such thing" and cannot be `gone`. This is
+    the engine's own worst failure mode, committed by the engine, and it surfaced
+    the way it always will: a locator that did not parse came back `gone` about a
+    project holding 25 runs — one of them the deployed model's own training.
+
+    The locator half is the other lesson. The strip tolerated `wandb:ent/proj` but
+    not `tracking:wandb:ent/proj`, which is the form `report` RENDERS — so the
+    string a person copies out of the tool's own output was the one it could not
+    read, and the whole thing became the entity name.
+    """
+
+    def probe_tracking(self, path):
+        self.record(path, on="tracking:wandb", st="code", ev="a config")
+        return load_script(SCRIPT)
+
+    def test_every_prefix_the_tool_itself_renders_is_stripped(self):
+        d = load_script(SCRIPT)
+        seen = {}
+
+        def fake_entity(entity, where, budget_s):
+            seen["entity"] = entity
+            return "verified", "ok", ["p"], {}
+
+        d.probe_wandb_entity = fake_entity
+        for path in ("ent", "wandb:ent", "tracking:wandb:ent"):
+            seen.clear()
+            d.probe_tracking("tracking:wandb", path, 5.0)
+            self.assertEqual(seen.get("entity"), "ent", path)
+
+    def test_an_empty_entity_listing_is_unreachable_not_gone(self):
+        d = load_script(SCRIPT)
+        real = d.subprocess.run
+
+        class R:
+            returncode = 0
+            stdout = json.dumps({"entity": "e", "projects": []})
+            stderr = ""
+
+        d.subprocess.run = lambda *a, **k: R()
+        try:
+            status, detail, _s, extra = d.probe_wandb_entity("e", "a key", 5.0)
+        finally:
+            d.subprocess.run = real
+        self.assertEqual(status, "unreachable",
+                         "[] cannot distinguish an empty entity from no entity")
+        self.assertEqual(extra["blocker"], "tracking:wandb:empty_is_ambiguous")
+        self.assertIn("does not exist", detail)
+
+    def test_a_populated_entity_still_verifies(self):
+        """The fix must not make the working case unanswerable."""
+        d = load_script(SCRIPT)
+        real = d.subprocess.run
+
+        class R:
+            returncode = 0
+            stdout = json.dumps({"entity": "e", "projects": ["a", "b"]})
+            stderr = ""
+
+        d.subprocess.run = lambda *a, **k: R()
+        try:
+            status, _d, sample, _x = d.probe_wandb_entity("e", "a key", 5.0)
+        finally:
+            d.subprocess.run = real
+        self.assertEqual(status, "verified")
+        self.assertEqual(sample, ["a", "b"])
+
+    def test_an_empty_project_needs_a_second_signal_to_be_gone(self):
+        """`gone` is earned by the project appearing in the entity's own list,
+        not by the run list being empty. Same both-signals discipline as the ssh
+        sentinel and S3's `Total Objects: 0`."""
+        d = load_script(SCRIPT)
+        real = d.subprocess.run
+
+        def run_with(payload):
+            class R:
+                returncode = 0
+                stdout = json.dumps(payload)
+                stderr = ""
+            return lambda *a, **k: R()
+
+        cases = {
+            True: ("gone", "the project exists"),
+            False: ("gone", "absent from the entity"),
+            None: ("unreachable", "could not be read"),
+        }
+        for exists, (want_status, fragment) in cases.items():
+            d.subprocess.run = run_with({"n": 0, "names": [],
+                                         "project_exists": exists})
+            try:
+                status, detail, _s, extra = d.probe_tracking(
+                    "tracking:wandb", "ent/proj", 5.0)
+            finally:
+                d.subprocess.run = real
+            self.assertEqual(status, want_status, f"project_exists={exists}")
+            self.assertIn(fragment, detail)
+            if want_status == "unreachable":
+                self.assertEqual(extra["blocker"],
+                                 "tracking:wandb:empty_is_ambiguous")
