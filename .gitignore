@@ -13,3 +13,6 @@ __pycache__/
 # is the point, it is what makes the env reconstructible from the repo. What must
 # not be committed is the ~200-directory materialised env under it.
 .pixi/
+
+# agent-refactor 工作目录（脚本产物 + state.json）
+.agent-refactor/
