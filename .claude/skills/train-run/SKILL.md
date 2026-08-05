@@ -62,17 +62,22 @@ Then record it as far as the schema allows — base path plus any digest in `sou
 
 ### Measure the base before you launch — every fine-tune, no exceptions
 
-The section above ends by saying the base's published numbers "are never this run's baseline." This is what is. **Put the base through the same measurement, on this run's data, before launching**, and write `<RUN_DIR>/output/baseline_before.json`. At finalize, measure the child identically into `baseline_after.json`. Mechanism, file shape, and why *before* rather than at finalize: `lifecycle/references/run-mechanics.md` → "Baseline measurement (fine-tune only)".
+The section above ends by saying the base's published numbers "are never this run's baseline." This is what is. **Before launching, run `/eval-run` against the base checkpoint** on this run's data, and cite it in `run.json -> baseline_delta.before`. At finalize, `/eval-run` the child the same way into `baseline_delta.after`. Rationale, and why *before* rather than at finalize: `lifecycle/references/run-mechanics.md` → "Baseline measurement (fine-tune only)".
 
-It is one val, and both inputs are already resolved — Step 1 just picked the base checkpoint and the data. Skipping it does not cost the run; it costs the only number the run produces that anyone can read, and it costs it permanently, because after the run nobody measures a model they are not shipping.
+It is one eval, and both inputs are already resolved — Step 1 just picked the base checkpoint and the data. Skipping it does not cost the run; it costs the only number the run produces that anyone can read, and it costs it permanently, because after the run nobody measures a model they are not shipping.
+
+**This means a fine-tune requires an evaluation stage.** If there is none, say so and route to `/eval-init` — do not measure it here by hand. `/train-run` growing a private evaluator is the mistake `/eval-init` refuses to make in the other direction, and it would immediately disagree with the real one about preprocessing, thresholds and scope.
 
 ```bash
 python <mlclaw_root>/lifecycle/scripts/train-run/baseline_delta.py check <RUN_DIR>
 ```
 
-`check` refuses (exit 1) on a fine-tune with no before-measurement. That is the answer, not a script bug — pass it through. If the base genuinely cannot be measured (no eval path, base weights unloadable in this env), record why in `run.json -> baseline_delta.waived` and say it in the summary; the run then carries a stated gap instead of a metric with no scale.
+`check` refuses (exit 1) on a fine-tune with no before-measurement. That is the answer, not a script bug — pass it through. If the base genuinely cannot be measured, record why in `run.json -> baseline_delta.waived` and say it in the summary; the run then carries a stated gap instead of a metric with no scale.
 
-Then `compare` the two, and **do not route around its refusals**: it fails when the two measurements were not taken the same way, and separately when either departs from the settings the checkpoint's own recorded training args name. The second is the one that catches a library default standing in for this project's protocol — a class of bug where both numbers are real, the delta is honest, and every absolute figure has silently stopped being comparable to anything published.
+Then two things, both of them, on the pair of eval runs:
+
+- **`compare_baseline.py`** for the delta — it owns direction and comparability.
+- **`baseline_delta.py protocol`** for the part that check cannot see: were the two measurements taken the same way, and did each honour the settings its own weights were trained under. **Do not route around its refusals.** It catches a library default standing in for this project's protocol — where both numbers are real, mode and scope are both fine so `compare_baseline.py` passes, the delta is honest, and every absolute figure has silently stopped being comparable to anything published.
 
 **LoRA / PEFT / frozen-backbone params get Step 1's `param_injection` check like anything else, and they are the worst case for skipping it.** A dropped `resume_from` at least bends the loss curve. A wrong `target_modules` does not crash, does not warn, and does not obviously change the curve — it trains a smaller parameter set to a worse optimum, and the recorded config claims otherwise.
 

@@ -65,7 +65,7 @@ Every skill knows its position in this graph. Two types of edges:
 | `/eval-report` | eval-run completed | (done) |
 | `/eval-triage` | eval-run completed **and** `output.json -> per_sample.path` non-null | whatever the piles named: `/data-label` (`label_wrong`), the data line (`sample_hard`), `/train-init` or a `/train-run` fork (`model_wrong`). Never `/eval-run` "to try again" |
 | `/train-init` | project.json, code available. Calls `/discover` for the data half of Step 0 | `/train-run` |
-| `/train-run` | train-init done | `/eval-run`, `/train-tune` |
+| `/train-run` | train-init done. **A fine-tune also requires an evaluation stage** — the base must be measured on this run's data before launch, and that is `/eval-run`'s to perform, not this skill's. No eval stage → route to `/eval-init`, never measure it by hand here | `/eval-run`, `/train-tune` |
 | `/train-tune` | train-init done, ≥1 prior train-run completed | `/train-tune-report` (auto at close) |
 | `/train-tune-report` | a tune session with ≥1 run | (done) |
 | `/refactor-init` | project.json | `/refactor-run` |
