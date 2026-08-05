@@ -163,30 +163,37 @@ Stage-specific extras (production mode launching, monitoring, ETA computation, f
 
 **A fine-tune exists because the base was not good enough on this data, so the only number it produces that can be read is the delta against that base.** The child's absolute score has no scale on its own: `box mAP 0.914` is a fact about nothing until `0.451` sits next to it. And the base's *published* number cannot supply that scale — it is a `claim` measured on somebody else's `scope`, which the fine-tune section of `/train-run` SKILL.md already says. That leaves exactly one baseline worth the name: **the base, put through the same measurement, on this run's data, with the same settings.**
 
-It costs one val, and both inputs are already in hand — you cannot fine-tune without the base weights and you cannot train without the data. **Take it before launch, not at finalize**, for four reasons that are all the same reason:
+It costs one eval, and both inputs are already in hand — you cannot fine-tune without the base weights and you cannot train without the data. **Take it before launch, not at finalize**, for four reasons that are all the same reason:
 
 - after the run, measuring the base is pure expenditure against a model nobody is shipping, so it does not happen;
 - by the time anyone wants it, the data, the weights or the env has moved, and then it cannot happen;
 - it exercises the exact path that will measure the child, on known-good weights, before hours are spent — a smoke test that costs nothing extra;
 - if the run crashes, the half you already paid for survives.
 
-`lifecycle/scripts/train-run/baseline_delta.py`:
+**Both measurements are `/eval-run` runs, not something the training skill performs.** Measuring is already a skill with a configured entry command, ground truth, and metric extraction; a second evaluator living inside `/train-run` is the mistake `/eval-init` refuses to make in the other direction ("two implementations of *where is the data* is how they start disagreeing"). Being runs is also what makes them worth having: each carries a `run_id`, a `scope`, a code snapshot and an extracted metric, where a pair of loose JSON files would carry a schema invented on the spot. The training run cites them:
 
-```bash
-# fine-tune with no base measurement (and no waiver) -> exit 1
-python .../baseline_delta.py check <RUN_DIR>
-
-# two measurements, or a refusal
-python .../baseline_delta.py compare <RUN_DIR>/output/baseline_before.json \
-                                     <RUN_DIR>/output/baseline_after.json \
-                                     --direction <stage>/output.json
+```json
+"baseline_delta": {"before": "evaluation/run_...", "after": "evaluation/run_...",
+                   "waived": null}
 ```
 
-**`compare` guards the defect that matters more than the missing measurement**, which is two measurements that both exist, both look fine, and were not taken the same way. It refuses on any differing settings key, and — the free half — on any key where a measurement departs from what the checkpoint's *own recorded training args* say. That second check needs nothing fetched or remembered: the value is inside the weights.
+This gives `/train-run` a real dependency on an **evaluation stage existing** for the fine-tune case. That is a cost, and the honest handling is to say it and route to `/eval-init` — not to grow a private evaluator so the dependency disappears. A fine-tune whose worth cannot be measured is a fact about the project, and the block is the finding.
 
-Found live, on a yolo26 segmentation fine-tune: validating at the library's `overlap_mask=True` instead of the `False` this model family trains under moved box mAP50-95 from `0.9142` to `0.9027` and wall from `0.9672` to `0.9445`. Same weights, same images, same metric name, nothing raised. Because both sides carried the same wrong default, **the delta stayed honest while every absolute number quietly stopped being comparable to any published figure** — the failure mode a delta-only check cannot see.
+The **diff** between the two is `eval-run/compare_baseline.py` — it already reads `direction` from config instead of guessing from a metric's name, and already grades comparability into hard versus unverifiable blockers. `baseline_delta.py` holds only what a fine-tune knows and neither of those can:
 
-Both refusals take a per-key `--waive-setting KEY='<why>'`, and the reason lands in the record. `check`'s waiver is `run.json -> baseline_delta.waived`. A metric measured on one side and not the other is reported as absent, never as unchanged, and a metric with no declared `direction` gets `improved: null` rather than a guess from its name.
+```bash
+# a fine-tune whose base was never measured (and not waived) -> exit 1
+python .../baseline_delta.py check <TRAIN_RUN_DIR>
+
+# were the two measurements taken the same way, each under its own weights' protocol?
+python .../baseline_delta.py protocol <before eval run> <after eval run>
+```
+
+**`protocol` guards the defect that matters more than the missing measurement**: two measurements that both exist, both look fine, and were not taken the same way. It refuses on any differing settings key, and — the free half, since the value sits inside the weights — on any key where a measurement departs from the checkpoint's *own recorded training args*.
+
+Found live, on a yolo26 segmentation fine-tune: validating at the library's `overlap_mask=True` instead of the `False` this model family trains under moved box mAP50-95 from `0.9142` to `0.9027` and wall from `0.9672` to `0.9445`. **`compare_baseline.py` passes this, correctly** — same mode, same scope, nothing about the *scale* is wrong, which is the only thing that check is about. And because both sides carried the same default, the delta stayed honest while every absolute number quietly stopped being comparable to any figure published for those weights.
+
+Both refusals take a per-key `--waive-setting KEY='<why>'`; `check`'s waiver is `run.json -> baseline_delta.waived`. Two absences are reported rather than passed: a measurement that recorded no settings **fails** (an unrecorded protocol is not a matching one, the same rule the repro axes draw between `intact` and `unverifiable`), and a checkpoint that recorded no training args **warns** — absent evidence, not agreement.
 
 ### Metric stream
 
