@@ -1482,12 +1482,26 @@ WANDB_LISTING = (
     "    print(json.dumps({'e':'no_pkg','m':str(e)})); sys.exit(0)\n"
     "try:\n"
     "    api = wandb.Api(timeout=20)\n"
-    "    rs = api.runs(%r, per_page=50)\n"
+    "    loc = %r\n"
+    "    rs = api.runs(loc, per_page=50)\n"
     "    names = []\n"
     "    for i, r in enumerate(rs):\n"
     "        if i >= 20: break\n"
     "        names.append(f'{r.name} [{r.state}]')\n"
-    "    print(json.dumps({'n': len(rs), 'names': names}))\n"
+    # An empty run list does not distinguish "this project is empty" from "there
+    # is no such project" -- the API returns [] for both. So when it comes back
+    # empty, ask a second question whose answer differs between those two cases:
+    # is the project among the entity's projects? Same both-signals discipline
+    # the ssh sentinel and S3's `Total Objects: 0` already use, and without it
+    # `gone` would be guessed rather than earned.
+    "    ent = loc.split('/')[0]\n"
+    "    exists = None\n"
+    "    if len(rs) == 0:\n"
+    "        try:\n"
+    "            exists = loc.split('/')[1] in [p.name for p in api.projects(ent)]\n"
+    "        except Exception:\n"
+    "            exists = None\n"
+    "    print(json.dumps({'n': len(rs), 'names': names, 'project_exists': exists}))\n"
     "except Exception as e:\n"
     "    print(json.dumps({'e': type(e).__name__, 'm': str(e)[:300]}))\n")
 
@@ -1927,8 +1941,20 @@ def probe_wandb_entity(entity, where, budget_s):
     """What can this credential see? Returns the project list as the sample.
 
     `verified` when the entity resolves and holds projects — the RECORD exists.
-    An entity with no projects is `gone` on the same bar as an empty S3 prefix:
-    it answered, and there is nothing in it.
+
+    **An empty project list is never `gone` here**, and the reasoning that said it
+    was is a fact error worth keeping written down. It claimed parity with an empty
+    S3 prefix — "it answered, and there is nothing in it" — but the two APIs behave
+    oppositely: `aws s3 ls` on a bucket that does not exist ERRORS, while
+    `wandb.Api().projects(<nonsense>)` returns `[]` with no error. Measured, on a
+    live account: a real entity gave 10 projects, `definitely-no-such-entity-9f3a`
+    gave 0, and so did a malformed locator.
+
+    So an empty list conflates "this entity is empty" with "there is no such
+    entity" and cannot tell them apart. Calling that `gone` is the false `gone`
+    this whole engine exists to prevent, produced by the engine — and it was found
+    exactly that way: a mistyped locator came back `gone` about a project holding
+    25 runs, one of them the deployed model's own training.
     """
     try:
         p = subprocess.run(
@@ -1955,8 +1981,14 @@ def probe_wandb_entity(entity, where, budget_s):
     ps = got.get("projects") or []
     ent = got.get("entity")
     if not ps:
-        return ("gone", f"entity {ent!r} answered and holds no projects "
-                f"(credential from {where})", None, {"blocker": None})
+        return ("unreachable",
+                f"entity {ent!r} returned no projects -- and for wandb that does "
+                f"NOT mean empty. The API returns [] both for an entity with no "
+                f"projects and for an entity that does not exist, so this reading "
+                f"cannot tell them apart. Check the entity name (a locator "
+                f"carrying a `tracking:wandb:` prefix lands here) before treating "
+                f"anything as absent [credential: {where}]", None,
+                {"blocker": "tracking:wandb:empty_is_ambiguous"})
     return ("verified",
             f"entity {ent!r} holds {len(ps)} project(s), reachable with the "
             f"credential from {where}. Record each project you care about as its "
@@ -2042,10 +2074,16 @@ def probe_tracking(on, path, budget_s):
                 f"and readable by hand. Do NOT read this as absent", None,
                 {"blocker": f"tracking:{backend}:unknown"})
 
-    # Tolerate `wandb:entity/project` as well as `entity/project`: the locator is
-    # usually copied out of a config where it carries the prefix, and otherwise
-    # the report renders `tracking:wandb:wandb:ent/proj`.
-    loc = path.split(":", 1)[1] if path.lower().startswith(backend + ":") else path
+    # Tolerate every prefix a locator is copied WITH. `wandb:ent/proj` comes out
+    # of configs; `tracking:wandb:ent/proj` is what `report` itself renders, so it
+    # is the form a person pastes back — and leaving it unstripped made the whole
+    # string the entity name, which the wandb API answers with `[]` rather than an
+    # error. That is how a project holding 25 runs was reported `gone`.
+    loc = path
+    for pfx in (f"tracking:{backend}:", f"{backend}:"):
+        if loc.lower().startswith(pfx):
+            loc = loc[len(pfx):]
+            break
 
     if spec["family"] == "disk":
         return probe_tracking_disk(backend, spec, loc, budget_s)
@@ -2113,8 +2151,21 @@ def probe_tracking(on, path, budget_s):
 
     n = got.get("n")
     if not n:
-        return ("gone", f"the project listed successfully and holds no runs "
-                f"(credential from {where})", None, {"blocker": None})
+        # Earned only by the second signal. `[]` alone is the same ambiguity the
+        # entity probe hits; the project's presence in the entity's project list
+        # is what separates "empty" from "no such project".
+        if got.get("project_exists") is True:
+            return ("gone", f"the project exists in {loc.split('/')[0]!r} and holds "
+                    f"no runs (credential from {where})", None, {"blocker": None})
+        if got.get("project_exists") is False:
+            return ("gone", f"no project {loc!r} -- it is absent from the entity's "
+                    f"own project list (credential from {where})", None,
+                    {"blocker": None})
+        return ("unreachable",
+                f"{loc!r} returned no runs, and the entity's project list could "
+                f"not be read to say whether the project exists at all. An empty "
+                f"run list does not distinguish the two [credential: {where}]",
+                None, {"blocker": "tracking:wandb:empty_is_ambiguous"})
     return ("verified",
             f"{n} run(s), reachable with the credential from {where}. This "
             f"verifies the RECORD exists, not any number in it — a run summary "

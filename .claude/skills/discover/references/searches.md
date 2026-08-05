@@ -136,6 +136,26 @@ A handover page is the canonical instance — including the case where the page 
 
 `/ask-human`, and their answer is a `claim` until something else agrees. `outsourcing` parties are never probed: a vendor may hold the only copy of a batch, and they are a source of **answers**, not listings.
 
+### An empty listing is not an absence, and one API taught this the hard way
+
+**`gone` needs a positive signal, never just an empty result.** Whether an empty answer is even *capable* of meaning absence is a property of the specific API, and the two behave oppositely:
+
+| | Nonexistent target |
+|---|---|
+| `aws s3 ls s3://no-such-bucket/` | **errors** — so `Total Objects: 0` genuinely means empty |
+| `wandb.Api().projects("no-such-entity")` | **returns `[]`, no error** — so `[]` means nothing at all |
+
+Measured on a live account: a real entity gave 10 projects, `definitely-no-such-entity-9f3a` gave 0, no error either time.
+
+So a wandb empty listing is `unreachable` with blocker `tracking:wandb:empty_is_ambiguous`, never `gone`. At project level `gone` **is** reachable, but only via a second signal — whether the project appears in its entity's own project list — the same both-signals discipline the ssh sentinel and S3's `Total Objects: 0` already use.
+
+**This was found by the engine doing it.** A locator was recorded as `tracking:wandb:yolo26-unload`; the prefix strip handled `wandb:…` but not `tracking:wandb:…` — *the form `report` itself renders* — so the whole string became the entity name, came back empty, and was written down as `gone` about a project holding **25 runs, one of them the deployed model's own training**. The string a person copies out of the tool's own output was the one string it could not read.
+
+Two rules fall out, and neither is specific to wandb:
+
+- **Accept every prefix the tool emits.** If `report` prints it, `probe` must parse it.
+- **Before writing `gone`, ask what an empty answer from THIS api can mean.** If it cannot distinguish empty from absent, no amount of it adds up to a conclusion.
+
 ## The shape of a path is evidence, and it changes the fix
 
 Before dispatching anything at an absolute path, read the path. `record` stores what its shape implies as `path_shape`, and `probe` uses it to say a **better blocker** than "find out whose disk this was".
