@@ -136,6 +136,27 @@ A handover page is the canonical instance — including the case where the page 
 
 `/ask-human`, and their answer is a `claim` until something else agrees. `outsourcing` parties are never probed: a vendor may hold the only copy of a batch, and they are a source of **answers**, not listings.
 
+## The shape of a path is evidence, and it changes the fix
+
+Before dispatching anything at an absolute path, read the path. `record` stores what its shape implies as `path_shape`, and `probe` uses it to say a **better blocker** than "find out whose disk this was".
+
+| Prefix | Environment | Why the obvious next step is wrong |
+|---|---|---|
+| `/workspace/<name>/…` | **container** | Docker / devcontainer convention. **Naming the host does not resolve it** — the host filesystem has no such path unless something bind-mounted it. Somebody sent to ssh in and `ls` looks where the path was never at and comes back with a `gone` that means nothing |
+| `/opt/ml/{input,model,code}/…` | SageMaker | the container is gone; the **S3 channels it was configured from are not** |
+| `/content/…` | Colab | ephemeral VM — but `gone` about the VM says nothing about the Drive mount it copied from |
+| `/kaggle/{input,working}/…` | Kaggle | `input` is an attachment with a permanent slug; `working` is not |
+| `/tmp/…` | ephemeral | finding the host will usually confirm a loss rather than recover anything |
+
+**`/workspace/<name>` also hands you a repo name, and that is the whole point.** `<name>` is almost always the repo mounted there — a `code` lead of a completely different family, needing **none** of the access blocking the original. `probe` emits it as `open_this_instead`.
+
+On the run this was built from, that one inference produced: the repo, the training entry point whose **34 of 35 recorded hyperparameters are identical to the checkpoint's**, the env setup script, and the **tracking project and run name** the training wrote to. All from a string the register had already stored and never read.
+
+Two limits, and both are load-bearing:
+
+- **A shape is not a status.** It is read off a string and can be wrong — somebody's host really may have a `/workspace`. It may redirect the fix; it may never decide whether the data is there, and a probe always outranks it.
+- **No shape is the normal case and must not be dressed up.** `/data/captures/…` gets the generic `host_unidentified`, because inventing an environment for it would be a confident wrong answer — strictly worse than an honest generic one.
+
 ## Probes, by `on` — and the fussiness is the point
 
 A probe's job is to reach one of four verdicts honestly. The failure that matters is a false `gone`: it sends somebody chasing data that is fine, and buries the one real loss in the noise.

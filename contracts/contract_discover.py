@@ -27,6 +27,12 @@ from helpers import TempDirCase, load_script, run_script
 SCRIPT = "discover/discover.py"
 
 
+def path_shape_of(path):
+    """The shape reader, in-process: it is a pure function of a string and
+    routing it through the CLI would need a lead per case."""
+    return load_script(SCRIPT).path_shape(path)
+
+
 class DiscoverCase(TempDirCase):
     def setUp(self):
         super().setUp()
@@ -1496,9 +1502,16 @@ class TheCheckpointIsASourceNotAFileWithASize(DiscoverCase):
         for l in hostless:
             self.assertEqual(l["status"], "unreachable",
                              "never `gone` — nothing was looked at")
-            self.assertEqual(l["probes"][-1]["blocker"], "host_unidentified",
+            blocker = l["probes"][-1]["blocker"]
+            self.assertNotIn("credential", blocker,
                              "the blocker must name identifying the machine, not "
                              "a credential — a key would not have helped")
+            # Which of the two it is depends on the path's shape, and the shape
+            # is the more useful answer where it applies: for a container path,
+            # naming the host still does not resolve it. Both are the same
+            # category of ask and neither is a key.
+            self.assertIn(blocker, ("host_unidentified",
+                                    "container_path_not_host_path"), blocker)
 
     def test_an_unreadable_shape_refuses_rather_than_guessing(self):
         """Exit 1, not 2. The script worked and the answer is no: the file is
@@ -2480,3 +2493,88 @@ class TheFrameworkBlindSpotIsCheckable(DiscoverCase):
                       "unverifiable"):
             self.assertIn(state, fi.STATE_MEANS)
             self.assertTrue(fi.STATE_MEANS[state].strip())
+
+
+class ThePathsOwnShapeIsEvidence(DiscoverCase):
+    """`searches.md` -> "Probes, by `on` — and the fussiness is the point", and
+    CLAUDE.md -> "Never silently" (never report data you could not look at).
+
+    `host_unknown` on `/workspace/acme-ai/src/dataset/...` produced one worklist
+    item: find out whose disk this was. Both halves of that are wrong, and a person
+    who has seen a Dockerfile sees it instantly:
+
+      * `/workspace` is the container convention. Naming the host does NOT resolve
+        the path — the host filesystem has no such path. Somebody sent to ssh in
+        and `ls` looks where the path was never at and comes back with a `gone`
+        that means nothing, which is the false-`gone` this engine is built against,
+        arrived at by following the engine's own advice.
+      * the segment after the prefix is almost always a REPO NAME — a lead of a
+        different family, needing none of the access that is blocking this one.
+
+    On the run this was built from, the second inference produced the training
+    script (34 of 35 recorded hyperparameters identical to the checkpoint's) and
+    the tracking project and run name. From a string the register had already
+    stored and never read.
+
+    A shape is not a status and never overrides a probe. It changes the FIX.
+    """
+
+    def test_a_container_path_says_the_host_is_not_the_answer(self):
+        self.record("/workspace/acme-ai/src/dataset/d.yaml", on="host_unknown",
+                    st="checkpoint", ev="train_args.data")
+        lead = self.leads()[0]
+        self.assertEqual(lead["path_shape"]["environment"], "container")
+        self.assertIn("INSIDE a container", lead["path_shape"]["why"])
+        self.assertIn("bind mount", lead["path_shape"]["resolved_by"])
+
+    def test_the_repo_name_becomes_a_lead_worth_opening(self):
+        """The payoff, and it needs none of the blocked access."""
+        self.record("/workspace/acme-ai/src/x.pt", on="host_unknown",
+                    st="checkpoint", ev="train_args.model")
+        shape = self.leads()[0]["path_shape"]
+        self.assertEqual(shape["likely_repo"], "acme-ai")
+        self.assertIn("REPO NAME", shape["derived_lead"])
+
+    def test_the_probe_reports_the_better_blocker(self):
+        """The worklist groups on the blocker, so this is the line that decides
+        what somebody actually goes and does."""
+        self.record("/workspace/acme-ai/src/x.pt", on="host_unknown",
+                    st="checkpoint", ev="train_args.model")
+        rc, out, err = self.probe()
+        self.assertEqual(rc, 0, err)
+        pr = self.leads()[0]["probes"][-1]
+        self.assertEqual(pr["blocker"], "container_path_not_host_path",
+                         "the generic blocker sends somebody to the wrong place")
+        self.assertIn("REPO NAME", pr["open_this_instead"])
+
+    def test_a_plain_host_path_keeps_the_generic_blocker(self):
+        """No shape is the normal case and must not be dressed up. Inventing an
+        environment for `/data/...` would be a confident wrong answer, which is
+        strictly worse than the honest generic one."""
+        self.record("/data/captures/2026/x.tar", on="host_unknown",
+                    st="checkpoint", ev="train_args.data")
+        self.assertIsNone(self.leads()[0]["path_shape"])
+        rc, out, err = self.probe()
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(self.leads()[0]["probes"][-1]["blocker"],
+                         "host_unidentified")
+
+    def test_ephemeral_and_managed_layouts_are_named(self):
+        """Each says something different about what survived, and collapsing them
+        loses the recovery route: SageMaker's container is gone but its S3
+        channels are not, and `/tmp` usually means the loss is already real."""
+        for path, env in (("/opt/ml/input/data/train", "sagemaker"),
+                          ("/content/drive/x", "colab"),
+                          ("/kaggle/input/ds/x", "kaggle"),
+                          ("/tmp/scratch/x", "ephemeral")):
+            self.assertEqual(path_shape_of(path)["environment"], env, path)
+
+    def test_a_shape_is_never_a_status(self):
+        """It is read off a string and can be wrong — somebody's host really may
+        have a `/workspace`. So it may inform the fix and must never decide
+        whether the data is there."""
+        self.record("/workspace/repo/x", on="host_unknown", st="doc", ev="a page")
+        self.assertEqual(self.leads()[0]["status"], "claim")
+        rc, out, _ = self.probe()
+        self.assertEqual(json.loads(json.dumps(out))["counts"]["gone"], 0,
+                         "a shape may never produce a `gone`")
