@@ -79,13 +79,6 @@ class ReproCase(TempDirCase):
                            capture_output=True, text=True)
         return p.stdout.strip()
 
-    def write(self, relpath, content):
-        full = self.path(relpath)
-        os.makedirs(os.path.dirname(full), exist_ok=True)
-        with open(full, "w") as fh:
-            fh.write(content)
-        return full
-
     def snapshot(self, retired=False, retired_at="2026-07-29T09:00:00+00:00"):
         rec = {"snapshot_id": "0728", "cite_as": "datasets/coco@0728",
                "count": 100, "frozen_at": "2026-07-28T10:00:00+00:00",
