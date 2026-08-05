@@ -1238,3 +1238,92 @@ class AnAxisMayNotAssertACauseTheRecordDoesNotState(ReproCase):
         for warnings in ([], ["anything at all"], ["a", "b"]):
             self.assertEqual(self.unreproducible_run(warnings)["verdict"],
                              "unverifiable")
+
+
+class ComparingAnOrderStatisticToItsOwnDrawsAnswersNothing(ReproCase):
+    """run-mechanics.md -> "Record integrity", and `.claude/skills/repro/references/
+    verdicts.md` -> "A band has a source".
+
+    A best-checkpoint save is the MAX of a converged tail. Testing that max against
+    the range of the very draws it was taken from is comparing an order statistic to
+    individuals: it sits at or above the top BY CONSTRUCTION, so `outside` carries no
+    information at all. Found live — a faithful 140-epoch reproduction whose tail mean
+    matched the target's to four decimals came back `inconclusive` because its
+    best-pick exceeded the target's best-pick by 0.0013.
+
+    The failure is subtle in the way that matters: the verdict was CONSERVATIVE, so
+    nothing looked broken. A too-cautious answer produced by a mis-posed question is
+    still a wrong answer, and it costs 6.5 GPU-hours per extra trial to act on.
+
+    So the trial's tail may be supplied and the comparison made like for like. This
+    is not an escape hatch: the tail must be SUPPLIED (never inferred), both
+    distributions are recorded side by side, and the one-directional rule is
+    untouched — outside a lower-bound band still cannot mean `diverged`.
+    """
+
+    TARGET_TAIL = [48.40, 48.45, 48.52, 48.47, 48.55, 48.44, 48.50]   # max 48.55
+
+    def session_with_trial(self, trial_value):
+        code, out, err = self.open_session()
+        self.assertEqual(code, 0, f"{out} {err}")
+        sid = out["session_id"]
+        c, o, e = self.repro("trial", "--project", self.project, "--session", sid,
+                             "--run", self.trial_run("run_B0", trial_value))
+        self.assertEqual(c, 0, f"{o} {e}")
+        return sid
+
+    def band(self, sid, *extra):
+        return self.repro("band", "--project", self.project, "--session", sid,
+                          "--from-history", json.dumps(self.TARGET_TAIL), *extra)
+
+    def test_a_max_against_its_own_range_is_the_mis_posed_question(self):
+        """Kept as the baseline the fix is measured against: without the trial's
+        tail, a best-pick above the target's best-pick reads `inconclusive`."""
+        sid = self.session_with_trial(48.61)
+        code, out, err = self.band(sid)
+        self.assertEqual(code, 0, f"{out} {err}")
+        self.assertEqual(out["metric_verdict"], "inconclusive")
+        self.assertEqual(out["band"]["tested"], "trial")
+
+    def test_like_for_like_tests_the_trial_tail_mean(self):
+        sid = self.session_with_trial(48.61)
+        trial_tail = [48.38, 48.44, 48.51, 48.46, 48.61, 48.42, 48.49]  # mean ~48.473
+        code, out, err = self.band(sid, "--trial-history", json.dumps(trial_tail),
+                                   "--trial-history-what", "epochs 94-100")
+        self.assertEqual(code, 0, f"{out} {err}")
+        self.assertEqual(out["band"]["tested"], "trial_tail_mean")
+        self.assertEqual(out["metric_verdict"], "reproduced")
+        self.assertIn("trial tail mean", out["why"])
+
+    def test_both_readings_are_recorded_never_just_the_flattering_one(self):
+        """The extreme-vs-extreme delta is symmetric and fair on its own terms; it
+        is simply not what a range can adjudicate. Dropping it would make this a
+        way to launder a worse number."""
+        sid = self.session_with_trial(48.61)
+        trial_tail = [48.38, 48.44, 48.51, 48.46, 48.61, 48.42, 48.49]
+        _, out, _ = self.band(sid, "--trial-history", json.dumps(trial_tail))
+        both = out["band"]["both_readings"]
+        self.assertIn("like_for_like", both)
+        self.assertIn("extreme_vs_extreme", both)
+        self.assertAlmostEqual(both["extreme_vs_extreme"]["trial"], 48.61, places=6)
+        self.assertAlmostEqual(both["extreme_vs_extreme"]["target"], 48.5, places=6)
+        self.assertEqual(out["band"]["trial_history"]["n"], len(trial_tail))
+
+    def test_it_cannot_turn_a_real_divergence_into_a_pass(self):
+        """A trial whose whole tail sits far below the target's stays out, and a
+        lower-bound band still refuses to call that `diverged`."""
+        sid = self.session_with_trial(40.0)
+        far = [39.8, 39.9, 40.0, 39.85, 39.95, 39.9, 40.05]
+        _, out, _ = self.band(sid, "--trial-history", json.dumps(far))
+        self.assertEqual(out["metric_verdict"], "inconclusive",
+                         "outside a lower bound is never `diverged` -- unchanged")
+        self.assertFalse(out["band"]["can_refute"])
+
+    def test_the_trial_tail_must_be_supplied_not_inferred(self):
+        sid = self.session_with_trial(48.61)
+        code, out, _ = self.repro("band", "--project", self.project, "--session", sid,
+                                  "--trial-history", json.dumps([1, 2, 3, 4, 5]))
+        self.assertEqual(code, 2, "a trial tail with no target tail bands nothing")
+        code, out, _ = self.band(sid, "--trial-history", json.dumps([48.4, 48.5]))
+        self.assertEqual(code, 1)
+        self.assertIn("not a distribution", json.dumps(out))
