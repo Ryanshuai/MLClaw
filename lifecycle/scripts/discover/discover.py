@@ -2969,6 +2969,14 @@ def cmd_save(a) -> None:
     brief = os.path.join(project, "discovery", BRIEF)
     if os.path.exists(brief):
         paths.append(brief)
+    # The surface reading goes with them. It is what says how much of the world the
+    # register covers, so a committed leads.json beside an untracked surface.json is
+    # a findings list whose scope lives on one disk — the same defect `record_unsaved`
+    # warns about, one file over, and the one that makes a partial sweep read as
+    # complete. A clone or a `git clean` takes it, and a handover is a clone.
+    surf = surface_path(project)
+    if os.path.exists(surf):
+        paths.append(surf)
     report = git_save(project, paths, a.message or save_message(rec))
     emit({"project": project, "record": path, **report,
           "note": None if report["committed"] else report["why"]})
@@ -3016,7 +3024,12 @@ def cmd_report(a) -> None:
 
     measured = [l for l in leads if l["status"] == "verified"
                 and l.get("bytes") is not None]
-    unsaved = not git_tracked(project, leads_path(project))
+    # The surface reading counts as part of the record. A tracked leads.json beside
+    # an untracked surface.json is a findings list whose SCOPE exists on one disk,
+    # which is how a 5%-coverage sweep survives a handover reading as complete.
+    unsaved = not git_tracked(project, leads_path(project)) or (
+        os.path.exists(surface_path(project))
+        and not git_tracked(project, surface_path(project)))
     if not a.json:
         print(table(leads, a.recheck_days, unsaved))
         return
