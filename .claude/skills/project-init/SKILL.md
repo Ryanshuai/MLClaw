@@ -65,6 +65,5 @@ Code modifications during runs stay in project git (for github/server) or are ca
 
 ## After creation
 
-1. The chosen workspace was already upserted in step 2d — `last_used` is fresh and `n_projects` is now incremented to include this new project. If it wasn't yet upserted (unusual — only when the script was unavailable and you used the bootstrap fallback path), run `python lifecycle/scripts/shared/workspaces.py upsert <workspace>` now.
-2. Tell user: Project created at `{root}`.
-3. **Downstream**: offer `/resources` and available `/{stage}-init` skills for enabled stages. For stages without an init skill yet, note it's not available.
+1. Tell user: Project created at `{root}`.
+2. **Downstream**: offer `/resources` and available `/{stage}-init` skills for enabled stages. For stages without an init skill yet, note it's not available.
