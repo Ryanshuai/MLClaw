@@ -103,6 +103,29 @@ A backend with no listing adapter must state **both halves**: that a key was fou
 
 Walk **one level**. A sweep that spends four hours on a NAS is a sweep nobody runs twice, and the budget rule below exists for the same reason.
 
+**Measure the reach before you scope the sweep.** `resources.json → aws.s3_bucket` is the bucket a *run* writes to; a credential usually reaches many more. `discover.py surface` enumerates them and classifies each `listable` / `access_denied`, and `sources` then reports the dated result instead of implying the declared bucket is the world. Skipping it is how one project swept three buckets out of twenty and produced a findings list that read as exhaustive.
+
+`access_denied` on a bucket the key can **see** is its own finding and its own ask: a policy change by that bucket's owner, never a new key. The two are opposite requests, and the one that gets made by default — "please give me access" — is the one that changes nothing, because the key is already accepted.
+
+### framework packages — the pin is checkable, and it used to be treated as a limitation
+
+A `code_source.source: framework` run records `<pkg>==<version>` instead of a commit, and `code_snapshot.py` stamps every such record with a warning that a version pin **cannot see a local edit to the installed package**. That was written as a permanent blind spot. It is not one:
+
+```bash
+python $S verify-framework --spec ultralytics==8.4.40 --python <the RUN env's interpreter>
+```
+
+pip writes `<dist-info>/RECORD` at install time — one row per installed file with a sha256 — so hashing the files on disk and comparing detects any post-install edit. Offline, no network, no wheel to fetch. Four readings, and only the first is a clean bill of health:
+
+| `state` | Means |
+|---|---|
+| `as_published` | every hashed file matches. This IS the published artifact, and `install <pkg>==<version>` reproduces it |
+| `edited` | **the blind spot, and it is real here.** `install <pkg>==<version>` will NOT reproduce what ran. Capture the difference *before* that environment is rebuilt — it is the dirty patch a git tree would have produced, and nothing else records it |
+| `incomplete` | files the RECORD names are absent — a partial or hand-assembled install, not an edit |
+| `not_installed` | nothing to check **in the interpreter you asked**. Not a statement about the package, and not about the environment that ran |
+
+The interpreter is the **run's**, not MLClaw's — the package lives there, and asking MLClaw's own env answers about the wrong world. Omitting it leaves `/repro`'s code axis `unverifiable`, never `intact`: an unchecked question is not a clean one, and that is the fourth verdict's entire job.
+
 ### docs / wikis — somebody wrote it, possibly from memory, possibly years ago
 
 Everything found here is `claim` and stays `claim` until a probe agrees. Query by project / repo / dataset name; never crawl a space. Two things doc sources are uniquely good for, and no other source has them: **the reason a thing exists**, and **numbers nobody logged**.

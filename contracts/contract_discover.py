@@ -17,6 +17,7 @@ makes it interpretable later, and a report that reads as an inventory.
 """
 import json
 import os
+import sys
 import unittest
 from datetime import datetime, timedelta, timezone
 
@@ -2280,3 +2281,172 @@ class RegeneratingTheBriefDoesNotEatTheJudgment(DiscoverCase):
         with open(self.brief()) as fh:
             t = fh.read()
         self.assertIn("never regenerated", t)
+
+
+class TheDeclaredBucketIsNotTheSweepableSurface(DiscoverCase):
+    """CLAUDE.md -> "Never silently" (never report data you could not look at), and
+    `searches.md` -> "Sources, ranked by what a mention is worth".
+
+    `sources` reported the s3 row as `bucket: <resources.json -> aws.s3_bucket>` —
+    one bucket, the default a RUN writes to. A credential's reach is a different
+    quantity and is routinely much larger; on the project this was found in, the key
+    could list twenty and the row named one.
+
+    The under-report is worse than a refusal. "No access" sends somebody to get a
+    key. One bucket out of twenty reads as the whole world and sends nobody
+    anywhere — a sweep covering 5% of the surface produces a findings list that
+    looks complete, which is the exact failure `sources` exists to prevent.
+
+    So the reach is a MEASUREMENT, taken by `surface` (network, dated, may be
+    partial) and read by `sources` (records only). The same split as `census.py
+    scan` vs `dataset.json`, and it must not be collapsed: `sources` runs at
+    conversation start, where four network timeouts before the user's first
+    sentence is not a greeting.
+    """
+
+    def sources_s3(self):
+        rc, out, err = run_script(SCRIPT, "sources", "--project", self.project)
+        self.assertEqual(rc, 0, err)
+        rows = [s for s in out["sources"] if s["source"] == "s3"]
+        self.assertEqual(len(rows), 1, "exactly one s3 row")
+        return rows[0]
+
+    def write_surface(self, buckets, *, declared="b-declared", enumerated=True):
+        by_state = {}
+        for b, st in buckets.items():
+            by_state.setdefault(st, []).append(b)
+        self.write_json("ws/proj/discovery/surface.json", {
+            "project": self.project, "measured_at": "2026-08-04T00:00:00+00:00",
+            "s3": {"declared_bucket": declared, "enumerated": enumerated,
+                   "why": "test", "visible_count": len(buckets),
+                   "buckets": {b: {"state": st, "detail": "", "declared": b == declared}
+                               for b, st in buckets.items()},
+                   "by_state": {k: sorted(v) for k, v in by_state.items()}}})
+
+    def test_the_row_no_longer_names_one_bucket_as_the_surface(self):
+        """`bucket` is gone as a field name. A reader who sees one bucket named on
+        the checklist scopes the sweep to it, and nothing on the row contradicts
+        them — which is how twenty buckets became three."""
+        self.resources(aws={"access_key_id": "k", "secret_access_key": "s",
+                            "region": "us-east-1", "s3_bucket": "b-declared"})
+        row = self.sources_s3()
+        self.assertNotIn("bucket", row,
+                         "the bare field is what invited the misreading")
+        self.assertEqual(row["declared_bucket"], "b-declared")
+
+    def test_a_reach_that_was_never_measured_says_so(self):
+        """Absence of a surface reading is not a small surface. It has to warn, or
+        the default state of every project is a silent under-report."""
+        self.resources(aws={"access_key_id": "k", "secret_access_key": "s",
+                            "region": "us-east-1", "s3_bucket": "b-declared"})
+        row = self.sources_s3()
+        self.assertIsNone(row["reachable_buckets"])
+        self.assertIn("NEVER been enumerated", row["surface_warning"])
+        self.assertIn("not the surface", row["surface_warning"])
+
+    def test_a_measured_reach_is_reported_with_its_age(self):
+        """A reading is dated for the same reason a census is: the answer moves."""
+        self.resources(aws={"access_key_id": "k", "secret_access_key": "s",
+                            "region": "us-east-1", "s3_bucket": "b-declared"})
+        self.write_surface({"b-declared": "listable", "b-two": "listable",
+                            "b-three": "access_denied"})
+        row = self.sources_s3()
+        self.assertEqual(row["reachable_count"], 3)
+        self.assertIn("b-three", row["reachable_buckets"])
+        self.assertIsNotNone(row["surface_measured_days_ago"])
+        self.assertNotIn("surface_warning", row)
+
+    def test_a_failed_enumeration_is_reported_as_a_lower_bound(self):
+        """ListAllMyBuckets is an account-level permission and routinely absent on
+        a key that reads specific buckets fine. Failing to enumerate must never
+        read as "the reach is what we happened to see"."""
+        self.resources(aws={"access_key_id": "k", "secret_access_key": "s",
+                            "region": "us-east-1", "s3_bucket": "b-declared"})
+        self.write_surface({"b-declared": "listable"}, enumerated=False)
+        row = self.sources_s3()
+        self.assertIn("LOWER BOUND", row["surface_warning"])
+
+    def test_access_denied_is_kept_apart_from_no_key(self):
+        """The two need opposite asks. A visible-but-unlistable bucket is a POLICY
+        change by its owner; a missing key is a key. Somebody sent to request
+        access they already hold comes back a week later with nothing, and the
+        blocker is the field the worklist groups on."""
+        self.resources(aws={"access_key_id": "k", "secret_access_key": "s",
+                            "region": "us-east-1", "s3_bucket": "b-declared"})
+        self.write_surface({"b-declared": "listable", "b-denied": "access_denied"})
+        row = self.sources_s3()
+        self.assertEqual(row["surface_by_state"]["access_denied"], ["b-denied"])
+        self.assertTrue(row["usable"], "the credential works; one bucket refuses it")
+
+    def test_surface_refuses_without_a_registry(self):
+        rc, out, _ = run_script(SCRIPT, "surface", "--project", self.project)
+        self.assertEqual(rc, 1)
+        self.assertIn("resources.json", json.dumps(out))
+
+    def test_surface_breaks_on_a_bad_project_path(self):
+        """Exit 2, not a false empty. `report` had this bug: a bare project NAME
+        produced a clean, empty, entirely wrong answer."""
+        rc, out, _ = run_script(SCRIPT, "surface", "--project", "not-a-path")
+        self.assertEqual(rc, 2)
+
+
+class TheFrameworkBlindSpotIsCheckable(DiscoverCase):
+    """`layout.md` -> "Code Source Resolution" (the `framework` mode), and
+    run-mechanics.md -> "Record integrity".
+
+    `code_snapshot.py` writes FRAMEWORK_BLIND_SPOT on every framework record: a
+    pinned version "CANNOT see a local edit to the installed package, where a tree
+    would have produced a dirty patch". That was written as a permanent limitation
+    and it is not one — pip's dist-info RECORD holds a sha256 per installed file, so
+    the question is answerable offline and exactly.
+
+    A limitation nobody can check and a check nobody ran read identically in a
+    record. This is the difference.
+    """
+
+    def verify(self, spec, *extra):
+        return run_script(SCRIPT, "verify-framework", "--spec", spec, *extra)
+
+    def test_a_clean_install_is_as_published(self):
+        rc, out, err = self.verify("json==1.0", "--python", sys.executable)
+        self.assertEqual(rc, 0, err)
+        # stdlib `json` is not a distribution, so this exercises the honest
+        # negative rather than a fake pass.
+        self.assertEqual(out["state"], "not_installed")
+
+    def test_not_installed_here_is_not_not_installed_anywhere(self):
+        """The unreachable/gone split, in the newest probe in the engine."""
+        rc, out, _ = self.verify("definitely-not-a-package==1.0",
+                                 "--python", sys.executable)
+        self.assertEqual(rc, 0)
+        self.assertEqual(out["state"], "not_installed")
+        self.assertIn("NOT a statement about the environment that ran", out["means"])
+
+    def test_a_missing_interpreter_breaks_rather_than_passing(self):
+        rc, out, _ = self.verify("anything==1.0", "--python", "/no/such/python")
+        self.assertEqual(rc, 2, "a bad argument is the script breaking, not an answer")
+        self.assertIn("RUN environment", json.dumps(out))
+
+    def test_an_unpinned_spec_still_reads_the_installed_version(self):
+        """The version question and the integrity question are separate and both
+        can fail; collapsing them loses the fix."""
+        rc, out, _ = self.verify("definitely-not-a-package", "--python", sys.executable)
+        self.assertEqual(rc, 0)
+        self.assertIsNone(out["pinned_version"])
+        self.assertIsNone(out["version_matches_pin"])
+
+    def test_every_state_carries_its_meaning(self):
+        """`means` travels with the reading, not with whichever caller prints it.
+        `/repro`'s code axis writes this into a run record; a meaning that only
+        appears in the CLI is missing exactly where the record gets written."""
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "fi", os.path.join(os.path.dirname(os.path.dirname(
+                os.path.abspath(__file__))),
+                "lifecycle", "scripts", "shared", "framework_integrity.py"))
+        fi = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(fi)
+        for state in ("as_published", "edited", "incomplete", "not_installed",
+                      "unverifiable"):
+            self.assertIn(state, fi.STATE_MEANS)
+            self.assertTrue(fi.STATE_MEANS[state].strip())

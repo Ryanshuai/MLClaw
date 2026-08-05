@@ -149,7 +149,7 @@ class EveryThirdPartyImportIsOptional(unittest.TestCase):
     """
 
     LOCAL = {"helpers", "_records", "_common", "_stream", "_dataset_paths",
-             "compare", "select_checkpoint"}
+             "compare", "select_checkpoint", "framework_integrity"}
 
     @staticmethod
     def _guarded_and_bare(tree):

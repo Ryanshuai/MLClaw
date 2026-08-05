@@ -65,6 +65,7 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__))), "shared"))
 from _records import (atomic_write_json, broke, emit, now_utc, parse_ts, read_json, refuse, stamp)  # noqa: E402
+from framework_integrity import framework_integrity  # noqa: E402
 
 AXES = ("data", "code", "env", "params", "artifacts")
 
@@ -429,7 +430,7 @@ def run_paths_dir(project, run):
     return os.path.join(project, "stages", run["stage"], "runs", run["run_id"])
 
 
-def probe_code(project, run, stage):
+def probe_code(project, run, stage, framework_python=None):
     """`code_snapshot.py` states the contract:
         git checkout <origin_commit> && git apply <run_dir>/<dirty_patch_path>
     This is the only thing that ever checks it."""
@@ -460,15 +461,59 @@ def probe_code(project, run, stage):
                         framework=pkg, pinned=ver, ran=ran,
                         fix=f"rebuild the env at {pkg}=={ran} to reproduce what ran, "
                             f"or at =={ver} to honour the pin, and say which")
-        return axis("intact",
-                    f"no tree by design (code_source `framework`); the contract is "
-                    f"`install {pkg}=={ver}`" + (f", and env.packages agrees ({ran})"
-                                                 if ran else ""),
-                    framework=pkg, framework_version=ver,
-                    note=("weaker than a SHA in one specific way and it cannot be "
-                          "checked from here: a pinned version cannot see a local edit "
-                          "to the installed package, where a tree would have produced "
-                          "a dirty patch"))
+
+        # The version matches. That used to end the axis at `intact` with a note
+        # saying the remaining question -- was the installed package EDITED after
+        # install -- "cannot be checked from here". It can: pip's dist-info RECORD
+        # holds a sha256 per installed file, so hashing them answers it offline.
+        # `discover.py verify-framework` is that check, and it needs the RUN
+        # environment's interpreter because the package lives there and not here.
+        #
+        # Absence of the interpreter must NOT read as a pass. Two verdicts, and the
+        # split is the point: checked-and-clean is `intact`, unchecked is
+        # `unverifiable`. Collapsing them would make a question nobody asked look
+        # like a question answered -- the one thing the fourth verdict exists for.
+        integ = None
+        if framework_python:
+            integ = framework_integrity(f"{pkg}=={ver}", python=framework_python)
+        base = (f"no tree by design (code_source `framework`); the contract is "
+                f"`install {pkg}=={ver}`"
+                + (f", and env.packages agrees ({ran})" if ran else ""))
+        if integ is None:
+            return axis("unverifiable",
+                        base + " -- but whether that installed package was EDITED "
+                               "after install was not checked, and an unchecked "
+                               "question is not a clean one",
+                        framework=pkg, framework_version=ver,
+                        integrity="not_checked",
+                        fix="pass --framework-python <the run environment's "
+                            "interpreter> to close it: pip's RECORD holds a sha256 "
+                            "per installed file, so the check is offline and exact")
+        st = integ.get("state")
+        if st == "as_published":
+            return axis("intact",
+                        base + f", and all {integ.get('files_checked')} hashed "
+                               f"file(s) match the RECORD pip wrote at install time "
+                               f"-- this IS the published artifact",
+                        framework=pkg, framework_version=ver,
+                        integrity=integ)
+        if st in ("edited", "incomplete"):
+            what = ("was modified after install"
+                    if st == "edited" else "is missing files the RECORD names")
+            return axis("drifted",
+                        base + f" -- but the installed package {what} "
+                               f"({integ.get('files_mismatched')} mismatched, "
+                               f"{integ.get('files_missing')} missing of "
+                               f"{integ.get('files_checked')} checked). "
+                               f"`install {pkg}=={ver}` will NOT reproduce what ran",
+                        framework=pkg, framework_version=ver, integrity=integ,
+                        fix="capture the difference before that environment is "
+                            "rebuilt -- it is the dirty patch a git tree would have "
+                            "produced, and nothing else records it")
+        return axis("unverifiable",
+                    base + f" -- the edit check did not produce a clean result "
+                           f"({st}: {integ.get('detail')})",
+                    framework=pkg, framework_version=ver, integrity=integ)
 
     sha = code.get("origin_commit")
     if not sha:
@@ -649,11 +694,11 @@ def probe_artifacts(project, run):
 # check
 # --------------------------------------------------------------------------
 
-def assess(project, ref, skip_env=False):
+def assess(project, ref, skip_env=False, framework_python=None):
     run, rd, stage, rid = load_run(project, ref)
     axes = {
         "data": probe_data(project, run),
-        "code": probe_code(project, run, stage),
+        "code": probe_code(project, run, stage, framework_python),
         "env": axis("unverifiable", "skipped by --no-env") if skip_env else probe_env(run),
         "params": probe_params(project, run, stage),
         "artifacts": probe_artifacts(project, run),
@@ -698,7 +743,8 @@ def assess(project, ref, skip_env=False):
 
 def cmd_check(a):
     project = os.path.expanduser(a.project)
-    report, rd = assess(project, a.run, skip_env=a.no_env)
+    report, rd = assess(project, a.run, skip_env=a.no_env,
+                        framework_python=a.framework_python)
     if not a.no_write:
         out = os.path.join(rd, "repro", f"check_{stamp()}.json")
         atomic_write_json(out, report)
@@ -757,7 +803,8 @@ def save_session(project, sid, s):
 
 def cmd_open(a):
     project = os.path.expanduser(a.project)
-    report, _ = assess(project, a.run, skip_env=False)
+    report, _ = assess(project, a.run, skip_env=False,
+                       framework_python=getattr(a, 'framework_python', None))
 
     if report["status"] != "completed":
         refuse(f"target run status is {report['status']!r}, not 'completed'",
@@ -1431,6 +1478,14 @@ def main():
     c.add_argument("--no-write", action="store_true",
                    help="do not persist the dated observation")
     c.add_argument("--json", action="store_true")
+    c.add_argument("--framework-python", dest="framework_python", default=None,
+                   help="interpreter of the RUN environment, for a `framework` code "
+                        "source. Closes the one question a version pin cannot "
+                        "answer -- whether the installed package was EDITED after "
+                        "install -- by hashing its files against the RECORD pip "
+                        "wrote. Offline. Omitting it leaves the code axis "
+                        "`unverifiable`, never `intact`: an unchecked question is "
+                        "not a clean one")
     c.set_defaults(fn=cmd_check)
 
     o = sub.add_parser("open", help="open a repro session; declares the target")

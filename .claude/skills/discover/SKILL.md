@@ -106,6 +106,41 @@ Two fields on each row decide what you do with it, and neither is decoration:
   next step.** "Blocked" alone routes a wiki page to the same queue as an expired AWS key, and no
   credential ever unblocks a wiki page.
 
+### The s3 row states a reach it has not measured, unless something measured it
+
+`resources.json → aws.s3_bucket` is **the bucket a run writes to, not the surface a sweep can
+cover.** A working key routinely reaches many more — on the project this skill was built against,
+twenty, of which the registry named one.
+
+That under-report is worse than a refusal, and the asymmetry is the whole point: *"no access"* sends
+somebody to get a key, while **one bucket out of twenty reads as the whole world and sends nobody
+anywhere.** A sweep over 5% of the surface produces a findings list that looks complete — the exact
+failure this verb exists to prevent, committed by the verb itself.
+
+So the reach is a *measurement*, and it has its own verb:
+
+```bash
+python $S surface --project <p>      # NETWORK. Enumerates every bucket the credential
+                                     # can see, then classifies each: listable / access_denied
+```
+
+`sources` stays records-only and reports whatever the last dated reading found — the same split as
+`census.py scan` (goes and looks, dated, may be partial) versus `dataset.json` (the durable
+contract). **Do not merge them**: `sources` is called at conversation start, and four network
+timeouts before the user's first sentence is not a greeting.
+
+Read three fields off the row and say them:
+
+| | |
+|---|---|
+| `reachable_buckets: null` + `surface_warning` | **nobody has ever measured the reach.** Say so before quoting any sweep as complete, and offer `surface` |
+| `surface_measured_days_ago` | a reading, like a census, and it moves. State the age before the count |
+| `surface_by_state.access_denied` | **a POLICY ask against the bucket's owner, not a key ask.** The credential is already accepted; a request for a *new key* comes back a week later having changed nothing |
+
+`enumerated: false` means `ListAllMyBuckets` was denied — an account-level permission routinely
+absent on a key that reads specific buckets fine. The list is then a **lower bound** on the reach,
+never the reach.
+
 **Lead with the credential-free rows, and say the count out loud.** On day one nothing is registered
 and most rows are blocked, so the temptation — and the shape the old output actively encouraged — is
 to report that the sweep must wait for access. It must not: `code:*`, `git_history:*` and
