@@ -43,6 +43,24 @@ A declared tolerance is deliberately **not** a band source. `declared_tolerance`
 
 When both exist, `trials` decides and the tail is kept beside it as `also_measured`. That cross-check earns its place: **run-to-run spread cannot be smaller than within-run spread**, so a trials band narrower than the tail means the repeats held something fixed that the original run did not, and the interval they produced is too narrow to judge on. `band` says so.
 
+### Comparing an order statistic to its own draws answers nothing
+
+A best-checkpoint save is the **max** of a converged tail. Testing that max against the range of the very draws it came from compares an order statistic to individuals — it sits at or above the top **by construction**, so `outside` carries no information.
+
+Found live: a faithful 140-epoch reproduction whose tail mean matched the target's to four decimal places came back `inconclusive`, because its best-pick exceeded the target's best-pick by 0.0013. **The verdict was conservative, so nothing looked broken** — and acting on it costs another full training run.
+
+So when the target metric is a best-checkpoint pick, supply the trial's tail too:
+
+```bash
+band --from-history <target tail> --trial-history <trial tail>
+```
+
+The trial's tail **mean** is then what gets tested — a draw-comparable summary against a range of draws, which is a question the range can answer. Three guards keep it from being an escape hatch:
+
+- the trial's tail must be **supplied**, never inferred;
+- **both readings are recorded** — like-for-like *and* extreme-vs-extreme — so a worse number cannot be laundered by choosing the flattering comparison;
+- the one-directional rule is untouched: outside a lower-bound band is still `inconclusive`, never `diverged`.
+
 ### The recorded number may be the tail's max, and that bias runs one way
 
 A best-checkpoint save picks the **best** epoch. If the target metric equals the extreme of its own converged tail, the recorded number is a selection, not a converged value — and a fresh run that lands on the tail **mean** has matched it while reading as short by roughly the tail's spread. Every time, in the same direction, with nothing anywhere raising.

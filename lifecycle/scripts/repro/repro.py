@@ -1014,11 +1014,41 @@ def cmd_trial(a):
         refuse(f"trial mode {trun.get('mode')!r} != target mode {tgt['mode']!r}",
                why="metrics are comparable only within the same mode; these two "
                    "numbers describe different workloads and happen to share a name")
-    if (trun.get("scope") or {}) != (tgt["scope"] or {}):
-        refuse("trial scope differs from the target's scope",
-               trial_scope=trun.get("scope") or {}, target_scope=tgt["scope"] or {},
-               why="two production runs over different sample counts are not "
-                   "comparable either")
+    # `_`-prefixed keys are commentary everywhere else in this codebase (`_comment`,
+    # `_note`, `_delta_vs_target`), and a differing sentence is not a differing
+    # measurement. Comparing them made prose decide comparability, which is the
+    # opposite of what this guard is for -- and it fails CLOSED, so it reads as the
+    # guard working.
+    t_scope = {k: v for k, v in (trun.get("scope") or {}).items()
+               if not k.startswith("_")}
+    g_scope = {k: v for k, v in (tgt["scope"] or {}).items()
+               if not k.startswith("_")}
+    if t_scope != g_scope:
+        differing = sorted(set(t_scope) | set(g_scope)
+                           if set(t_scope) != set(g_scope)
+                           else [k for k in t_scope if t_scope[k] != g_scope.get(k)])
+        # A person who has LOOKED can say the difference is immaterial -- and then
+        # it goes in the record, not into a shrug. Same discipline as
+        # `--i-accept-the-cost` and `--remeasure-only`: the absence of an objection
+        # has to be something somebody typed. What is refused is the DEFAULT, which
+        # must never quietly compare two different quantities.
+        if not a.scope_differs_immaterially:
+            refuse("trial scope differs from the target's scope",
+                   trial_scope=t_scope, target_scope=g_scope,
+                   differing_keys=differing,
+                   why="two production runs over different sample counts are not "
+                       "comparable either. This compares the measurement only -- "
+                       "`_`-prefixed commentary is ignored",
+                   your_option={
+                       "--scope-differs-immaterially '<why>'":
+                           "record the difference as looked-at and judged too small "
+                           "to move the metric, and proceed. The text is stored on "
+                           "the trial and surfaces in the verdict's caveats"})
+        scope_waiver = {"differing_keys": differing, "trial": t_scope,
+                        "target": g_scope,
+                        "judged_by_a_person": a.scope_differs_immaterially}
+    else:
+        scope_waiver = None
 
     best = ((trun.get("metrics") or {}).get("best") or {})
     value = a.value if a.value is not None else best.get("primary_metric_value")
@@ -1047,9 +1077,18 @@ def cmd_trial(a):
         "delta_pct": (round(100.0 * delta / tgt["value"], 6) if tgt["value"] else None),
         "probe_run": a.probe_run,
         "predictions_agree": a.predictions_agree,
+        "scope_waiver": scope_waiver,
         "at": now_utc(),
     }
     s["trials"].append(entry)
+    if scope_waiver:
+        # Into `caveats`, where the verdict is read. A waived difference that only
+        # lives on the trial is a difference the conclusion does not carry.
+        note = (f"trial {entry['n']} was compared across a scope difference in "
+                f"{', '.join(scope_waiver['differing_keys'])}, waived by hand: "
+                f"{scope_waiver['judged_by_a_person']}")
+        if note not in s["caveats"]:
+            s["caveats"].append(note)
     if a.predictions_agree is not None:
         s["predictions_agree"] = a.predictions_agree
     save_session(project, a.session, s)
@@ -1089,6 +1128,16 @@ def cmd_band(a):
     s, _ = load_session(project, a.session)
     base = [t for t in s["trials"] if not t["pinned"]]
     hist = read_history_values(a.from_history) if a.from_history else None
+    thist = read_history_values(a.trial_history) if a.trial_history else None
+    if thist is not None and hist is None:
+        broke("--trial-history without --from-history",
+              hint="the trial's tail is only used to make the comparison like for "
+                   "like against the TARGET's tail; on its own it bands nothing")
+    if thist is not None and len(thist) < MIN_HISTORY_FOR_BAND:
+        refuse(f"{len(thist)} trial history value(s) -- needs at least "
+               f"{MIN_HISTORY_FOR_BAND}",
+               why="a handful of points is a range with extra steps, not a "
+                   "distribution")
 
     # A trials band is strictly stronger, so it wins whenever it exists. History
     # supplied alongside it is kept as a cross-check, not discarded: a trials band
@@ -1133,8 +1182,24 @@ def cmd_band(a):
         n, tested, tested_what = len(base), s["target"]["value"], "target"
     else:
         vals = sorted(hist)
-        n, tested = len(hist), sorted(t["value"] for t in base)[-1]
-        tested_what = "trial"
+        n = len(hist)
+        if thist is not None:
+            # LIKE FOR LIKE. A best-checkpoint pick is the MAX of a tail, and
+            # testing a max against the range of the draws it was drawn from is
+            # comparing an order statistic to individuals -- it sits at or above
+            # the top by construction, so `outside` carries no information. The
+            # tail MEAN is a draw-comparable summary of where the pipeline sits,
+            # and testing that against the target's own range is a question the
+            # range can answer.
+            #
+            # This is not an escape hatch: it needs the trial's tail SUPPLIED,
+            # both distributions are recorded side by side, and the one-directional
+            # rule below is unchanged -- outside still cannot mean `diverged`.
+            tested = sum(thist) / len(thist)
+            tested_what = "trial_tail_mean"
+        else:
+            tested = sorted(t["value"] for t in base)[-1]
+            tested_what = "trial"
 
     lo, hi = vals[0], vals[-1]
     spread = hi - lo
@@ -1146,9 +1211,10 @@ def cmd_band(a):
         verdict = "reproduced"
         why = (f"the recorded {tv} lies inside the interval {n} repeats produced"
                if source == "trials" else
-               f"the trial's {tv} lies inside the target's own converged wobble "
-               f"[{lo:.6g}, {hi:.6g}]. A lower bound on noise, so a delta inside it "
-               f"is noise-sized whatever the true run-to-run spread is")
+               f"the trial's {tested_what.replace('_', ' ')} {tv:.6g} lies inside the "
+               f"target's own converged wobble [{lo:.6g}, {hi:.6g}]. A lower bound on "
+               f"noise, so a delta inside it is noise-sized whatever the true "
+               f"run-to-run spread is")
     elif source == "run_history":
         # The asymmetry, enforced. See BAND_SOURCES: this band cannot see kernel
         # selection, dataloader order or init, so outside it is not yet outside noise.
@@ -1177,6 +1243,26 @@ def cmd_band(a):
             "can_refute": source == "trials"}
     if source == "run_history":
         band["history_what"] = a.history_what
+    if thist is not None:
+        import statistics as _st
+        band["trial_history"] = {
+            "n": len(thist), "min": min(thist), "max": max(thist),
+            "mean": sum(thist) / len(thist),
+            "stdev": _st.stdev(thist) if len(thist) > 1 else None,
+            "what": a.trial_history_what,
+        }
+        band["both_readings"] = {
+            "like_for_like": {"what": "trial tail mean vs the target's tail range",
+                              "trial": band["trial_history"]["mean"],
+                              "target_mean": sum(vals) / len(vals),
+                              "delta": band["trial_history"]["mean"] - sum(vals) / len(vals)},
+            "extreme_vs_extreme": {
+                "what": "best-checkpoint pick vs best-checkpoint pick -- both are the "
+                        "MAX of a 40-point tail, so this one is symmetric and fair, but "
+                        "it is not what the range can adjudicate",
+                "trial": max(thist), "target": s["target"]["value"],
+                "delta": max(thist) - s["target"]["value"]},
+        }
 
     extra_caveats = []
 
@@ -1546,6 +1632,13 @@ def main():
                         "from the target's")
     t.add_argument("--probe-run", default=None,
                    help="<stage>/<run_id> of the /infer-run over the probe set")
+    t.add_argument("--scope-differs-immaterially", dest="scope_differs_immaterially",
+                   default=None, metavar="WHY",
+                   help="record a scope difference as looked-at and judged too small "
+                        "to move the metric, and proceed. Stored on the trial and "
+                        "surfaced in the verdict's caveats. Without it a differing "
+                        "scope is refused, because the DEFAULT must never quietly "
+                        "compare two different quantities")
     grp = t.add_mutually_exclusive_group()
     grp.add_argument("--predictions-agree", dest="predictions_agree",
                      action="store_true", default=None)
@@ -1562,6 +1655,17 @@ def main():
                         "band without repeats -- free, but a lower bound on run-to-run "
                         "spread, so it can confirm and never refute. Also enables the "
                         "best-checkpoint selection check")
+    b.add_argument("--trial-history", dest="trial_history", default=None,
+                   help="JSON array (inline or a file) of the TRIAL's own converged "
+                        "tail. Supply it whenever the target metric is a "
+                        "best-checkpoint pick: the trial's pick is then also a max, "
+                        "and testing a max against the range it was drawn from is "
+                        "comparing an order statistic to individuals. With this, the "
+                        "trial's tail MEAN is tested instead and both distributions "
+                        "are recorded side by side")
+    b.add_argument("--trial-history-what", dest="trial_history_what", default=None,
+                   help="what the trial's tail values are, same standard as "
+                        "--history-what")
     b.add_argument("--history-what", default=None,
                    help="what those values are, e.g. 'epochs 101-140 of the target's "
                         "train_results; mosaic closed at 100'. Recorded with the band: "
