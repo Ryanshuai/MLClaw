@@ -159,6 +159,35 @@ Three rules, uniform across all run skills:
 
 Stage-specific extras (production mode launching, monitoring, ETA computation, finalize hooks) go in each run skill's SKILL.md — these three rules do not.
 
+### Baseline measurement (fine-tune only)
+
+**A fine-tune exists because the base was not good enough on this data, so the only number it produces that can be read is the delta against that base.** The child's absolute score has no scale on its own: `box mAP 0.914` is a fact about nothing until `0.451` sits next to it. And the base's *published* number cannot supply that scale — it is a `claim` measured on somebody else's `scope`, which the fine-tune section of `/train-run` SKILL.md already says. That leaves exactly one baseline worth the name: **the base, put through the same measurement, on this run's data, with the same settings.**
+
+It costs one val, and both inputs are already in hand — you cannot fine-tune without the base weights and you cannot train without the data. **Take it before launch, not at finalize**, for four reasons that are all the same reason:
+
+- after the run, measuring the base is pure expenditure against a model nobody is shipping, so it does not happen;
+- by the time anyone wants it, the data, the weights or the env has moved, and then it cannot happen;
+- it exercises the exact path that will measure the child, on known-good weights, before hours are spent — a smoke test that costs nothing extra;
+- if the run crashes, the half you already paid for survives.
+
+`lifecycle/scripts/train-run/baseline_delta.py`:
+
+```bash
+# fine-tune with no base measurement (and no waiver) -> exit 1
+python .../baseline_delta.py check <RUN_DIR>
+
+# two measurements, or a refusal
+python .../baseline_delta.py compare <RUN_DIR>/output/baseline_before.json \
+                                     <RUN_DIR>/output/baseline_after.json \
+                                     --direction <stage>/output.json
+```
+
+**`compare` guards the defect that matters more than the missing measurement**, which is two measurements that both exist, both look fine, and were not taken the same way. It refuses on any differing settings key, and — the free half — on any key where a measurement departs from what the checkpoint's *own recorded training args* say. That second check needs nothing fetched or remembered: the value is inside the weights.
+
+Found live, on a yolo26 segmentation fine-tune: validating at the library's `overlap_mask=True` instead of the `False` this model family trains under moved box mAP50-95 from `0.9142` to `0.9027` and wall from `0.9672` to `0.9445`. Same weights, same images, same metric name, nothing raised. Because both sides carried the same wrong default, **the delta stayed honest while every absolute number quietly stopped being comparable to any published figure** — the failure mode a delta-only check cannot see.
+
+Both refusals take a per-key `--waive-setting KEY='<why>'`, and the reason lands in the record. `check`'s waiver is `run.json -> baseline_delta.waived`. A metric measured on one side and not the other is reported as absent, never as unchanged, and a metric with no declared `direction` gets `improved: null` rather than a guess from its name.
+
 ### Metric stream
 
 Three words with fixed meanings. They were interchangeable while the stream was
@@ -331,6 +360,7 @@ Rules for anything a run writes down now that somebody reads later. They share o
 | The overall reproduction verdict ranks `gone` above every other axis state. | Ranking by the verdict enum's own order put `unverifiable` above `gone` and reported a run whose cited data had been **deleted** as merely unverifiable — the worst state in the table, announced as the second mildest, with the `you can still` guidance never firing. |
 | `reproduced` requires a measured band, every axis `intact`, and — if a probe was declared — that the probe actually ran. | Each missing piece degrades it to a different weaker claim, and all three read identically once the word "reproduced" is written down. A matching average over changed predictions is the fake-metric shape one layer above the model. |
 | A repro trial is comparable to its target: same `mode`, equivalent `scope`. | A band assembled from mismatched trials is "Metric comparability" below with a measurement's authority on top — nothing errors, nothing is missing, and the noise estimate every later verdict rests on is of the wrong quantity. |
+| A fine-tune records the base **measured here**, and the two measurements were taken the same way. | See "Baseline measurement" below. A fine-tune's absolute score has no scale without the base's, the base's published number was measured on another scope, and the measurement is only cheap while the run is being set up. Two measurements taken under different settings are the worse half: both exist, both look fine, and nothing downstream can tell they are not a delta. |
 
 ### Listing runs (no separate index)
 
