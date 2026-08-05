@@ -2620,6 +2620,25 @@ class AnEmptyWandbListingIsNotAnAbsence(DiscoverCase):
             d.probe_tracking("tracking:wandb", path, 5.0)
             self.assertEqual(seen.get("entity"), "ent", path)
 
+    def test_report_never_renders_a_locator_probe_cannot_read(self):
+        """The other end of the same defect. `report` prepended `on:`
+        unconditionally, so a locator already carrying its prefix — which is how
+        they are copied out of configs — rendered
+        `tracking:wandb:tracking:wandb:ent/proj`. A reader who copies that back
+        gets a locator the strip has to undo twice."""
+        d = load_script(SCRIPT)
+        cases = [
+            ({"on": "tracking:wandb", "path": "tracking:wandb:ent/proj"},
+             "tracking:wandb:ent/proj"),
+            ({"on": "tracking:wandb", "path": "ent/proj"},
+             "tracking:wandb:ent/proj"),
+            ({"on": "s3", "path": "s3://b/k"}, "s3://b/k"),
+            ({"on": "local", "path": "/data/x"}, "/data/x"),
+            ({"on": "server:gpu1", "path": "/data/x"}, "server:gpu1:/data/x"),
+        ]
+        for lead, want in cases:
+            self.assertEqual(d.display_where(lead), want, lead)
+
     def test_an_empty_entity_listing_is_unreachable_not_gone(self):
         d = load_script(SCRIPT)
         real = d.subprocess.run

@@ -275,6 +275,23 @@ def classify_on(on):
     return None
 
 
+def display_where(lead) -> str:
+    """One string a reader can copy straight back into `probe --path`.
+
+    It used to unconditionally prepend `on:`, so a locator already carrying its
+    prefix -- which is how they are copied out of configs -- rendered
+    `tracking:wandb:tracking:wandb:ent/proj`. That is the same defect as the strip
+    that could not read its own output, seen from the other end: the tool emitting
+    a form it cannot itself parse. If `report` prints it, `probe` must take it.
+    """
+    on, path = lead.get("on") or "", lead.get("path") or ""
+    if on in ("local", "s3") or not on:
+        return path
+    if path.lower().startswith(on.lower() + ":"):
+        return path
+    return f"{on}:{path}"
+
+
 def leads_path(project) -> str:
     return os.path.join(project, "discovery", "leads.json")
 
@@ -2312,8 +2329,7 @@ def table(leads, recheck_days, unsaved=False):
         rows.append((
             GLYPH.get(l["status"], " "),
             (l.get("what") or "—")[:30],
-            (f'{l["on"]}:{l["path"]}' if l["on"] not in ("local", "s3")
-             else l["path"])[:46],
+            display_where(l)[:46],
             l["status"],
             "—" if unmeasured or l.get("bytes") is None else human(l["bytes"]),
             "—" if unmeasured or l.get("files") is None else f'{l["files"]:,}',
