@@ -22,6 +22,7 @@ than maintaining a copy by hand.
 """
 import os
 import re
+import subprocess
 import sys
 import unittest
 
@@ -104,11 +105,36 @@ def declared_dirs(block):
     return dirs
 
 
+def ignored_dir_names(root):
+    """The names git already knows are not part of this repo, by basename — the
+    same granularity the walk below prunes at.
+
+    `.gitignore` is the authoritative statement of "not part of this project",
+    and the hand-written list in `actual_dirs` is a second copy of that idea that
+    does not track edits to it. Any tool that drops a working directory in the
+    repo root then turns this check red with a message about `layout.md`, which
+    sends the reader at the documents when the problem is the environment.
+
+    Falling back to the empty set on any git failure is safe by construction: the
+    caller unions this with the hand list, so no git means exactly today's
+    behaviour rather than a check that silently stops excluding anything."""
+    try:
+        p = subprocess.run(["git", "-C", root, "ls-files", "--others", "--ignored",
+                            "--exclude-standard", "--directory"],
+                           capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return set()
+    if p.returncode != 0:
+        return set()
+    return {line.rstrip("/").rsplit("/", 1)[-1]
+            for line in p.stdout.splitlines() if line.endswith("/")}
+
+
 def actual_dirs(root):
     """Everything on disk except build junk. `.git` is excluded by name rather
     than by a dotfile rule — `.claude` and `.github` are both real entries."""
     junk = {".git", "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache",
-            ".venv", ".pixi", "node_modules", ".egg-info"}
+            ".venv", ".pixi", "node_modules", ".egg-info"} | ignored_dir_names(root)
     found = set()
     for dirpath, dirnames, _ in os.walk(root):
         dirnames[:] = [d for d in dirnames if d not in junk]
