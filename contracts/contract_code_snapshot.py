@@ -8,6 +8,7 @@ reproduces different code months later.
 """
 import os
 import subprocess
+import sys
 import unittest
 
 from helpers import GitRepoCase, load_script
@@ -400,9 +401,12 @@ class AStageWithNoTreeHasADifferentContractNotAMissingOne(GitRepoCase):
         plain = self.path("not_a_repo")
         os.makedirs(plain, exist_ok=True)
         out = subprocess.run(
-            ["python", snap.__file__, plain, self.path("run"),
+            # `sys.executable`, not "python" -- a machine can have python3 only,
+            # and then this test does not fail, it *errors*: a test that cannot
+            # run is not a test that passes.
+            [sys.executable, snap.__file__, plain, self.path("run"),
              "--framework", "ultralytics==8.4.40"],
-            capture_output=True, text=True)
+            capture_output=True, text=True, encoding="utf-8")
         self.assertEqual(out.returncode, 0, out.stderr)
         self.assertIn('"kind": "framework"', out.stdout)
 
@@ -412,7 +416,7 @@ class AStageWithNoTreeHasADifferentContractNotAMissingOne(GitRepoCase):
         always did."""
         plain = self.path("not_a_repo2")
         os.makedirs(plain, exist_ok=True)
-        out = subprocess.run(["python", snap.__file__, plain, self.path("run")],
-                             capture_output=True, text=True)
+        out = subprocess.run([sys.executable, snap.__file__, plain, self.path("run")],
+                             capture_output=True, text=True, encoding="utf-8")
         self.assertEqual(out.returncode, 1)
         self.assertIn("not a git working tree", out.stdout)
