@@ -65,7 +65,15 @@ OK = "__MLCLAW_OK__"
 NOPREFIX = "__MLCLAW_NOPREFIX__"
 
 
-def load_dataset(project, dataset):
+def load_declared_dataset(project, dataset):
+    """Read a dataset's declaration -- **existence only, no layout validation.**
+
+    `census.py -> load_layout_contract` shares this signature and return shape
+    and additionally refuses an empty `unit_glob`, a layer without a marker, and
+    a label that would corrupt its own output. This one refuses none of that: a
+    reading only needs the unit identity both sides count by. The names are
+    different so a caller cannot inherit guarantees it did not get.
+    """
     p = os.path.join(dataset_dir(project, dataset), "dataset.json")
     cfg = read_json(p, required=False)
     if cfg is None:
@@ -111,7 +119,7 @@ def cmd_declare(a) -> None:
     the online and offline sides must count the same unit or the comparison is
     between two different questions.
     """
-    cfg, path = load_dataset(a.project, a.dataset)
+    cfg, path = load_declared_dataset(a.project, a.dataset)
     if a.partition not in PARTITIONS:
         broke(f"--partition must be one of {PARTITIONS}", got=a.partition)
     if a.partition == "strftime" and not a.pattern:
@@ -280,7 +288,7 @@ def digest(ids: list[str]) -> str:
 
 def cmd_sample(a) -> None:
     project = os.path.expanduser(a.project)
-    cfg, _ = load_dataset(project, a.dataset)
+    cfg, _ = load_declared_dataset(project, a.dataset)
     online = cfg.get("online")
     if not online:
         refuse(f"{a.dataset} has no online contract",

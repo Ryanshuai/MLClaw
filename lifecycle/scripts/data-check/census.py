@@ -127,8 +127,15 @@ def rjoin(root: str, *rest: str) -> str:
 
 # ------------------------------------------------------------ config loading
 
-def load_dataset(project: str, dataset: str) -> tuple[dict, str]:
-    """Read and validate a dataset's layout contract. Refuses, never guesses."""
+def load_layout_contract(project: str, dataset: str) -> tuple[dict, str]:
+    """Read and validate a dataset's layout contract. Refuses, never guesses.
+
+    Named for what it validates, not for what it loads. `online.py` had a
+    `load_dataset(project, dataset) -> (cfg, path)` too -- same name, same
+    signature, same return shape, and it checks only that the dataset is
+    declared. A reader who learned the name here would carry the layout
+    guarantees over to a call that never made them.
+    """
     ddir = dataset_dir(project, dataset)
     path = os.path.join(ddir, "dataset.json")
     if not os.path.isfile(path):
@@ -413,7 +420,7 @@ def compute(cfg: dict, scans: dict) -> dict:
 # ---------------------------------------------------------------------- scan
 
 def cmd_scan(a) -> None:
-    cfg, ddir = load_dataset(a.project, a.dataset)
+    cfg, ddir = load_layout_contract(a.project, a.dataset)
 
     scans = {}
     for loc in cfg["locations"]:
@@ -550,7 +557,7 @@ def report(cfg: dict, c: dict) -> None:
 # ---------------------------------------------------------------------- show
 
 def cmd_show(a) -> None:
-    cfg, ddir = load_dataset(a.project, a.dataset)
+    cfg, ddir = load_layout_contract(a.project, a.dataset)
     path = (os.path.join(ddir, "census", f"{a.census}.json") if a.census
             else latest_census_path(ddir))
     if not path or not os.path.isfile(path):
@@ -584,7 +591,7 @@ def cmd_snapshot(a) -> None:
     to answer it would trade a real answer for one nobody would ever wait for.
     So a snapshot pins membership, not bytes.
     """
-    cfg, ddir = load_dataset(a.project, a.dataset)
+    cfg, ddir = load_layout_contract(a.project, a.dataset)
     cpath = latest_census_path(ddir)
     if not cpath:
         die(f"no census for {a.dataset} — snapshot freezes what a scan saw, "
@@ -722,7 +729,7 @@ def cmd_resolve(a) -> None:
     resolve against a three-week-old census is a set of paths that were real
     three weeks ago, and the consumer is told so rather than left to assume.
     """
-    cfg, ddir = load_dataset(a.project, a.dataset)
+    cfg, ddir = load_layout_contract(a.project, a.dataset)
 
     sdir = os.path.join(ddir, "snapshots", a.snapshot)
     spath = os.path.join(sdir, "snapshot.json")

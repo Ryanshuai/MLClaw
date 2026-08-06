@@ -285,7 +285,7 @@ class DeclarationRefusals(CensusCase):
         mutate(cfg)
         self.write_json("proj/datasets/ds/dataset.json", cfg)
         with self.assertRaises(SystemExit) as cm:
-            census.load_dataset(self.path("proj"), "ds")
+            census.load_layout_contract(self.path("proj"), "ds")
         self.assertEqual(cm.exception.code, 1)
 
     def test_empty_unit_glob(self):
@@ -314,7 +314,7 @@ class DeclarationRefusals(CensusCase):
     def test_undeclared_dataset(self):
         self.write_json("proj/project.json", {"name": "proj"})
         with self.assertRaises(SystemExit) as cm:
-            census.load_dataset(self.path("proj"), "nope")
+            census.load_layout_contract(self.path("proj"), "nope")
         self.assertEqual(cm.exception.code, 1)
 
 
