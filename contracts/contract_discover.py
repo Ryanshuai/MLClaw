@@ -1633,7 +1633,7 @@ class TheRecordIsKeptNotJustWritten(DiscoverCase):
     def git(self, *args):
         import subprocess
         return subprocess.run(["git", "-C", self.project, *args],
-                              capture_output=True, text=True)
+                              capture_output=True, text=True, encoding="utf-8")
 
     def init_repo(self):
         self.git("init", "-q")

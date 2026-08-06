@@ -112,7 +112,7 @@ def run_gate(project, dataset, acknowledge) -> dict | None:
            "--dataset", dataset, "--to", "curate"]
     if acknowledge:
         cmd += ["--acknowledge", str(acknowledge)]
-    p = subprocess.run(cmd, capture_output=True, text=True)
+    p = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8")
     if p.returncode == 0:
         return None
     try:

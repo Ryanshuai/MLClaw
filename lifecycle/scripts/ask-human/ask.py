@@ -117,7 +117,7 @@ def cmd_open(a):
 
 def run_verify(cmd):
     try:
-        p = subprocess.run(cmd, shell=True, capture_output=True, text=True,
+        p = subprocess.run(cmd, shell=True, capture_output=True, text=True, encoding="utf-8",
                            timeout=VERIFY_TIMEOUT_S)
     except subprocess.TimeoutExpired:
         return None, f"verify exceeded {VERIFY_TIMEOUT_S}s"

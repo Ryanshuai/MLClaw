@@ -321,7 +321,7 @@ def bootstrap_workspace_resources(project, lifecycle, warnings):
 def _git(cwd, *args):
     """Run one git command. Returns (ok, returncode, last_output_line)."""
     try:
-        proc = subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True)
+        proc = subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, encoding="utf-8")
     except OSError as e:
         return False, None, str(e)
     out = (proc.stderr or "").strip() or (proc.stdout or "").strip()

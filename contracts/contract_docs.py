@@ -121,7 +121,7 @@ def ignored_dir_names(root):
     try:
         p = subprocess.run(["git", "-C", root, "ls-files", "--others", "--ignored",
                             "--exclude-standard", "--directory"],
-                           capture_output=True, text=True, timeout=30)
+                           capture_output=True, text=True, encoding="utf-8", timeout=30)
     except (OSError, subprocess.SubprocessError):
         return set()
     if p.returncode != 0:

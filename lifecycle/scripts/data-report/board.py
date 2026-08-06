@@ -76,7 +76,7 @@ def gather(verb, project, stale_days, *extra):
         broke(f"phase.py not found at {PHASE_PY}")
     p = subprocess.run([sys.executable, PHASE_PY, verb, "--project", project,
                         "--stale-days", str(stale_days), *extra],
-                       capture_output=True, text=True)
+                       capture_output=True, text=True, encoding="utf-8")
     if p.returncode != 0 or not p.stdout.strip():
         broke(f"phase.py {verb} failed (exit {p.returncode}): "
               f"{(p.stderr or p.stdout).strip()[:400]}")

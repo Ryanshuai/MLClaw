@@ -27,7 +27,7 @@ DEFAULT_ML_PACKAGES = [
 
 def run_cmd(cmd):
     try:
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", timeout=10)
         return r.stdout.strip() if r.returncode == 0 else None
     except FileNotFoundError:
         return None
