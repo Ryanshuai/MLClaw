@@ -83,8 +83,11 @@ class Findings:
         self.info.append({"file": file, "key": key, "message": message})
 
 
-def load_json(path, required=False):
-    """Return the parsed JSON, or None when absent/unreadable."""
+def load_json_lenient(path, required=False):
+    """Absent OR unreadable -> None (unless `required`). The lenient one of three:
+    see `validate_refs.load_json_absent_ok` and `compare_baseline.load_json_required`,
+    which differ on exactly the unreadable case. The name carries the difference
+    because a bare `load_json` bound to three contracts is how a caller picks wrong."""
     if not os.path.isfile(path):
         if required:
             raise ValidationError("missing %s" % path)
@@ -421,7 +424,7 @@ def check_candidates(which, cands, dataset, project_root, fnd):
                 stage, _, run_id = ref.partition("/")
                 rpath = os.path.join(project_root, "stages", stage, "runs",
                                      run_id, "run.json")
-                run = load_json(rpath)
+                run = load_json_lenient(rpath)
                 if run is None:
                     fnd.error(which, key,
                               "names run %s, whose run.json is not at %s" % (ref, rpath))
@@ -441,7 +444,7 @@ def check_candidates(which, cands, dataset, project_root, fnd):
                     continue
                 hid = loc.split(":", 1)[1]
                 hpath = os.path.join(project_root, "handoffs", hid, "handoff.json")
-                h = load_json(hpath)
+                h = load_json_lenient(hpath)
                 if h is None:
                     fnd.error(which, key,
                               "names handoff %s, which does not exist at %s" % (hid, hpath))
@@ -512,8 +515,8 @@ def validate(stage_dir, training_input=None, project_root=None, allow_tta=False)
     if not os.path.isdir(stage_dir):
         raise ValidationError("stage_dir does not exist: %s" % stage_dir)
 
-    inputs = load_json(os.path.join(stage_dir, "input.json"), required=True)
-    config = load_json(os.path.join(stage_dir, "config.json")) or {}
+    inputs = load_json_lenient(os.path.join(stage_dir, "input.json"), required=True)
+    config = load_json_lenient(os.path.join(stage_dir, "config.json")) or {}
 
     if project_root is None:
         # stage_dir is <project>/stages/<stage>
@@ -524,7 +527,7 @@ def validate(stage_dir, training_input=None, project_root=None, allow_tta=False)
     if training_input is None:
         training_input = os.path.join(project_root, "stages", "training", "input.json")
     training_input = os.path.abspath(os.path.expanduser(training_input))
-    train_json = load_json(training_input)
+    train_json = load_json_lenient(training_input)
 
     fnd = Findings()
     if not os.path.isfile(os.path.join(stage_dir, "config.json")):
@@ -544,7 +547,7 @@ def validate(stage_dir, training_input=None, project_root=None, allow_tta=False)
     dataset = config.get("dataset") or {}
     check_candidates("input.json", (inputs.get("candidates") or {}).get("items"),
                      dataset, project_root, fnd)
-    artifacts = load_json(os.path.join(stage_dir, "artifacts.json")) or {}
+    artifacts = load_json_lenient(os.path.join(stage_dir, "artifacts.json")) or {}
     # Artifact candidates are weights, not data, so the sample-count gate does
     # not apply to them — an empty dataset here suppresses it while leaving the
     # run: and pending: checks, which do.

@@ -70,9 +70,12 @@ class ValidationError(Exception):
     """The script cannot run at all."""
 
 
-def load_json(path, required=False):
-    """Parsed JSON, or None when absent. Unreadable/invalid is always fatal —
-    an unparseable config is not "no references found"."""
+def load_json_absent_ok(path, required=False):
+    """Absent -> None (unless `required`); unreadable/invalid is ALWAYS fatal —
+    an unparseable config is not "no references found". That asymmetry is the whole
+    point of this variant, so it is in the name: the lenient one is
+    `validate_ground_truth.load_json_lenient`, the strict one is
+    `compare_baseline.load_json_required`."""
     if not os.path.isfile(path):
         if required:
             raise ValidationError("missing %s" % path)
@@ -118,7 +121,7 @@ def validate(stage_dir):
     if not os.path.isdir(stage_dir):
         raise ValidationError("stage_dir does not exist: %s" % stage_dir)
 
-    loaded = {name: load_json(os.path.join(stage_dir, name)) for name in FILES}
+    loaded = {name: load_json_absent_ok(os.path.join(stage_dir, name)) for name in FILES}
     if all(v is None for v in loaded.values()):
         raise ValidationError("no config.json / artifacts.json / input.json / "
                               "output.json found in %s" % stage_dir)
