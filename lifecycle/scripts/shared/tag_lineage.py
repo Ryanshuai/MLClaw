@@ -99,7 +99,6 @@ def main():
     is_pipeline = tag in PIPELINE_TAGS
     tagged = []
 
-    # Tag the target run
     tag_type = "pipeline_tags" if is_pipeline else "local_tags"
     if add_tag(runs[target_id]["data"], tag, tag_type):
         save_run(runs[target_id]["path"], runs[target_id]["data"])
