@@ -819,8 +819,15 @@ def save_session(project, sid, s):
 
 def cmd_open(a):
     project = os.path.expanduser(a.project)
-    report, _ = assess(project, a.run, skip_env=False,
-                       framework_python=getattr(a, 'framework_python', None))
+    # **`open` does not register `--framework-python`; only `check` does.** So this
+    # was `getattr(a, 'framework_python', None)` returning None on every call, and
+    # the getattr made it look like the flag might be there. Explicit, because the
+    # consequence is stated in that flag's own help: without it the code axis stays
+    # `unverifiable` and can never reach `intact` -- so a repro session opened here
+    # can never close the axis that says whether the installed package was edited
+    # after install. Whether `open` should grow the flag is not a refactor's call
+    # to make; leaving it visible is.
+    report, _ = assess(project, a.run, skip_env=False, framework_python=None)
 
     if report["status"] != "completed":
         refuse(f"target run status is {report['status']!r}, not 'completed'",
