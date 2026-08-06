@@ -32,6 +32,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -40,10 +41,28 @@ SCRIPTS = os.path.join(REPO_ROOT, "lifecycle", "scripts")
 
 
 def load_script(relpath):
-    """Import a script by path, e.g. load_script('shared/create_run.py')."""
+    """Import a script by path, e.g. load_script('shared/create_run.py').
+
+    **A fresh module every call, siblings included.** A script that imports a
+    sibling out of its own directory gets that sibling from `sys.modules`, so a
+    plain re-exec hands back a module whose top half is new and whose bottom half
+    is whatever a previous test left there. A test that mutates a module-level
+    table then leaks into every later test, and the leak reads as a real failure
+    in an unrelated place -- which is how it was found: splitting the probe
+    section out of `discover.py` made a `TRACKING["futurething"]` written by one
+    test show up in another's assertion.
+
+    Half-fresh is the worse answer, not the safer one: it looks exactly like
+    fresh right up to the first module-level mutation.
+    """
     path = os.path.join(SCRIPTS, relpath)
     if not os.path.isfile(path):
         raise unittest.SkipTest(f"script not present yet: {relpath}")
+    for cached in [k for k, m in sys.modules.items()
+                   if getattr(m, "__file__", None)
+                   and os.path.dirname(os.path.abspath(m.__file__))
+                   == os.path.dirname(os.path.abspath(path))]:
+        del sys.modules[cached]
     name = "mlclaw_" + relpath.replace("/", "_").replace("-", "_")[:-3]
     spec = importlib.util.spec_from_file_location(name, path)
     mod = importlib.util.module_from_spec(spec)

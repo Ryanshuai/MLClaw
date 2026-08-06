@@ -25,6 +25,9 @@ from datetime import datetime, timedelta, timezone
 from helpers import TempDirCase, load_script, run_script
 
 SCRIPT = "discover/discover.py"
+# The probe transports and the five vendor REST adapters live here; a probe
+# resolves its collaborators in this module, so patch here, not on `discover`.
+PROBES = "discover/_probes.py"
 
 
 def path_shape_of(path):
@@ -2607,7 +2610,11 @@ class AnEmptyWandbListingIsNotAnAbsence(DiscoverCase):
         return load_script(SCRIPT)
 
     def test_every_prefix_the_tool_itself_renders_is_stripped(self):
-        d = load_script(SCRIPT)
+        # `_probes`, not `discover`: it owns both `probe_tracking` and the
+        # per-vendor probe it dispatches to, and a function looks its collaborators
+        # up in **its own** module globals. Patching a name on `discover` (which
+        # only imports the four transports) would patch nothing.
+        d = load_script(PROBES)
         seen = {}
 
         def fake_entity(entity, where, budget_s):
@@ -2640,7 +2647,7 @@ class AnEmptyWandbListingIsNotAnAbsence(DiscoverCase):
             self.assertEqual(d.display_where(lead), want, lead)
 
     def test_an_empty_entity_listing_is_unreachable_not_gone(self):
-        d = load_script(SCRIPT)
+        d = load_script(PROBES)
         real = d.subprocess.run
 
         class R:
@@ -2660,7 +2667,7 @@ class AnEmptyWandbListingIsNotAnAbsence(DiscoverCase):
 
     def test_a_populated_entity_still_verifies(self):
         """The fix must not make the working case unanswerable."""
-        d = load_script(SCRIPT)
+        d = load_script(PROBES)
         real = d.subprocess.run
 
         class R:
