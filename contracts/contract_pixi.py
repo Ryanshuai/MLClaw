@@ -148,8 +148,28 @@ class EveryThirdPartyImportIsOptional(unittest.TestCase):
     scenes)." — and a check that cries wolf on documentation gets switched off.
     """
 
-    LOCAL = {"helpers", "_records", "_common", "_stream", "_dataset_paths",
-             "compare", "select_checkpoint", "framework_integrity"}
+    @staticmethod
+    def _repo_local_modules():
+        """Every module name that resolves to a file **inside this repo**.
+
+        Was a hand-written list of eight names, and a hand-written list of
+        repo-internal facts is a list that goes stale on the next split: pulling
+        the probe section out of `discover.py` created `_probes`, and the check
+        reported it as an unguarded third-party import -- a defect in the code
+        where there was none, and the suggested fix (wrap it in a try) would have
+        been wrong.
+
+        The criterion is computable and always current: a sibling `.py` under
+        `lifecycle/scripts/` or `contracts/` is repo-local by construction, since
+        that is exactly what `sys.path.insert` makes importable.
+        """
+        names = set()
+        for base in ("lifecycle/scripts", "contracts"):
+            for dirpath, _d, files in os.walk(os.path.join(REPO_ROOT, base)):
+                if "__pycache__" in dirpath:
+                    continue
+                names |= {f[:-3] for f in files if f.endswith(".py")}
+        return names
 
     @staticmethod
     def _guarded_and_bare(tree):
@@ -217,7 +237,7 @@ class EveryThirdPartyImportIsOptional(unittest.TestCase):
         stdlib = set(getattr(sys, "stdlib_module_names", ()))
         if not stdlib:
             self.skipTest("sys.stdlib_module_names needs 3.10+")
-        allowed = stdlib | self.LOCAL | {"__future__"}
+        allowed = stdlib | self._repo_local_modules() | {"__future__"}
 
         unguarded, optional = {}, {}
         for base in ("lifecycle/scripts", "contracts"):
