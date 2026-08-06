@@ -46,7 +46,7 @@ from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _common import (DEFAULT_TTL_S, TAG_PREFIX, add_shape_args, die, emit,  # noqa: E402
-                     fan_out, load_resources, resources_path, shape_flags)
+                     fan_out, load_resources, resources_from_workspace_root, shape_flags)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 OPEN_STATES = ("held", "requesting")
@@ -369,7 +369,7 @@ def main():
     p.add_argument("--tag-prefix", default=TAG_PREFIX)
 
     args = ap.parse_args()
-    args.res = resources_path(args.resources)
+    args.res = resources_from_workspace_root(args.resources)
     args.fn(args)
 
 
