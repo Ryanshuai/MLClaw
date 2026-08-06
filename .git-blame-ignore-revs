@@ -1,0 +1,14 @@
+# Commits that touched many lines without changing what any of them mean.
+# `git blame` must skip them, and this file is how it learns to:
+#
+#     git config blame.ignoreRevsFile .git-blame-ignore-revs
+#
+# Why it matters beyond readability: the `comment` check in agent-refactor uses
+# blame to tell "the code changed and the comment did not" from "they agree".
+# A repo-wide mechanical edit resets the code side's author-time on every line it
+# touched, so every normative comment sitting above one of them reads as
+# `conflict` -- which the tool reports as **a bug to hand out**, the most
+# expensive false positive it can produce.
+
+# fix: pin encoding="utf-8" on all 33 subprocess text reads
+8e7d095c8794413be8a8b00a0535819c08af8df8
