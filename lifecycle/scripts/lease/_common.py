@@ -62,8 +62,13 @@ def fan_out(items, fn):
         return list(pool.map(fn, items))
 
 
-def resources_path(arg):
+def resources_from_workspace_root(arg):
     """--resources, else $MLCLAW_RESOURCES, else the workspace named in CLAUDE.md.
+
+    Not the same third fallback as `data-collect/collect.py ->
+    resources_beside_project`, which looks beside the project directory. Named
+    apart so the divergence is visible: one name for two resolvers that can land
+    on different registry files is a disagreement nothing downstream can see.
 
     The fallback is what makes the skill's promise true — `reap` and `release` have to
     run with zero upstream state, and requiring the caller to already know the

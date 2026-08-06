@@ -44,8 +44,15 @@ from _records import (atomic_write_json, broke, emit, now_utc, read_json, refuse
 KINDS = ("server", "s3", "local")
 
 
-def resources_path(project, explicit):
+def resources_beside_project(project, explicit):
     """--resources, else $MLCLAW_RESOURCES, else the workspace beside the project.
+
+    The third fallback is **not the same one** `lease/_common.py ->
+    resources_from_workspace_root` uses: that one reads `workspace_root` out of
+    CLAUDE.md, because `reap` and `release` must run with zero upstream state.
+    Both were called `resources_path`, and two functions with one name that can
+    resolve to *different registry files* is worse than either fallback being
+    wrong -- a disagreement there is silent and nothing downstream can see it.
     `resources.json` is workspace-level and never committed; a project sits under
     the workspace root, so its parent is the default place to look."""
     for c in (explicit, os.environ.get("MLCLAW_RESOURCES"),
@@ -75,7 +82,7 @@ def resolve(project, frm, at, resources_arg):
             broke("--at must be an s3:// URI when --from is s3", got=at)
         return "s3", at.rstrip("/") + "/", {"kind": "s3", "uri": at}
 
-    rpath = resources_path(project, resources_arg)
+    rpath = resources_beside_project(project, resources_arg)
     if not rpath:
         broke("cannot locate resources.json",
               hint="pass --resources, set $MLCLAW_RESOURCES, or put it at the workspace root")

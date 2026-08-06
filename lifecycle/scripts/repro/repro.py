@@ -207,7 +207,7 @@ def is_remeasure_only(session) -> bool:
 # locating things
 # --------------------------------------------------------------------------
 
-def run_dir(project, ref):
+def resolve_run_ref(project, ref):
     """`<stage>/<run_id>` -> absolute run directory. The two-part form is
     required: a bare run_id is ambiguous across stages, and guessing the stage
     is how a repro ends up comparing an eval number to a training number."""
@@ -221,7 +221,7 @@ def run_dir(project, ref):
 
 
 def load_run(project, ref):
-    d, stage, rid = run_dir(project, ref)
+    d, stage, rid = resolve_run_ref(project, ref)
     rj = os.path.join(d, "run.json")
     if not os.path.exists(rj):
         broke(f"no run.json at {rj}")
@@ -538,7 +538,7 @@ def probe_code(project, run, stage, framework_python=None):
     notes = {}
     patch_rel = code.get("dirty_patch_path")
     if patch_rel:
-        rd, _, _ = run_dir(project, f"{stage}/{run.get('run_id')}")
+        rd, _, _ = resolve_run_ref(project, f"{stage}/{run.get('run_id')}")
         ppath = os.path.join(rd, patch_rel)
         if not os.path.exists(ppath):
             return axis("drifted", f"origin_commit resolves but the dirty patch is "
@@ -634,7 +634,7 @@ def probe_params(project, run, stage):
     """A param that was overridable when the run launched and is hardcoded now
     means the code moved under the recorded config. The run's own numbers are
     still real; relaunching with that config no longer produces them."""
-    rd, _, _ = run_dir(project, f"{stage}/{run.get('run_id')}")
+    rd, _, _ = resolve_run_ref(project, f"{stage}/{run.get('run_id')}")
     snap = read_json(os.path.join(rd, "config_snapshot.json"), required=False)
     if snap is None:
         return axis("unverifiable", "no config_snapshot.json -- what this run was "
@@ -677,7 +677,7 @@ def probe_artifacts(project, run):
     findings, worst = [], "intact"
     for ref in parents:
         try:
-            pd, _, _ = run_dir(project, ref)
+            pd, _, _ = resolve_run_ref(project, ref)
         except SystemExit:
             findings.append({"parent": ref, "verdict": "unverifiable",
                              "detail": "parent ref is not <stage>/<run_id>"})

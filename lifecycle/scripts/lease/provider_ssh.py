@@ -30,7 +30,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _common import (SSH_UNREACHABLE, TAG_PREFIX, add_shape_args, die, emit,  # noqa: E402
-                     fan_out, load_resources, parse_arch, resources_path)
+                     fan_out, load_resources, parse_arch, resources_from_workspace_root)
 
 PROBE_TIMEOUT = 12   # nvidia-smi + a few small reads; 60s only ever hid a wedged host
 CLAIM_TIMEOUT = 20
@@ -404,7 +404,7 @@ def main():
     s.add_argument("--tag-prefix", default=TAG_PREFIX)
 
     args = ap.parse_args()
-    args.res = resources_path(args.resources)
+    args.res = resources_from_workspace_root(args.resources)
     args.fn(args)
 
 

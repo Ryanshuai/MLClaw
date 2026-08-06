@@ -97,13 +97,23 @@ BLIND_TO = ("distribution shift — the eval set was cut from the training "
             "neither skill can serve as the other's alarm")
 
 
-def run_dir(project, run_id) -> str:
+def eval_run_dir(project, run_id) -> str:
+    """The stage is **hardcoded** to `evaluation`, which is correct here and only
+    here: /eval-triage operates on evaluation runs by definition.
+
+    Named for that, because `repro.py -> resolve_run_ref` exists specifically to
+    *refuse* a bare run_id -- the stage is what decides whether two numbers are
+    the same quantity (CLAUDE.md: "Never compare metrics across different mode or
+    non-equivalent scope"). Both were called `run_dir`, so a reader who learned
+    the name here would write `run_dir(project, "run_003")` somewhere new and
+    silently get an evaluation path.
+    """
     return os.path.join(os.path.expanduser(project), "stages", "evaluation",
                         "runs", run_id)
 
 
 def session_path(project, run_id, sid) -> str:
-    return os.path.join(run_dir(project, run_id), "triage", sid, "session.json")
+    return os.path.join(eval_run_dir(project, run_id), "triage", sid, "session.json")
 
 
 # --------------------------------------------------------------------------- #
@@ -291,7 +301,7 @@ def find_case(session, unit):
 
 def cmd_rank(a) -> None:
     project = os.path.expanduser(a.project)
-    rdir = run_dir(project, a.run)
+    rdir = eval_run_dir(project, a.run)
     rec = read_json(os.path.join(rdir, "run.json"))
     if rec.get("status") != "completed":
         refuse(f"{a.run} is {rec.get('status')!r}, not completed",
