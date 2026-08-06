@@ -27,11 +27,10 @@ import os
 import subprocess
 import sys
 import time
-from concurrent.futures import ThreadPoolExecutor
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _common import (SSH_UNREACHABLE, TAG_PREFIX, add_shape_args, die, emit,  # noqa: E402
-                     load_resources, parse_arch, resources_path)
+                     fan_out, load_resources, parse_arch, resources_path)
 
 PROBE_TIMEOUT = 12   # nvidia-smi + a few small reads; 60s only ever hid a wedged host
 CLAIM_TIMEOUT = 20
@@ -104,16 +103,6 @@ def ssh_or_die(entry, script, timeout=PROBE_TIMEOUT):
     if rc == SSH_UNREACHABLE:
         die("transient", "ssh could not connect")
     return out
-
-
-def in_parallel(items, fn):
-    """Fan out over servers. Pure subprocess I/O, so threads give wall-clock =
-    slowest host instead of the sum — and one powered-off desktop costs its own
-    timeout rather than everyone else's."""
-    if not items:
-        return []
-    with ThreadPoolExecutor(max_workers=min(8, len(items))) as pool:
-        return list(pool.map(fn, items))
 
 
 # --- one round trip per host --------------------------------------------------
@@ -303,7 +292,7 @@ def v_capacity(args):
             "arch": f"sm_{first['arch']}" if first["arch"] else None,
         }
 
-    rows = in_parallel(list(servers.items()), one)
+    rows = fan_out(list(servers.items()), one)
     emit(sorted(rows, key=lambda r: -r["avail"]))
 
 
@@ -385,7 +374,7 @@ def v_sweep(args):
             })
         return rows
 
-    emit([r for rows in in_parallel(list(servers.items()), one) for r in rows])
+    emit([r for rows in fan_out(list(servers.items()), one) for r in rows])
 
 
 def main():

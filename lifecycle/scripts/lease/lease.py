@@ -42,12 +42,11 @@ import secrets
 import subprocess
 import sys
 import time
-from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _common import (DEFAULT_TTL_S, TAG_PREFIX, add_shape_args, die, emit,  # noqa: E402
-                     load_resources, resources_path, shape_flags)
+                     fan_out, load_resources, resources_path, shape_flags)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 OPEN_STATES = ("held", "requesting")
@@ -123,16 +122,6 @@ def call(provider, res_path, verb, *extra):
             parsed = {"error": "transient", "detail": proc.stderr[-400:] or "adapter failed"}
         return False, parsed
     return True, parsed
-
-
-def fan_out(names, fn):
-    """Providers are independent and already isolated in subprocesses, so wall clock is
-    the slowest provider instead of the sum. Matters as soon as a cloud adapter lands —
-    describe/capacity APIs take seconds, not milliseconds."""
-    if not names:
-        return []
-    with ThreadPoolExecutor(max_workers=min(8, len(names))) as pool:
-        return list(pool.map(fn, names))
 
 
 def collect(names, res, verb, *extra):

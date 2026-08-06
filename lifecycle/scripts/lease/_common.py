@@ -12,6 +12,7 @@ decisions, so adapters must not carry their own defaults for them.
 import json
 import os
 import sys
+from concurrent.futures import ThreadPoolExecutor
 
 DEFAULT_TTL_S = 14400  # 4h. L2 policy — adapters require --ttl-s, they don't default it.
 TAG_PREFIX = "mlclaw-"
@@ -30,6 +31,21 @@ def die(cls, detail, **extra):
 
 def emit(obj, indent=None):
     print(json.dumps(obj, indent=indent))
+
+
+def fan_out(items, fn):
+    """Map `fn` over `items` concurrently. Threads are correct here because the work is
+    pure subprocess I/O -- providers and hosts are already isolated in their own
+    processes, so wall clock is the slowest one instead of the sum.
+
+    Two reasons that matters, one per caller: an unreachable host costs its own ssh
+    timeout rather than everyone else's, and a cloud adapter's describe/capacity APIs
+    take seconds, not milliseconds.
+    """
+    if not items:
+        return []
+    with ThreadPoolExecutor(max_workers=min(8, len(items))) as pool:
+        return list(pool.map(fn, items))
 
 
 def resources_path(arg):
