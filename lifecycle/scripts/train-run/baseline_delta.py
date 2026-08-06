@@ -56,6 +56,9 @@ import json
 import os
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _stream import finding  # noqa: E402
+
 BASE_KEYS = ("model", "weights", "init_from", "resume_from", "base_model",
              "pretrained_path", "load_from")
 
@@ -67,12 +70,6 @@ def _real(d):
     exactly like the guard working, which is how it survives unnoticed.
     """
     return {k: v for k, v in (d or {}).items() if not str(k).startswith("_")}
-
-
-def finding(level, code, message, **extra):
-    f = {"level": level, "code": code, "message": message}
-    f.update(extra)
-    return f
 
 
 def verdict_of(findings):
