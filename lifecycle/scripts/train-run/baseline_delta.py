@@ -72,7 +72,16 @@ def _real(d):
     return {k: v for k, v in (d or {}).items() if not str(k).startswith("_")}
 
 
-def emit(report):
+def emit_verdict(report):
+    """Print the report, **return an exit code** -- 1 when the verdict is `fail`.
+
+    Not named `emit`. `shared/_records.py -> emit(obj)` has the identical
+    signature and returns `None`, and eleven scripts write `return emit({...})`
+    meaning "success, exit 0". Anyone who "cleaned this up" by importing the
+    shared one instead would turn every refusal this script makes into exit 0 --
+    and refusing is its whole job (a fine-tune with no base measurement).
+    The name is the guard, because the signatures cannot be told apart.
+    """
     print(json.dumps(report, indent=2, default=str))
     return 1 if report["verdict"] == "fail" else 0
 
@@ -118,7 +127,7 @@ def cmd_check(a):
 
     ft, why = is_finetune(run)
     if not ft:
-        return emit({"verdict": "ok", "is_finetune": False, "findings": [],
+        return emit_verdict({"verdict": "ok", "is_finetune": False, "findings": [],
                      "note": "not a fine-tune -- no base to measure against"})
 
     bd = run.get("baseline_delta") or {}
@@ -149,7 +158,7 @@ def cmd_check(a):
             "the base was measured (%s) and the child has not been -- expected "
             "while the run is still going" % before))
 
-    return emit({"verdict": verdict_of(findings), "is_finetune": True,
+    return emit_verdict({"verdict": verdict_of(findings), "is_finetune": True,
                  "is_finetune_because": why, "before": before, "after": after,
                  "findings": findings})
 
@@ -273,7 +282,7 @@ def cmd_protocol(a):
     if a.output_json:
         with open(a.output_json, "w") as fh:
             json.dump(report, fh, indent=2, default=str)
-    return emit(report)
+    return emit_verdict(report)
 
 
 def main():
