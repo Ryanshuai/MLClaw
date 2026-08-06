@@ -296,7 +296,6 @@ def cmd_register(a) -> None:
                    fix="tag_lineage.py the run, or register --claimed")
         prov = "run"
 
-    # --- the layout contract for the new dataset.
     if a.declare:
         cfg = read_json(os.path.expanduser(a.declare))
     else:

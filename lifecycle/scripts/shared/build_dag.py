@@ -107,7 +107,6 @@ def build_graph(runs):
             "local_tags": run.get("lineage", {}).get("local_tags", []),
         }
 
-        # Cross-stage parents
         parents = run.get("lineage", {}).get("parents", [])
         for p in parents:
             if isinstance(p, str):
@@ -397,7 +396,6 @@ def main():
         if idx + 1 < len(sys.argv):
             output_path = sys.argv[idx + 1]
 
-    # Load project name
     project_json = os.path.join(project_root, "project.json")
     project_name = os.path.basename(project_root)
     if os.path.isfile(project_json):
