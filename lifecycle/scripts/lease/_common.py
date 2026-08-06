@@ -30,7 +30,21 @@ def die(cls, detail, **extra):
 
 
 def emit(obj, indent=None):
-    print(json.dumps(obj, indent=indent))
+    """Success payload on stdout, compact by default.
+
+    `ensure_ascii=False` is not cosmetic and not optional: every other emitter in
+    this repo uses it, and without it a non-ASCII host label or note comes out as
+    backslash-u escapes -- readable only to whoever knows to decode them. A record
+    nobody can read is not a record.
+
+    Differs from `shared/_records.py -> emit(obj)` on purpose, which is why the
+    signature differs too: 15 of 16 call sites here are small provider payloads
+    read by a script, so compact is the right default; the one place a human
+    reads it passes `indent=2`. Same-name-different-contract is only safe while
+    the signatures also differ -- see `load_layout_contract` for the case where
+    they did not.
+    """
+    print(json.dumps(obj, indent=indent, ensure_ascii=False))
 
 
 def fan_out(items, fn):
