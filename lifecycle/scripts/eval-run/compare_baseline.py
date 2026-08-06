@@ -72,7 +72,10 @@ class CompareError(Exception):
     """The script cannot run at all."""
 
 
-def load_json(path, what="file"):
+def load_json_required(path, what="file"):
+    """Absent OR unreadable -> raise. The strict one of three; the other two return
+    None on absence (`validate_refs.load_json_absent_ok`) or on either
+    (`validate_ground_truth.load_json_lenient`)."""
     try:
         with open(path, encoding="utf-8") as f:
             return json.load(f)
@@ -108,7 +111,7 @@ def _run_dataset(run_dir, run):
     snap = os.path.join(run_dir, "config_snapshot.json")
     if os.path.isfile(snap):
         try:
-            d = (load_json(snap, "config snapshot") or {}).get("dataset")
+            d = (load_json_required(snap, "config snapshot") or {}).get("dataset")
             if d:
                 return d, "config_snapshot.json"
         except CompareError:
@@ -116,7 +119,7 @@ def _run_dataset(run_dir, run):
     stage_cfg = os.path.join(os.path.dirname(os.path.dirname(run_dir)), "config.json")
     if os.path.isfile(stage_cfg):
         try:
-            d = (load_json(stage_cfg, "stage config") or {}).get("dataset")
+            d = (load_json_required(stage_cfg, "stage config") or {}).get("dataset")
             if d:
                 return d, "stage config.json"
         except CompareError:
@@ -130,7 +133,7 @@ def load_run_side(run_json_path, label):
         run_json_path = os.path.join(run_json_path, "run.json")
     if not os.path.isfile(run_json_path):
         raise CompareError("no %s run.json at %s" % (label, run_json_path))
-    run = load_json(run_json_path, "%s run.json" % label)
+    run = load_json_required(run_json_path, "%s run.json" % label)
     run_dir = os.path.dirname(run_json_path)
     dataset, dataset_from = _run_dataset(run_dir, run)
     metrics, skipped = scalar_metrics(run.get("metrics"))
@@ -186,7 +189,7 @@ def resolve_baseline(spec, run_json_path):
     if os.path.isdir(expanded):
         return load_run_side(os.path.join(expanded, "run.json"), "baseline")
     if os.path.isfile(expanded):
-        obj = load_json(expanded, "baseline")
+        obj = load_json_required(expanded, "baseline")
         if _looks_like_run_record(obj):
             return load_run_side(expanded, "baseline")
         return _external_side(obj, os.path.abspath(expanded))
@@ -415,7 +418,7 @@ def compare(run_json_path, baseline_spec, output_json_path=None, assert_reason=N
     output_json_path = os.path.abspath(os.path.expanduser(output_json_path))
     output_json = None
     if os.path.isfile(output_json_path):
-        output_json = load_json(output_json_path, "output.json")
+        output_json = load_json_required(output_json_path, "output.json")
     else:
         warnings.append("no output.json at %s — no metric direction is available, so "
                         "every delta is reported as unknown_direction."
