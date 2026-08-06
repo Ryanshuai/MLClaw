@@ -346,7 +346,7 @@ def run_remote(plan, script: str, timeout=600):
         cmd = ["sh", "-s"]
     try:
         return subprocess.run(cmd, input=script, capture_output=True,
-                              text=True, timeout=timeout)
+                              text=True, encoding="utf-8", timeout=timeout)
     except (subprocess.TimeoutExpired, OSError) as e:
         broke(f"could not reach {plan.get('at')}: {type(e).__name__}: {e}")
 

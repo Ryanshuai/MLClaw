@@ -414,7 +414,7 @@ def s3_buckets_visible(res, budget_s):
     """
     env, where, _registered = aws_env(res)
     try:
-        p = subprocess.run(["aws", "s3", "ls"], capture_output=True, text=True,
+        p = subprocess.run(["aws", "s3", "ls"], capture_output=True, text=True, encoding="utf-8",
                            env=env, timeout=max(30.0, budget_s))
     except FileNotFoundError:
         return None, "the aws CLI is not installed"
@@ -447,7 +447,7 @@ def s3_bucket_listable(bucket, res, budget_s):
     env, where, _ = aws_env(res)
     try:
         p = subprocess.run(["aws", "s3", "ls", f"s3://{bucket}/"],
-                           capture_output=True, text=True, env=env,
+                           capture_output=True, text=True, encoding="utf-8", env=env,
                            timeout=max(30.0, budget_s))
     except FileNotFoundError:
         return "error", "the aws CLI is not installed"
@@ -1215,7 +1215,7 @@ def probe_server(key, path, res, budget_s):
         f'else echo MISSING; echo {OK}; fi\n')
     cmd = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", host, "sh", "-s"]
     try:
-        p = subprocess.run(cmd, input=script, capture_output=True, text=True,
+        p = subprocess.run(cmd, input=script, capture_output=True, text=True, encoding="utf-8",
                            timeout=max(60.0, budget_s * 2))
     except (subprocess.TimeoutExpired, OSError) as exc:
         return "unreachable", f"{type(exc).__name__}: {exc}", None, {}
@@ -1313,7 +1313,7 @@ def probe_s3(path, res, budget_s):
         # `--summarize --recursive` is the only way to get a real total, and it
         # is also what makes this the slow probe. Bounded like the local walk.
         p = subprocess.run(["aws", "s3", "ls", "--recursive", "--summarize", path],
-                           capture_output=True, text=True, env=env,
+                           capture_output=True, text=True, encoding="utf-8", env=env,
                            timeout=max(60.0, budget_s * 4))
     except FileNotFoundError:
         return ("unreachable", "the aws CLI is not installed", None,
@@ -1976,7 +1976,7 @@ def probe_wandb_entity(entity, where, budget_s):
     try:
         p = subprocess.run(
             [sys.executable, "-c", WANDB_ENTITY_LISTING % (entity or None)],
-            capture_output=True, text=True, timeout=max(60.0, budget_s * 2))
+            capture_output=True, text=True, encoding="utf-8", timeout=max(60.0, budget_s * 2))
     except (subprocess.TimeoutExpired, OSError) as exc:
         return ("unreachable", f"{type(exc).__name__}: {exc}", None,
                 {"blocker": "tracking:wandb:entity_probe_failed"})
@@ -2136,7 +2136,7 @@ def probe_tracking(on, path, budget_s):
         return probe_wandb_entity(loc, where, budget_s)
     try:
         p = subprocess.run([sys.executable, "-c", WANDB_LISTING % loc],
-                           capture_output=True, text=True,
+                           capture_output=True, text=True, encoding="utf-8",
                            timeout=max(60.0, budget_s * 2))
     except subprocess.TimeoutExpired:
         return ("unreachable", f"the {backend} API did not answer within the "

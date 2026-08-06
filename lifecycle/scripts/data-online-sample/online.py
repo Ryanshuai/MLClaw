@@ -197,7 +197,7 @@ def list_prefix(online: dict, prefix: str, resources: str | None,
         uri = prefix if prefix.startswith("s3://") else \
             f"{online['resource'].rstrip('/')}/{prefix}"
         p = subprocess.run(["aws", "s3", "ls", uri.rstrip("/") + "/"],
-                           capture_output=True, text=True, timeout=600)
+                           capture_output=True, text=True, encoding="utf-8", timeout=600)
         if p.returncode != 0:
             err = (p.stderr or "").strip().splitlines()
             low = " ".join(err).lower()
@@ -243,7 +243,7 @@ def list_prefix(online: dict, prefix: str, resources: str | None,
 
     try:
         p = subprocess.run(cmd, input=script, capture_output=True,
-                           text=True, timeout=600)
+                           text=True, encoding="utf-8", timeout=600)
     except (subprocess.TimeoutExpired, OSError) as e:
         return {"reachable": False, "error": f"{type(e).__name__}: {e}"}
     out = p.stdout

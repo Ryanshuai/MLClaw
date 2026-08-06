@@ -55,7 +55,7 @@ def run_script(relpath, *args):
     """Run a script as a subprocess. -> (returncode, parsed_stdout_or_raw, stderr)."""
     path = os.path.join(SCRIPTS, relpath)
     p = subprocess.run(["python3", path, *[str(a) for a in args]],
-                       capture_output=True, text=True)
+                       capture_output=True, text=True, encoding="utf-8")
     try:
         out = json.loads(p.stdout) if p.stdout.strip() else None
     except json.JSONDecodeError:
@@ -97,7 +97,7 @@ class GitRepoCase(TempDirCase):
 
     def git(self, *args, cwd=None):
         p = subprocess.run(["git", *args], cwd=cwd or self.repo,
-                           capture_output=True, text=True)
+                           capture_output=True, text=True, encoding="utf-8")
         return p
 
     def make_repo(self, name="repo", files=None, gitignore=None, code_subdir=None):

@@ -74,9 +74,9 @@ class ReproCase(TempDirCase):
                     ("config", "user.name", "MLClaw Test"),
                     ("config", "commit.gpgsign", "false"),
                     ("add", "-A"), ("commit", "-qm", "init")):
-            subprocess.run(["git", *cmd], cwd=cdir, capture_output=True, text=True)
+            subprocess.run(["git", *cmd], cwd=cdir, capture_output=True, text=True, encoding="utf-8")
         p = subprocess.run(["git", "rev-parse", "HEAD"], cwd=cdir,
-                           capture_output=True, text=True)
+                           capture_output=True, text=True, encoding="utf-8")
         return p.stdout.strip()
 
     def snapshot(self, retired=False, retired_at="2026-07-29T09:00:00+00:00"):

@@ -241,7 +241,7 @@ def git(cwd, *args):
     result (`unverifiable`), not a crash."""
     try:
         p = subprocess.run(("git",) + args, cwd=cwd, capture_output=True,
-                           text=True, timeout=30)
+                           text=True, encoding="utf-8", timeout=30)
         return p.returncode == 0, (p.stdout or "").strip()
     except (OSError, subprocess.SubprocessError):
         return False, ""
@@ -589,7 +589,7 @@ def current_env(packages):
         return None, "capture_env.py not found"
     try:
         p = subprocess.run([sys.executable, script, ",".join(packages)],
-                           capture_output=True, text=True, timeout=120)
+                           capture_output=True, text=True, encoding="utf-8", timeout=120)
     except (OSError, subprocess.SubprocessError) as exc:
         return None, str(exc)
     if p.returncode != 0:

@@ -135,7 +135,7 @@ def build_cmd(kind, remote, dest, args, *, dry):
 
 def run(cmd, timeout):
     try:
-        p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        p = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", timeout=timeout)
     except FileNotFoundError:
         broke(f"{cmd[0]} is not installed", cmd=" ".join(cmd))
     except subprocess.TimeoutExpired:
@@ -255,7 +255,7 @@ def cmd_pull(a):
                             "--rig", a.rig, "--into", dest] +
                            (["--session", a.session] if a.session else []) +
                            (["--overwrite"] if a.overwrite else []),
-                           capture_output=True, text=True)
+                           capture_output=True, text=True, encoding="utf-8")
         try:
             session["rig_stamp"] = json.loads(p.stdout) if p.stdout.strip() else None
         except json.JSONDecodeError:

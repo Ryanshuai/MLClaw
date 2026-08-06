@@ -148,7 +148,7 @@ def framework_integrity(spec, python=None, budget_s=120.0):
     interp = python or sys.executable
     try:
         p = subprocess.run([interp, "-c", _INTEGRITY_SNIPPET, name],
-                           capture_output=True, text=True, timeout=budget_s)
+                           capture_output=True, text=True, encoding="utf-8", timeout=budget_s)
     except FileNotFoundError:
         return {"state": "no_interpreter", "means": STATE_MEANS["no_interpreter"],
                 "detail": f"{interp} is not an executable on this machine"}

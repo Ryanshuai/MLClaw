@@ -142,7 +142,7 @@ def _run(cmd, cwd, env=None):
     if env:
         full_env = os.environ.copy()
         full_env.update(env)
-    return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, env=full_env)
+    return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, encoding="utf-8", env=full_env)
 
 
 def _run_z(cmd, cwd):

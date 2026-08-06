@@ -78,7 +78,7 @@ def run_probe(cmd):
     """-> (status, value_or_detail). Never raises: a probe is somebody else's
     command and its failure is a finding, not a crash."""
     try:
-        p = subprocess.run(cmd, shell=True, capture_output=True, text=True,
+        p = subprocess.run(cmd, shell=True, capture_output=True, text=True, encoding="utf-8",
                            timeout=PROBE_TIMEOUT_S)
     except subprocess.TimeoutExpired:
         return "timeout", f"probe exceeded {PROBE_TIMEOUT_S}s"

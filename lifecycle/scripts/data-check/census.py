@@ -269,7 +269,7 @@ def probe(loc: dict, cfg: dict) -> dict:
 
     try:
         p = subprocess.run(cmd, input=script, capture_output=True,
-                           text=True, timeout=600)
+                           text=True, encoding="utf-8", timeout=600)
     except (subprocess.TimeoutExpired, OSError) as e:
         return {"reachable": False, "error": f"{type(e).__name__}: {e}"}
 

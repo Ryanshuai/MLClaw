@@ -86,7 +86,7 @@ def ssh_exec(entry, script, timeout=PROBE_TIMEOUT):
         argv += ["-p", str(port)]
     try:
         proc = subprocess.run(argv + [target, "bash -s"], input=script,
-                              capture_output=True, text=True, timeout=timeout)
+                              capture_output=True, text=True, encoding="utf-8", timeout=timeout)
     except subprocess.TimeoutExpired:
         return SSH_UNREACHABLE, ""
     except FileNotFoundError:

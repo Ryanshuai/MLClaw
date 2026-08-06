@@ -22,7 +22,7 @@ def test_ssh(host, port, username, ssh_key_path, remote_path=None, timeout=10):
         cmd.append("echo ok")
 
     try:
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout + 5)
+        r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", timeout=timeout + 5)
         return {
             "ok": r.returncode == 0,
             "output": r.stdout.strip(),
@@ -45,7 +45,7 @@ def test_s3(path, region=None, profile=None, timeout=10):
         cmd += ["--profile", profile]
 
     try:
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", timeout=timeout)
         return {
             "ok": r.returncode == 0,
             "output": r.stdout.strip()[:200],
