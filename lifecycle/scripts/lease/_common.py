@@ -108,23 +108,39 @@ def load_resources(path):
         die("permission", f"resources.json is not valid JSON: {exc}")
 
 
+# The requirement vocabulary, declared **once**. Adding a dimension (disk_gb,
+# arch_max) is one line here instead of one per subparser per file.
+#
+# It used to be two lists that had to agree: four `add_argument` calls plus a
+# `SHAPE_FLAGS` tuple, under a docstring claiming "driven by the same list". Add
+# `--disk-gb` to only one of them and the failure is silent in whichever
+# direction you got wrong -- a flag the user passed never reaches the provider,
+# or a name nobody registers is skipped. One table cannot disagree with itself.
+SHAPE_ARGS = (
+    ("gpu_count", {"type": int, "default": 1}),
+    ("gpu_memory_gb", {"type": float, "default": 0}),
+    ("arch_min", {}),
+    ("host_ram_gb", {"type": float}),
+)
+SHAPE_FLAGS = tuple(name for name, _ in SHAPE_ARGS)
+
+
 def add_shape_args(parser):
-    """The requirement vocabulary, declared once. Adding a dimension (disk_gb, arch_max)
-    is one edit here instead of one per subparser per file."""
-    parser.add_argument("--gpu-count", type=int, default=1)
-    parser.add_argument("--gpu-memory-gb", type=float, default=0)
-    parser.add_argument("--arch-min")
-    parser.add_argument("--host-ram-gb", type=float)
-
-
-SHAPE_FLAGS = ("gpu_count", "gpu_memory_gb", "arch_min", "host_ram_gb")
+    for name, kw in SHAPE_ARGS:
+        parser.add_argument(f"--{name.replace('_', '-')}", **kw)
 
 
 def shape_flags(args):
-    """Re-serialize the shape for a subprocess call, driven by the same list."""
+    """Re-serialize the shape for a subprocess call, driven by the same table.
+
+    Direct attribute access, not `getattr(args, name, None)`. Every call site is
+    a subparser that ran `add_shape_args`, so the default was unreachable -- and
+    what it hid is the one error worth seeing: a name in the table that no parser
+    registers would have been silently skipped instead of raising.
+    """
     out = []
     for name in SHAPE_FLAGS:
-        val = getattr(args, name, None)
+        val = getattr(args, name)
         if val not in (None, 0):
             out += [f"--{name.replace('_', '-')}", str(val)]
     return out
