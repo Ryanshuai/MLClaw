@@ -211,5 +211,67 @@ class Template(unittest.TestCase):
         self.assertEqual(offenders, [], f"step names absent from run.json: {offenders}")
 
 
+class Workload(unittest.TestCase):
+    """run-mechanics.md -> "Record integrity": `workload` records what the run was
+    ASKED to do, and an unknown stays null rather than taking a default.
+
+    It is the only record of the ask. Once a default is filled in, nothing
+    downstream can separate "8 GPUs were requested and 1 responded" from "nobody
+    wrote down how many were requested" — and a `grad_accum` quietly defaulted to
+    1 makes every derived sample count wrong by the real factor while the
+    arithmetic stays sound. Also run-mechanics.md -> "Launch contract (Step 3 detail)"
+    rule 4, which is what tells a run skill to fill it.
+    """
+
+    FIELDS = ("world_size", "batch_size", "grad_accum", "epochs", "samples_per_epoch")
+
+    def setUp(self):
+        with open(TEMPLATE) as f:
+            self.t = json.load(f)
+
+    def test_block_exists_with_every_field(self):
+        self.assertIn("workload", self.t, "run.json lost its `workload` block")
+        for key in self.FIELDS + ("source",):
+            self.assertIn(key, self.t["workload"], f"workload is missing `{key}`")
+
+    def test_no_field_defaults_to_a_number(self):
+        """The whole point. A helpful `"grad_accum": 1` turns an unknown into a
+        stated fact, and the sample count computed from it is wrong by whatever
+        the real value was — with nothing to show it happened."""
+        for key in self.FIELDS:
+            self.assertIsNone(
+                self.t["workload"][key],
+                f"workload.{key} defaults to {self.t['workload'][key]!r} — null means "
+                f"NOT RECORDED, and a default silently converts that into a claim",
+            )
+
+    def test_source_is_a_map(self):
+        """Per-key provenance mirroring `param_injection.items[].via`. A value the
+        code hardcodes is still true and still recorded, but it is not a knob."""
+        self.assertEqual(self.t["workload"]["source"], {})
+
+    def test_not_folded_into_scope(self):
+        """`scope` is the comparability key. Folding these in would make one-GPU
+        and eight-GPU runs of the same workload incomparable, which is backwards —
+        surviving that change is what distributed training is for. Same for
+        batch_size, which /train-tune searches over."""
+        for key in self.FIELDS:
+            self.assertNotIn(
+                key, self.t.get("scope") or {},
+                f"`{key}` is in `scope` — that makes runs differing only in it "
+                f"incomparable, which is the opposite of what it means",
+            )
+
+    def test_run_mechanics_documents_every_field(self):
+        """The template and the rule that tells skills to fill it must not drift.
+        A field no document mentions is a field no skill writes."""
+        with open(os.path.join(REPO_ROOT, "lifecycle", "references",
+                               "run-mechanics.md")) as f:
+            doc = f.read()
+        missing = [k for k in self.FIELDS if f"`{k}`" not in doc]
+        self.assertEqual(missing, [],
+                         f"workload fields absent from run-mechanics.md: {missing}")
+
+
 if __name__ == "__main__":
     unittest.main()

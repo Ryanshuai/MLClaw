@@ -157,7 +157,17 @@ Three rules, uniform across all run skills:
    - **`/{stage}-run`** builds the launch command per-param from these entries instead of guessing from `config_format`. A `runtime_params` key with no entry is an error — stop and ask; never fall back to trying `--key value`, because a silently-ignored flag yields a run whose recorded config lies about what ran.
    - This applies to params **MLClaw sets on its own** too, not just user-supplied ones: debug-mode `epochs=1` / sample limits, OOM auto-retry `batch_size ÷ 2`, resume-from-checkpoint flags. Those are the dangerous ones — the user never typed them, so nobody is watching whether they took effect.
 
-Stage-specific extras (production mode launching, monitoring, ETA computation, finalize hooks) go in each run skill's SKILL.md — these three rules do not.
+4. **Write `run.json -> workload` from the same entries you just built the command from.** `world_size`, `batch_size`, `grad_accum`, `epochs`, `samples_per_epoch` — plus `source`, mirroring each one's `param_injection.via`. This costs nothing at launch: every value is already resolved by rule 3, one line above.
+
+   It is a separate rule because the failure it prevents is not rule 3's. Rule 3 stops a param the code *ignores*. This one stops a run that finished having done **a different amount of work than it was asked to do** — a dataloader that dropped a shard, an early exit that still wrote a checkpoint, a resume that counted the same epochs twice. Those all produce a complete run with plausible metrics and no error, and the only way to see them is to compare what was asked against what happened. Nothing can make that comparison if the ask was never recorded.
+
+   **Null means not recorded — never fill a default.** A `grad_accum` defaulted to 1 because the code did not say turns an unknown into a stated fact, and the sample count computed from it is wrong by whatever the real value was. `samples_per_epoch` should come from the cited dataset snapshot when there is one; leave it null rather than counting files.
+
+   Applies to every run skill, not just `/train-run`: eval and inference have no `epochs` or `grad_accum` and leave them null, but `world_size`, `batch_size` and `samples_per_epoch` are exactly as load-bearing there — an eval that silently scored two thirds of the set is the same defect as a train that saw two thirds of it, and `samples` ≠ `dataset.num_samples` is already a `mismatch` gate in `/eval-init`.
+
+   Do not confuse this with `scope`, which holds what the run **actually reached** and is read back out of the log afterwards. Both sides are needed and neither is derivable from the other; that gap is the only visible symptom of a run that completed having done different work than it was given.
+
+Stage-specific extras (production mode launching, monitoring, ETA computation, finalize hooks) go in each run skill's SKILL.md — these four rules do not.
 
 ### Baseline measurement (fine-tune only)
 
@@ -362,6 +372,7 @@ Rules for anything a run writes down now that somebody reads later. They share o
 | The metric schema in `output.json` must describe the stream the code actually emits — right field, right split, right direction. | A schema naming `val_loss` against code that emits `train_loss` produces a complete run whose checkpoint was selected to fit the training set. Both numbers are real and both look plausible. |
 | The chosen checkpoint and the recorded metric describe the **same artifact**. | When the peak epoch was never saved, falling through to the next-best is correct — recording the stream's peak beside the surviving file is a fake metric. |
 | Retention plans and applies as two steps, never deletes what it cannot rank, and aborts wholly on drift. | It is the only irreversible operation here. "Confirm with the user" is not a safeguard: a list of filenames carries no evidence that the sort behind it was right. |
+| `workload` records what the run was **asked** to do, and an unknown stays null rather than taking a default. | It is the only record of the ask, so nothing downstream can tell "8 GPUs were requested and 1 responded" from "nobody wrote down how many were requested" once a default is filled in. A `grad_accum` silently defaulted to 1 makes every derived sample count wrong by the real factor while the arithmetic stays sound. |
 | A skill writes only step keys the `run.json` template defines. | Resume skips completed steps by reading them back; an undefined key is never recognized as completed and re-runs forever. This is how `check_sources` vs `resolve_assets` survived unnoticed. |
 | An axis probe that could not run is `unverifiable`, never `intact`. | Same shape as the metric rule above, applied to reproduction: "the commit resolves" and "no commit was recorded" are different facts, and only the first is evidence. A probe that fails open turns every unchecked axis into a pass. |
 | The overall reproduction verdict ranks `gone` above every other axis state. | Ranking by the verdict enum's own order put `unverifiable` above `gone` and reported a run whose cited data had been **deleted** as merely unverifiable — the worst state in the table, announced as the second mildest, with the `you can still` guidance never firing. |
