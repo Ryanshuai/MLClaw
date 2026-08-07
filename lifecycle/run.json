@@ -12,6 +12,16 @@
   "mode": null,
   "scope": {},
 
+  "_comment_workload": "How much work this run was LAUNCHED to do — the declared side only, written at create_run from the same `param_injection` entries the launch command was built from. Every value here was in hand at launch; the block exists because none of it was being written down, and recovering it from a log afterwards is reconstructing information that was already known.\n\nWhat reads it: /train-triage compares declared against what actually happened (`last_step`, the checkpoint, the log) — expected_steps = ceil(samples_per_epoch / (batch_size * world_size * grad_accum)) * epochs, and a mismatch means samples were silently dropped, the run exited early, or resume double-counted. /train-compare and /repro read it too: 'same config' between two runs is not checkable when nothing recorded the shape of the work.\n\nNOT part of `scope`, and the difference is the point rather than a filing decision. `scope` records what the run ACTUALLY REACHED — /train-run reads a debug run's epochs and batch size back out of the log precisely because what you passed is not evidence of what happened. `workload` records what was ASKED. Two names for adjacent numbers is a real cost, paid for one reason: the gap between them is the only visible symptom of a run that finished having done different work than it was given, and a single field cannot hold both sides of a comparison. Fill `workload` at launch from the config; fill `scope` afterwards from the log; never copy one into the other.\n\nFolding these into `scope` instead would also break comparability outright, since `scope` is its key (see run-mechanics.md -> 'Metric comparability'): one-GPU and eight-GPU runs of the same workload would become incomparable, which is backwards — surviving that change is the entire point of distributed training. Same for batch_size, which /train-tune searches over: runs differing in it are exactly the ones that must stay comparable.\n\n`grad_accum` is not optional padding. Effective batch is batch_size * world_size * grad_accum, and a checker missing any one factor computes a sample count that is wrong by that factor while looking arithmetically sound.\n\nNull means NOT RECORDED, never 1 — a defaulted-to-1 grad_accum silently turns an unknown into a claim. `source` maps each key to where the value came from, mirroring `param_injection.items[].via` (cli | yaml | env | hardcoded | derived): a value the code hardcodes is still true and still recorded, but it is not a knob, and whoever reads this later needs to know which kind it was.",
+  "workload": {
+    "world_size": null,
+    "batch_size": null,
+    "grad_accum": null,
+    "epochs": null,
+    "samples_per_epoch": null,
+    "source": {}
+  },
+
   "_comment_steps": "Every key here except `ad_hoc` is a step record `{status, at}`; nested keys are sub-steps. Resume reads this block to skip completed steps, so a skill MUST write the exact key names below — a key the template doesn't have is never recognized as completed and the step re-runs forever. `monitor` is long-running stages only (/train-run): it is re-entrant, so its `status` stays null while the job runs and infer/eval leave it `skipped`.",
   "steps": {
     "fork_check":     { "status": null, "at": null },
