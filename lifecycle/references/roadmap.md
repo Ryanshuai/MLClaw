@@ -146,6 +146,60 @@ because only one side was ever recorded.
 Still to build: the comparison itself, the crash classifier, the hazard re-ask, and the cross-run
 frequency verb. Nothing in that list is blocked on a record any more.
 
+## Identity — what `<id>@<pin>` is for, and what it is not
+
+Read before `models/` below: that section is an *instance* of this one, and building it without
+this produces a fifth hand-written citation parser.
+
+**The system already exists, in two syntaxes.** `candidates.location` (`dataset:<id>@<snapshot>`,
+`handoff:<handoff_id>`, `run:<stage>/<run_id>`) and `lineage.parents` (`datasets/<id>@<sid>`,
+`handoffs/<hid>`, `<stage>/<run_id>`). Adding a citable kind means adding a row to **both**, never
+inventing a third form. The `:` / `/` divergence between them is not worth unifying: the fix would
+have to rewrite run records that cannot be rewritten.
+
+**Three directions, and the middle one is why the forms are formal at all:**
+
+| | Who asks | When | Cost of failure |
+|---|---|---|---|
+| back — where did this come from | a person | afterwards | you do not know |
+| **forward — who still cites this** | a script | **before an `rm`** | **you already deleted it** |
+| same — are these still the bytes | a hash | either | the other two are confidently wrong |
+
+Only the first is served by prose, which is why "trained on July's boxes" is survivable and a
+missing reverse edge is not. `retention.py`, `retire.py plan` and deploy all ask the second before
+acting; nobody can ask it by hand, because it means walking every record in the project.
+
+**The reverse direction is computed, never stored.** `data-label/handoff.json` already settles this:
+`consumed_by` is advisory *and may lag*, and the authoritative direction is the consuming record's
+own `lineage.parents`. A stored reverse edge goes stale the moment a third record cites the same
+parent and nothing walks back to update it.
+
+**Two kinds, and the `@` is what marks which:**
+
+- **event** — happened at an instant; id assigned by MLClaw, timestamp-shaped, never named by a
+  human; cited as `<plural>/<id>`. It splits again by failure mode: those born finished (census,
+  online window) go **stale**, those with a duration (run, lease, handoff, ask) **dangle** — which
+  is what three of the four "On Conversation Start" checks are looking for. An event's id is minted
+  at birth and does **not** change as its content churns; a run has to stay citable while it runs.
+- **entity** — persists and is revised; id declared by a human because it has to mean something to
+  one; cited **only** as `<plural>/<name>@<pin>`, never bare. The pin is cut when somebody needs to
+  cite it, not on a schedule — so an entity has no history *between* pins, and two pins must never
+  be interpolated into one.
+
+**What must never get an id at all**: `unreachable`, `absent`, `unverifiable`. Minting one for a
+non-observation is exactly how "could not look" becomes "looked, nothing there" — the failure
+`census.py -> complete: false` and the `match` enum's `unreachable` exist to prevent. `/discover`'s
+lead is the legal form: **the id belongs to the claim, not to the data it claims.**
+
+**Do not build a general identity layer before `models/`.** The generalization is real and so is the
+debt — one shared `parse` for the five readers that hand-roll it today (`build_dag.py` accepts a
+`{stage, run_id}` dict form nothing else does), a `_comment_parents` in `run.json` so the one
+load-bearing field stops being the only one in `lineage` with no declared form, and `build_dag`
+walking every record kind rather than only runs, so a `datasets/…@…` parent is a node instead of an
+edge into empty space. All worth doing; none of it blocks. Build `models/` under the one borrowed
+constraint — **do not invent a third citation syntax** — and fold `cited_by_release` in as the
+shared reverse-edge helper it is the fourth hand-written copy of.
+
 ## `models/<id>@<release>` — the model identity layer
 
 **Build this first.** It is not a skill; it is the missing primitive three separate records need, and
@@ -161,9 +215,18 @@ reports afterwards as `not_reproducible`. The ten "Never silently" rules include
 frozen snapshot still names*; there is no model counterpart, not because it does not apply but
 because there is no frozen thing to name.
 
-What a release pins: the checkpoint, the eval numbers **with their `scope`**, the env, and the
-snapshot it trained on. Then `retention.py plan` grows a `cited_by_release` exclusion exactly like
-`retire.py plan`'s `cited_by_snapshot`.
+What a release pins: **the checkpoint's content hash**, the eval numbers **with their `scope`**, the
+env, and the snapshot it trained on. Then `retention.py plan` grows a `cited_by_release` exclusion
+exactly like `retire.py plan`'s `cited_by_snapshot`.
+
+**The hash is the load-bearing one, and pinning a path instead reproduces one level up the exact bug
+this layer exists to fix** — a release that names a location rather than bytes gets the deployment
+failure named below, where `/srv/models/best.pt` stops being true the first time somebody scp's over
+it. Note that this *inverts* the data side rather than copying it: a snapshot deliberately pins
+membership and **not** bytes, because hashing a multi-terabyte tree trades a real answer for one
+nobody would wait for. A checkpoint is one file, so here the trade runs the other way and the hash is
+affordable. It is also the only thing that makes an inherited model's `verified` distinguishable from
+its `claimed`.
 
 **Three records, one prerequisite, and conflating any two is a known expensive failure:**
 
@@ -177,11 +240,34 @@ Reading "better" as "serving" gives the classic bug: the leaderboard says C is b
 believes C is live, B was deployed and C never shipped. Reading "serving" as "better" leaves a
 rollback decision nothing to consult.
 
+**But only one of the three is this layer's to build.** `better` is computed and never stored — the
+classic bug above is a *stored* leaderboard, and storing a judgment is precisely what lets it go on
+asserting after the measurement it summarized has moved. It is a verb: refuse across a different exam
+or non-equivalent `scope` (through `shared/compare.py`, already the one definition of equivalence)
+and recompute. `approved` needs no new machinery either — an `/ask-human` `decision` that the release
+cites by id. So this layer builds `serving`'s **subject**, and points the other two at things that
+already exist.
+
 And a trap the loop springs the moment it turns twice: the new model is evaluated on `boxes@v2`, the
 old one on `boxes@v1`, and the two numbers **look comparable and are not** — CLAUDE.md's own *never
 compare across non-equivalent `scope`*. Cross-generation comparison must be re-measured on one fixed
 set, which needs a record of *which* set is this model line's standing exam. That record is part of
 this layer.
+
+So `model.json` — the entity-side record, sibling of `dataset.json` — carries two fields, and neither
+is a fact about any one artifact: the **standing exam** (what makes two releases' numbers
+subtractable) and the **interface contract** (what an artifact must accept and produce to fill this
+slot). Every fact lives in `release.json`, which is close to already written: `artifacts.json ->
+items.<name>.origin` carries `metrics` / `scope` / `confidence: verified | claimed | asked` /
+`source` today, and needs the hash and an id to become citable instead of buried under one item name.
+The exam is a dated *list*, not a value — an exam set gets retired and the world shifts — and a
+comparison spanning an exam change is refused, not silently taken.
+
+**The interface contract also settles where an export goes, and not the obvious way.** An `.onnx` or
+`.engine` has a different runtime interface, so it cannot fill the slot its parent fills: it is a
+**separate line** with a `derived_from` edge, not a `kind: derived` release under the same id. That
+is what keeps deploy answerable — the edge fleet and the cloud bind different slots, and asking one
+"what is serving" must never return the other's answer.
 
 ## Deployment stage — `/deploy-init` + `/deploy-run`
 
@@ -191,6 +277,25 @@ subject is `/srv/models/best.pt` stops being true the first time somebody scp's 
 What it owns: the *binding* — this release, on this environment, from this instant — and its
 **history**, because the question asked in an incident is "what was serving at 03:00 on the 12th",
 which a current-value pointer cannot answer.
+
+**It is not a second identity layer. It is the forward direction of a release's, plus a duration.** A
+deployment is a record that *cites* `models/<id>@<release>`, and "what is serving" is the reverse-edge
+query on that release — so three of the four things it needs are borrowed rather than designed:
+
+| what deploy needs | borrowed from |
+|---|---|
+| the subject | `models/<id>@<release>` and its hash |
+| the state of one binding | `/discover`'s `claim` / `verified` / `gone` / `unreachable` |
+| what a fleet is running | `census.py`'s scan: partial results, `complete: false`, unreachable ≠ absent |
+
+Only the interval is its own, and the reason it needs the other three is that **its citation is the
+only live one in MLClaw**. Every other edge is past tense: a run consumed a snapshot and finished,
+and that edge can never afterwards become false. A binding goes on being true — or quietly stops —
+while nobody is watching. So a binding is a `claim` until something re-reads the bytes on the target
+and matches them against the release's hash, which is CLAUDE.md's *never let somebody's word become a
+checked fact* applied to a machine's word about itself. And a binding that is never closed is a
+dangling event in the sense of "Identity" above: `to: null` forever means nobody knows whether it was
+ever taken out of service.
 
 One thing it owns that is easy to miss: **where the served inputs land.** That value is
 `dataset.json -> online.resource`, so `/data-online-sample` can read the stream this deployment
