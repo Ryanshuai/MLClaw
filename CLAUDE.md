@@ -82,7 +82,7 @@ rules would be skimmed with it.
 
 **Implemented**: inference (init + run), evaluation (init + run + report + triage), refactor (init + run + report), training (init + run + tune + tune-report), project init, resources, lease, handoff, reproduction, and the whole data line (collect + label + curate + freeze + retire, plus check / route / report / online-sample).
 
-**Next**, in dependency order: `models/<id>@<release>` (the model-identity primitive three things wait on), then deployment (`/deploy-init` + `/deploy-run`) and model curate, plus `/data-drift`'s comparison half — its online half is built. Then exploration and `/train-compare`. **Designed, not built: there is no script to call.** Reasoning, and the traps that make the obvious implementation wrong: `lifecycle/references/roadmap.md`.
+**Next**, in dependency order: `/train-triage` (depends on nothing, and covers the one failure the record layer actively disguises — a run that finished and was void), then `models/<id>@<release>` (the model-identity primitive three things wait on), then deployment (`/deploy-init` + `/deploy-run`) and model curate, plus `/data-drift`'s comparison half — its online half is built. Then exploration and `/train-compare`. **Designed, not built: there is no script to call.** Reasoning, and the traps that make the obvious implementation wrong: `lifecycle/references/roadmap.md`.
 
 **The data lifecycle**, one skill per phase — including the small ones, because a phase whose skill is "part of another skill" is a phase nobody can name, and an unnamed box reads as a box that does not exist:
 
