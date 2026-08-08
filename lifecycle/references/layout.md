@@ -115,6 +115,8 @@ README.md                           ← what MLClaw is, and which stages are bui
     data-online-sample/SKILL.md     ← /data-online-sample
     data-report/SKILL.md            ← /data-report
     data-check/SKILL.md             ← /data-check
+    data-audit/SKILL.md             ← /data-audit (the only skill that opens a data file)
+    data-audit-report/SKILL.md      ← /data-audit-report
     data-freeze/SKILL.md            ← /data-freeze
     data-curate/SKILL.md            ← /data-curate
     data-retire/SKILL.md            ← /data-retire
@@ -287,6 +289,9 @@ datasets/                           ← where the data is and what state it is i
     dataset.json                    ← the layout contract, plus `derived_from` (null = captured),
                                       plus `online` (where the LIVE counterpart arrives)
     census/census_{ts}.json         ← one scan; `complete: false` = a location did not answer
+    audits/{audit_id}/              ← audit.json + audit_report.html. The census's counterpart:
+                                      that one reads where the files are, this one reads what is
+                                      inside them, and neither answers the other's question
     online/window_{ts}.json         ← one reading of the live stream this dataset gets compared
                                       against. Describes data that never enters the dataset, and
                                       unlike a census it can never be retaken
@@ -355,6 +360,16 @@ datasets/
       census_{YYYYMMDD}_{HHmmss}.json   ← one scan: per-location listing + the five verdicts.
                                           `complete: false` means a location did not answer and
                                           every count in it is a lower bound
+    audits/
+      {audit_id}/
+        audit.json                ← what it judged against (layout contract, consuming code, prior
+                                    version), per-section verdict, every finding WITH its file and
+                                    record locator, the sample sizes, and every section that was
+                                    SKIPPED. A skipped section is a recorded field, never an absent
+                                    one — absent reads as passed
+        audit_report.html         ← /data-audit-report's render. Beside the audit, not under a
+                                    run's output/: its subject is the dataset, and it has to stay
+                                    readable after every run that touched that data is gone
     snapshots/
       {snapshot_id}/
         snapshot.json             ← cite_as, source census, layer coverage, unverified units,

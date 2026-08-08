@@ -33,7 +33,9 @@ project
 - **Report skill** executions are stored as output files within a run's `output/` directory.
 - On disk, `runs/` directory = executions of the run skill. The naming is kept for simplicity.
 
-**Seven skills are not stage nodes.** Where each writes and why is one lookup; full paths in `lifecycle/references/layout.md`. **None has a step chain** — in every case the work happens outside any process MLClaw can step through, so the state is a `status` field, not a resumable position.
+**Nine skills are not stage nodes.** Where each writes and why is one lookup; full paths in `lifecycle/references/layout.md`. **All but one have no step chain** — in those cases the work happens outside any process MLClaw can step through, so the state is a `status` field, not a resumable position.
+
+`/data-audit` is the exception, and the exception is informative: it is not a stage node (a dataset is not a stage) yet it *is* a process MLClaw runs end to end, so it has steps and resumes like a run skill. Non-stage and non-resumable are two different properties that happened to coincide until this skill existed — a census has no steps because the world has no steps, not because it sits outside `stages/`.
 
 | Skill | Records at | Level, and why |
 |---|---|---|
@@ -44,6 +46,8 @@ project
 | `/repro` | Can a past run still be reproduced, and when its number moves, which axis moved it. Five axes of rot → `intact` / `drifted` / `gone` / `unverifiable`, then a loop judging each re-measurement against a band this pipeline measured **on itself**. Executes nothing itself |
 | `/data-online-sample` | A dated reading of the **live input stream** — what production was seeing between two instants — the half every drift tool fakes with an exported CSV. `/data-freeze` pins the reference side. Uniform draw always; a reading can never be retaken |
 | `/eval-triage` | What a bad case *is*, and whose it is. Ranks an eval run's worst per-sample scores, judges each, routes **three verdicts to three owners**: `label_wrong` → a `/data-label` rework · `sample_hard` → the data line · `model_wrong` → **never leaves the model line**. `label_wrong` may never enter the hard-example pile |
+| `/data-audit` | `datasets/<id>/audits/<audit_id>/audit.json`. Dataset-level, `stage: null`, `execution: <audit_id>` — **and it has a step chain**, unlike everything else in this table. Steps: `integrity` / `compatibility` / `consistency` / `statistics` / `schema_diff` / `ad_hoc` / `record` |
+| `/data-audit-report` | `datasets/<id>/audits/<audit_id>/audit_report.html`. Beside the audit it renders, not under a run's `output/` — its subject is a dataset, and it must stay readable after every run that touched that data is gone |
 
 ## Skill Dependency Graph
 
@@ -75,6 +79,8 @@ Every skill knows its position in this graph. Two types of edges:
 | `/data-collect` | project.json (+ resources.json for a server) | `/data-check scan` to confirm it landed, then `/data` |
 | `/data-online-sample` | `dataset.json` — its `identity` is what both sides count. **Not** a frozen snapshot: that is needed to *compare* a reading, not to take one | a drift comparison against a frozen snapshot; `/data-collect --cite-window` to pull the interesting units; `/ask-human` for a `decision` on retention or vendor access |
 | `/data-check` | project.json | on GAP: whatever `layers[].produced_by` names. On a clean census: `/data-freeze` |
+| `/data-audit` | project.json **and** either a declared dataset or a user-named path. Step 2 additionally needs a stage with a non-empty `entry_command` — absent, that section is recorded `skipped`, never inferred | by finding, never generically: `label_wrong`-shaped → a `/data-label` rework · format defect → `/data-curate` · fatal on frozen data → `/data-freeze` for a corrected snapshot · clean → the run the user was heading for · `/data-audit-report` when there is something to look at |
+| `/data-audit-report` | an `audits/*/audit.json` — including one that stopped at a Step 1 fatal, which is often the useful one | exactly where the audit routed; rendering never softens an owner |
 | `/data-freeze` | a census whose `complete` is true | `/train-init` or `/train-run`; `/data` |
 | `/data-curate` | a frozen snapshot of **every** parent (`datasets/<id>@<snap>` resolves) | `/data-check` (declare the output's locations, then scan), then `/data` |
 | `/data-retire` | a census whose `complete` is true **and** the target location answered | `/data-check scan` — the disk changed under the census — then `/data` |
@@ -139,6 +145,8 @@ Two reasons the sweep is not `/train-init`'s, and be precise about the first: **
 | a delta was judged against measured noise | that session's `band` is non-null with `n >= 3`. A verdict resting on the declared tolerance instead is the guess `/repro` exists to replace |
 | bad cases can be named at all | `stages/evaluation/output.json → per_sample.path` is non-null **and** `score.field` + `score.direction` are both set. A declared path with no `direction` does not satisfy this: sorting the wrong end reviews the model's *best* predictions as its worst, and nothing errors |
 | a bad case was judged rather than guessed | its `provenance` in `triage/*/session.json → cases` is `claim` or `verified`, never `unreviewed` or `disputed`. `verified` means two **different kinds** of source agreed — two agent passes over one image are one source sampled twice, so they stay a `claim` |
+| an audit exists | `datasets/<id>/audits/*/audit.json` exists. **A clean census does not satisfy this** — the census never opened a file, so it has no opinion on what is inside one |
+| an audit is decidable | that audit's fatal sections (`integrity`, `compatibility`) are `passed`, not `skipped`. `skipped` means the check did not run — most often because no consuming stage was named — and a `skipped` compatibility section is exactly the state that looks like a pass in every summary |
 
 ## Workflow State Protocol
 

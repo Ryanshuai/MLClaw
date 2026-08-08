@@ -80,7 +80,7 @@ rules would be skimmed with it.
 
 ## Status
 
-**Implemented**: inference (init + run), evaluation (init + run + report + triage), refactor (init + run + report), training (init + run + tune + tune-report), project init, resources, lease, handoff, reproduction, and the whole data line (collect + label + curate + freeze + retire, plus check / route / report / online-sample).
+**Implemented**: inference (init + run), evaluation (init + run + report + triage), refactor (init + run + report), training (init + run + tune + tune-report), project init, resources, lease, handoff, reproduction, and the whole data line (collect + label + curate + freeze + retire, plus check / audit / route / report / online-sample).
 
 **Next**, in dependency order: `/train-triage` (depends on nothing, and covers the one failure the record layer actively disguises — a run that finished and was void), then `models/<id>@<release>` (the model-identity primitive three things wait on), then deployment (`/deploy-init` + `/deploy-run`) and model curate, plus `/data-drift`'s comparison half — its online half is built. Then exploration and `/train-compare`. **Designed, not built: there is no script to call.** Reasoning, and the traps that make the obvious implementation wrong: `lifecycle/references/roadmap.md`.
 
@@ -91,8 +91,15 @@ rules would be skimmed with it.
 /data-collect  /data-label  /data-curate  /data-freeze  /data-retire
 
         /data  composes them · /data-check censuses · /data-report renders
+   /data-audit opens the files · /data-audit-report shows what it flagged
    /data-online-sample reads the live stream the frozen side gets compared against
 ```
+
+**`/data-check` and `/data-audit` are the two readings, and they are disjoint on purpose**: the
+census reads existence, location and completeness markers across machines and never opens a file;
+the audit opens the file and never asks where else it lives. A unit can be present everywhere,
+replicated three times and marked complete, and still carry category ids the dataloader will
+silently clamp — which is why one of them being clean says nothing about the other.
 
 It is a **record** layer end to end, with one exception: `/data-retire apply` deletes,
 earned by `plan → apply` against evidence plus the containment rule. Which phase owns
@@ -121,6 +128,8 @@ what, what is deliberately *not* a phase (Archive, Train), and how `/data` compo
 | `/data-collect` | Name a resource, name a path on it, pull — and record what arrived. Ingest only, one direction. Never waits for a human — that is `/data-label` |
 | `/data-online-sample` | A dated reading of the **live input stream** — what production was seeing between two instants — the half every drift tool fakes with an exported CSV. `/data-freeze` pins the reference side. Uniform draw always; a reading can never be retaken |
 | `/data-check` | Declare a dataset's layout contract, then census it across every machine: GAP / DRIFT / UNREPLICATED / UNARCHIVED / INCOMPLETE. Reports; moves no byte. **Freezing is `/data-freeze`'s** — same script, different skill |
+| `/data-audit` | **The only skill on the data line that opens a file.** Judges the data against its declared contract and the code about to consume it — integrity → compatibility → consistency → statistics → schema diff, fatal before advisory. Needs no model, which is what separates it from the evaluation stage; finds the wrong label *before* a run, where `/eval-triage` finds it through one. **Fixes nothing** — a repair is a `/data-curate` run |
+| `/data-audit-report` | The half of an audit a person has to *look* at: flagged samples with annotations drawn on, distributions with outliers marked, the schema diff. Computes nothing. Every gallery states its denominator |
 | `/data-curate` | Derive a new dataset from a frozen one — convert, split, dedup, relabel, sample, merge — and record what it was made of. Executes nothing: the transform is an ordinary run |
 | `/data-freeze` | Freeze a citable snapshot so a run can record exactly which units it consumed — `datasets/<id>@<snapshot>`, the boundary the model lifecycle cites |
 | `/data-report` | The whole line as one self-contained HTML board, Airflow-grid shaped: datasets × censuses, each column that census **replayed**. Computes nothing; no auto-refresh on purpose |
