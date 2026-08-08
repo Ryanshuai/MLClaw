@@ -11,4 +11,4 @@
 # expensive false positive it can produce.
 
 # fix: pin encoding="utf-8" on all 33 subprocess text reads
-8e7d095c8794413be8a8b00a0535819c08af8df8
+abe8a178c89fc4eeaffbb6707d020f367503d76d
