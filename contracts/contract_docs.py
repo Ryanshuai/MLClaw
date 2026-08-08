@@ -51,10 +51,19 @@ def read(path):
 
 
 def skills_on_disk():
+    """Skill dirs the repo actually carries — gitignored ones do not count.
+
+    Same authority the layout check already defers to: `.gitignore` states what
+    is not part of this project. Without it, a scaffolding tool that drops a
+    working skill under `.claude/skills/` turns this red with a message about
+    CLAUDE.md's table, sending the reader at the document when the problem is a
+    directory that was never going to be committed."""
     if not os.path.isdir(SKILLS_DIR):
         return set()
+    ignored = ignored_dir_names(REPO_ROOT)
     return {d for d in os.listdir(SKILLS_DIR)
-            if os.path.isfile(os.path.join(SKILLS_DIR, d, "SKILL.md"))}
+            if d not in ignored
+            and os.path.isfile(os.path.join(SKILLS_DIR, d, "SKILL.md"))}
 
 
 def skill_table_entries(text):
@@ -132,15 +141,28 @@ def ignored_dir_names(root):
 
 def actual_dirs(root):
     """Everything on disk except build junk. `.git` is excluded by name rather
-    than by a dotfile rule — `.claude` and `.github` are both real entries."""
+    than by a dotfile rule — `.claude` and `.github` are both real entries.
+
+    A directory holding no file at all is skipped, and that is not laxity: git
+    cannot represent an empty directory, so one can never reach a clone and
+    `layout.md` documenting it would describe something no reader will ever see.
+    They also slip past `ignored_dir_names` by construction — `git ls-files
+    --others` lists paths, and an empty directory has none — so without this a
+    stray `mkdir` in the working tree reads as an undocumented layout entry."""
     junk = {".git", "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache",
             ".venv", ".pixi", "node_modules", ".egg-info"} | ignored_dir_names(root)
     found = set()
-    for dirpath, dirnames, _ in os.walk(root):
+    for dirpath, dirnames, filenames in os.walk(root):
         dirnames[:] = [d for d in dirnames if d not in junk]
+        if not filenames:
+            continue
         rel = os.path.relpath(dirpath, root).replace(os.sep, "/")
-        if rel != ".":
+        # Every ancestor too: `.claude/skills` and `lifecycle/scripts` hold only
+        # subdirectories, and they are real declared entries. What is being
+        # excluded is a subtree with no file anywhere in it, not a container.
+        while rel != ".":
             found.add(rel)
+            rel = os.path.dirname(rel) or "."
     return found
 
 
@@ -321,6 +343,16 @@ class CitationsResolve(unittest.TestCase):
         """`CLAUDE.md "Script Integration"` — the form skills actually use, and the
         one that was invisible here. See `pointers_in`: the target need not be a
         heading, but it has to still be in that file.
+
+        **Prose only.** It used to walk `.py` too, and there the pattern is not a
+        citation — it is any line where a document's filename is followed by a
+        string literal, which is what `open(os.path.join(ROOT, "CLAUDE.md"),
+        encoding="utf-8")` is. Adding an encoding argument to a file read reported
+        a dangling pointer at a section named `), encoding=`, twice in one sitting,
+        and the only way to satisfy it was to restructure working code. A check
+        that fires on edits it has no opinion about spends the attention that the
+        checks with real opinions need — so the half that misfires is gone, and the
+        half that catches a skill citing a section somebody renamed is kept.
         """
         bodies = {doc: read(path) for doc, path in DOC_FILES.items()}
         dangling = []
@@ -328,7 +360,7 @@ class CitationsResolve(unittest.TestCase):
         for dp, dirs, fs in os.walk(REPO_ROOT):
             dirs[:] = [d for d in dirs if d not in skip]
             for f in fs:
-                if not f.endswith((".md", ".py", ".json", ".yml")):
+                if not f.endswith(".md"):
                     continue
                 path = os.path.join(dp, f)
                 if os.path.basename(path) == os.path.basename(__file__):
