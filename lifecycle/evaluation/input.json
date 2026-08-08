@@ -1,12 +1,11 @@
 {
   "_comment": "Evaluation inputs — test/val data AND ground truth annotations.",
+  "_comment_items": "Per item name: {type, description, requires{}}. `requires` is THE CONTRACT — what the evaluation code will not run without — and it is what a candidate's `match` is judged against. Without it `mismatch` is a bare verdict that stops the workflow; with it, `mismatch` is a DIFF, which is simultaneously the spec for a conversion and the progress bar of one. `adaptation/adapt.py open` refuses a consumer whose items are empty for exactly that reason: nothing could say whether a round passed.\n\nFixed keys inside `requires`, each read out of the loading code rather than declared anywhere: `layout` (directory shape the code globs for), `annotation_format`, `fields` (name -> what the code expects that field to be), `value_ranges` (the constraints a loader will NOT raise on — an out-of-range category id is silently clamped, not a crash, which is why this is written down), `num_classes`, `evidence` (path:line).\n\nA requirement that could not be read is `null`, never omitted: \"the code does not care\" and \"nobody looked\" are different facts, and only the first one makes a candidate's `ok` mean anything. Design reasoning: `lifecycle/references/roadmap.md` -> \"Adaptation\".",
   "items": {},
-
   "_comment_candidates": "Per item name, an ordered list of usable options found by /eval-init Step 1b. Locating them is /discover's job, not this skill's; the judgment recorded here is `match`. Entry shape and the `location` enum are /train-init references/schemas.md -> `candidates` — not restated, because a second copy drifts.\n\nTWO THINGS ARE SPECIFIC TO EVALUATION AND BOTH ARE ABOUT THE METRIC MEANING SOMETHING.\n\n`samples` is mandatory and is compared against config.json -> dataset.num_samples; a count that differs is `mismatch`, never `ok`. In training a subset just trains on less data and the metrics show it. In EVAL a subset is a different measurement wearing the same name — mAP over 500 images against a 5000-image baseline is a delta made of sampling noise, and nothing errors. This is the baseline-scope rule from Step 4, applied early enough to prevent rather than caveat.\n\nGround truth must pair. Images present with annotations missing is `mismatch`: the run starts, loads, and reports nothing.\n\n`match`: ok | mismatch | absent | pending | unreachable. `unreachable` is never `absent` — a bucket with no key still gets a candidate, or this file reads as proof the data does not exist.",
   "candidates": {
     "items": {}
   },
-
   "sources": {},
   "ground_truth": {
     "_comment": "Annotations/labels to compare predictions against.",
@@ -16,9 +15,24 @@
   "pairing": "",
   "preprocessing": {
     "_comment": "MUST MATCH the training stage's input.json -> preprocessing on normalization / input_layout / label_transform — see lifecycle/references/run-mechanics.md 'Preprocessing contract (cross-stage)'. A difference means this evaluation is not measuring the model that was actually trained, so its metrics are fake even though nothing errors. `augmentation` must stay empty here, or hold only explicitly-declared test-time augmentation. Same shape as the training template; every block carries `evidence` (path:line) since these values are read out of code.",
-    "normalization": { "mean": [], "std": [], "source": "", "evidence": "" },
-    "input_layout": { "size": [], "resize_mode": "", "channel_order": "", "evidence": "" },
-    "label_transform": { "index_base": null, "class_mapping": "", "background_class": null, "evidence": "" },
+    "normalization": {
+      "mean": [],
+      "std": [],
+      "source": "",
+      "evidence": ""
+    },
+    "input_layout": {
+      "size": [],
+      "resize_mode": "",
+      "channel_order": "",
+      "evidence": ""
+    },
+    "label_transform": {
+      "index_base": null,
+      "class_mapping": "",
+      "background_class": null,
+      "evidence": ""
+    },
     "augmentation": [],
     "pipeline_evidence": ""
   }
