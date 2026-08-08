@@ -67,6 +67,74 @@ Nothing special. Create the run, snapshot the code, execute. **One thing must no
 run cites every parent in `run.json -> lineage.parents`, exactly as the plan's `the_run_must_cite`
 lists them. That citation is not decoration — it is the evidence `register` checks against.
 
+## Step 2b — when the point is to satisfy a consumer: the adaptation loop
+
+Skip this when the derivation stands on its own (a split, a dedup, a subsample). Run it when the
+derivation exists **because some stage's code cannot read the parent** — the `--op convert` case, and
+the one a user actually arrives at: `/train-init` wrote `match: "mismatch"` and training cannot start.
+
+One transform is almost never right the first time, so Step 2 becomes a loop, and the loop needs a
+ledger or it does not converge — round five re-tries what round two eliminated. That ledger is
+`lifecycle/scripts/adaptation/adapt.py`; the record it writes is `{PROJECT}/adaptation/<id>/session.json`.
+
+```
+adapt.py open --project {P} --dataset <parent> --snapshot <frozen> --consumer-stage training
+```
+
+It refuses two things at open, and both refusals are the point: **an unfrozen parent** (this skill's
+own rule — a derivation from a moving directory cannot say what it was made of) and **a consumer
+whose `input.json -> items` declares no `requires`**. The second is what makes the loop possible at
+all: with the contract filled, `mismatch` stops being a verdict and becomes a **diff**, which is both
+the first converter's spec and the loop's progress bar.
+
+**Each iteration is one ordinary Step 2 run, then two oracles, in order:**
+
+| | what it answers | on failure |
+|---|---|---|
+| **dataloader probe** | does the consuming code accept this at all — format, field names, layout | `--probe fail` |
+| **`/data-audit`** | is what it accepted actually right — values in range, category ids inside `num_classes`, distribution sane | `--audit dirty` |
+
+```
+adapt.py round --project {P} --id <sid> --run curate/run_<...> --probe pass|fail --audit clean|dirty
+```
+
+**Never stop at the first layer.** `round` refuses `--probe pass --audit not_run`, and the refusal is
+the whole reason this loop is written down: a converter emitting all-zero boxes loads perfectly, and
+a category id the dataloader silently clamps is not a crash. A loop whose bar is "it ran" certifies
+exactly the converters that ruin a training run without ever erroring.
+
+What a round turns up goes in as a **finding**, against one of three ends — `dataset`, `consumer`,
+`contract`, never a person:
+
+```
+adapt.py raise    --project {P} --id <sid> --against dataset --what "..." --evidence "<probe stderr | audit id>"
+adapt.py respond  --project {P} --id <sid> --n 1 --action fixed|partially_fixed|cannot_fix|disagree|needs_from_other_side
+adapt.py distill  --project {P} --id <sid> --kind refuted --says "no converter can synthesise depth" --cites 1 --cites 2
+```
+
+`distill --kind refuted` is the one to actually use. Confirmed conclusions tend to get written down
+on their own; the ruled-out ones are what stop the loop re-treading itself, and they are the half
+every summary drops.
+
+**When it stops converging, that is a result and not a failure.** If rounds establish that no
+converter can fix it — the source never captured the field, the labels are wrong at the source — the
+defect is upstream and the oracle has changed from "the dataloader accepts it" to "the party that
+owns the data agrees". Two oracles are never one session:
+
+```
+adapt.py close --id <sid> --verdict degraded_to_rework --attributed-to dataset
+```
+
+It prints `unresolved_findings`; those are what the `/data-label` rework round carries. Same backward
+edge as `/eval-triage`'s `label_wrong` — reached *before* a training run rather than through one.
+
+On a clean round, close as `adapted` and go to Step 3. `close --verdict adapted` refuses when the
+probe never ran (that is `unverifiable`, because a probe that fails open turns every unchecked round
+into a pass) and when any finding is still open.
+
+**This skill still executes nothing.** Every round's transform is the user's code through the
+ordinary run machinery; what is new is only that the loop leaves a record.
+
 ## Step 3 — `register`, and the claim/verified split
 
 `register` writes the new `dataset.json` with `derived_from` filled in. Two provenances, same
@@ -116,18 +184,33 @@ records is wrong.
 
 ## What this is not
 
-**It does not convert bytes, and it does not choose a shard format.** `/data-freeze` says the same
-thing from the other side, and it is the same boundary: standardising a *manifest* is free;
+**It does not convert bytes itself, and it does not choose a shard format.** `/data-freeze` says the
+same thing from the other side, and it is the same boundary: standardising a *manifest* is free;
 standardising *bytes* is a curate run producing a new dataset. That run is the user's code, and it
-stays theirs — zero code invasion is the project's first principle, and a built-in converter would
-be the first violation of it.
+stays theirs.
+
+**Which forbids a converter shipped in MLClaw — not a converter.** The line is between the two, and
+it used to read as though it banned both, which is how the most common thing a user does ended up
+with a diagnosis and no action. A `coco_to_yolo.py` living in this repo would be MLClaw carrying a
+format library: it would rot against the next variant, get edited in place, and become a piece of the
+tool that one project's data decided the shape of. A converter the agent writes for **this** source,
+after reading a sample, that runs as an ordinary run and is frozen in that run's code snapshot, is an
+*instance* — the same category as a filled `config.json`, and it satisfies zero code invasion more
+completely than a built-in would, because nothing was added to the user's code *or* to the tool.
+
+Concretising per project is the whole job. Step 2b is where it happens; what stays project-independent
+is the loop and the record, not the transform.
 
 ## Requires / suggests
 
 - **Requires**: a `datasets/<id>/dataset.json` for the parent, and **a frozen snapshot of it**. No
   snapshot means `/data-freeze` first — this skill refuses to derive from a moving target.
+- **Requires for Step 2b only**: the consuming stage's `input.json -> items.<name>.requires`. Empty
+  means there is no oracle, and `adapt.py open` refuses rather than let each round be judged by
+  whoever is looking.
 - **Suggests**: `/data-check` to declare the output's locations and scan it, then `/data` to confirm
-  where the new dataset lands on the line.
+  where the new dataset lands on the line. After a Step 2b campaign that ended
+  `degraded_to_rework`, `/data-label` for the rework round the unresolved findings describe.
 
 Per `lifecycle/references/skill-graph.md` -> "Workflow State Protocol", push on entry and pop on exit. `stage: "curate"` when the
 transform runs as an MLClaw run, `execution: <run_id>`; `stage: null` when it does not.

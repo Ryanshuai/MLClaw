@@ -202,8 +202,33 @@ If no candidate has `match: "ok"`, stop before Step 7 rather than presenting a c
 
 | Best you have | What it means | What you do |
 |---|---|---|
-| `absent` / `mismatch` only | the data isn't here and nothing is bringing it | training can't start, and that's the finding. `/data-collect` if it sits on a machine you can reach; conversion if `mismatch` |
+| `absent` only | the data isn't here and nothing is bringing it | training can't start, and that's the finding. `/data-collect` if it sits on a machine you can reach |
+| `mismatch` | the bytes are here and the code cannot read them | **this one has somewhere to go** — see below. Do not stop at "needs conversion" |
 | `pending` | it's with a named party, due on a date | **name the party and the date; do not go looking for a path.** `handoff.py status --project {PROJECT} --open-only`, report, stop. Falling through to "so where is your data?" is how a half-labeled directory gets picked instead |
+
+**`mismatch` is the one kind of no that routes somewhere, and it is the most common one.** The bytes
+exist; the loader cannot read them. Historically this row said "needs conversion" and the trail ended
+there, because nothing performs a conversion — which left the single most frequent user situation
+with a diagnosis and no action. It has a path now:
+
+1. **Fill the contract first — `input.json -> items.<name>.requires`.** You already read the
+   dataloader to *make* this judgment, so write down what it requires (`layout`,
+   `annotation_format`, `fields`, `value_ranges`, `num_classes`, `evidence`) instead of discarding it.
+   This is what turns `mismatch` from a verdict into a **diff**, and the diff is the conversion's
+   spec. A requirement you could not read is `null`, never omitted.
+2. **Push, then hand off to the data line.** Per `skill-graph.md`'s state protocol, push this skill
+   onto the stack and route: `/data-check` to declare the source's layout if it is not a dataset yet,
+   `/data-freeze` to pin it (a derivation from a moving directory cannot say what it was made of),
+   then `/data-curate` Step 2b, which loops a converter against the contract you just wrote —
+   dataloader probe, then `/data-audit`, until it converges or establishes that no converter can fix
+   it. **The user should see one flow, not three skill names**; the stack is what makes that possible.
+3. **Come back and re-scan.** The campaign produces a new dataset id; freeze it and the candidate
+   list gains a `dataset:<id>@<snapshot>` entry that ranks first — which is the point, since a
+   citation names a membership set and the directory you started from does not.
+
+When the campaign closes `degraded_to_rework` instead, that is also an answer: no converter can fix
+it, the defect is upstream, and the unresolved findings are a `/data-label` rework round. Report that
+and stop — it is the same finding as `pending`, arrived at by measurement rather than by waiting.
 
 **Inherited checkpoints get an `origin` block.** When a weight file came from someone else (handover, paper release) rather than being a standard pretrained backbone, record what's known about it in `artifacts.json -> items.<name>.origin` — see `references/schemas.md` → "artifacts.json -> items.<name>.origin". Fill what you can automatically by querying the backend Step 0 reached for this checkpoint's own run (`config` and final `metrics` come for free); Step 4d later does the same at project scope for the whole history. Then ask the user only for what's missing — above all `why` (what experiment this was, why it was kept).
 
