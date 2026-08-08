@@ -16,3 +16,7 @@ __pycache__/
 
 # agent-refactor 工作目录（脚本产物 + state.json）
 .agent-refactor/
+
+# skill-creator 的脚手架和工作目录
+.claude/skills/skill-creator/
+skill-creator-workspace/
