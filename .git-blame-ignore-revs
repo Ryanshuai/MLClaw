@@ -12,3 +12,6 @@
 
 # fix: pin encoding="utf-8" on all 33 subprocess text reads
 abe8a178c89fc4eeaffbb6707d020f367503d76d
+
+# style(roadmap): rewrap to the file's line width -- 332 lines moved, 7 words changed.
+fed95b8da0b531be9754b8a9e30037e85b03fc41
