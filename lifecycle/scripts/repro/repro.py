@@ -588,7 +588,7 @@ def current_env(packages):
     if not os.path.exists(script):
         return None, "capture_env.py not found"
     try:
-        p = subprocess.run([sys.executable, script, ",".join(packages)],
+        p = subprocess.run([sys.executable, "-X", "utf8", script, ",".join(packages)],
                            capture_output=True, text=True, encoding="utf-8", timeout=120)
     except (OSError, subprocess.SubprocessError) as exc:
         return None, str(exc)

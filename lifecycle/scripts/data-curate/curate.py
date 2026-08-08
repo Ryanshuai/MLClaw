@@ -108,7 +108,7 @@ def run_gate(project, dataset, acknowledge) -> dict | None:
     if not os.path.isfile(gate):
         return {"refused": "phase.py is not present, so the curate gate could "
                            "not be evaluated", "unchecked": True}
-    cmd = [sys.executable, gate, "gate", "--project", project,
+    cmd = [sys.executable, "-X", "utf8", gate, "gate", "--project", project,
            "--dataset", dataset, "--to", "curate"]
     if acknowledge:
         cmd += ["--acknowledge", str(acknowledge)]

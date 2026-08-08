@@ -414,19 +414,35 @@ def expected_direction(name):
     return None
 
 
+def _escape_either_sep(literal):
+    """`re.escape`, except a path separator matches whichever one the OS used.
+
+    The regex is built from the *pattern* (`<output_dir>/checkpoint-{step}.pt`,
+    always written with forward slashes) but matched against what `glob.glob`
+    *returned*, which on Windows uses backslashes. Escaping the pattern verbatim
+    makes the two disagree on every separator, so nothing matches — and the
+    failure is silent in the worst way: every checkpoint lands in
+    `checkpoints_without_a_metric`, `best` comes back None, and retention
+    correctly refuses to delete what it cannot rank. So it looks like a careful
+    tool declining to act, not like a resolver that never resolved anything.
+    """
+    return "[\\\\/]".join(re.escape(part) for part in re.split(r"[\\/]", literal))
+
+
 def resolve_pattern(pattern, output_dir):
     """Turn `<output_dir>/checkpoint-{step}.pt` into a regex + glob.
 
     -> (glob_pattern, compiled_regex). The regex captures whichever of
-    `{epoch}` / `{step}` the pattern uses, under those group names.
+    `{epoch}` / `{step}` the pattern uses, under those group names. Separators
+    are matched loosely — see `_escape_either_sep` for why that is not laxity.
     """
     p = pattern.replace("<output_dir>", output_dir).replace("${output_dir}", output_dir)
     glob = re.sub(r"\{(epoch|step)\}", "*", p)
 
     rx, last = [], 0
     for m in re.finditer(r"\{(epoch|step)\}", p):
-        rx.append(re.escape(p[last:m.start()]))
+        rx.append(_escape_either_sep(p[last:m.start()]))
         rx.append(r"(?P<%s>\d+)" % m.group(1))
         last = m.end()
-    rx.append(re.escape(p[last:]))
+    rx.append(_escape_either_sep(p[last:]))
     return glob, re.compile("^" + "".join(rx) + "$")

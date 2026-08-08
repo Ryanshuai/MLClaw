@@ -25,7 +25,8 @@ import os
 import unittest
 from datetime import datetime, timedelta, timezone
 
-from helpers import TempDirCase, run_script
+from helpers import (TempDirCase, requires_rsync_accepting_native_paths,
+                     run_script)
 
 SCRIPT = "data-online-sample/online.py"
 COLLECT = "data-collect/collect.py"
@@ -262,6 +263,9 @@ class DenominatorIsCitedNotAsserted(OnlineCase):
         self.assertEqual(code, 2)
 
     def test_a_cited_reading_carries_its_own_honesty_through(self):
+        # The only check here that needs the transfer to actually SUCCEED; the
+        # others assert on refusals, which rsync never gets to see.
+        requires_rsync_accepting_native_paths(self.tmp)
         self.declare()
         _, s, _ = self.sample("--n", "2")
         code, out, _ = self.collect("--cite-window", f"boxes/{s['window_id']}")

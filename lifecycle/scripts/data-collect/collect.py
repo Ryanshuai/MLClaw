@@ -251,7 +251,7 @@ def cmd_pull(a):
     # the data. Failure to stamp never fails the pull — the bytes are already in.
     if a.rig:
         rig_py = os.path.join(os.path.dirname(os.path.abspath(__file__)), "rig.py")
-        p = subprocess.run([sys.executable, rig_py, "stamp", "--project", a.project,
+        p = subprocess.run([sys.executable, "-X", "utf8", rig_py, "stamp", "--project", a.project,
                             "--rig", a.rig, "--into", dest] +
                            (["--session", a.session] if a.session else []) +
                            (["--overwrite"] if a.overwrite else []),

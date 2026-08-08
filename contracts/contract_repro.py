@@ -674,18 +674,23 @@ class AFrameworkStagesCodeAxisIsNotAMissingTree(ReproCase):
     verdict rather than a courtesy.
     """
 
-    def framework_run(self, pinned="8.4.40", ran="8.4.40"):
+    # A distribution name that cannot resolve, so "not installed" is a property of
+    # the name rather than of whoever is running the suite. Underscores and the
+    # sentinel word keep it off PyPI by construction.
+    ABSENT_PKG = "mlclaw-contract-absent-sentinel"
+
+    def framework_run(self, pinned="8.4.40", ran="8.4.40", framework="ultralytics"):
         run = {"run_id": "run_A", "stage": "evaluation", "status": "completed",
                "mode": "production", "scope": {"samples": 100},
                "env": {"packages": {}},
                "metrics": {"best": {"primary_metric": "m", "primary_metric_value": 0.5}}}
-        run["code"] = {"kind": "framework", "framework": "ultralytics",
+        run["code"] = {"kind": "framework", "framework": framework,
                        "framework_version": pinned, "repo": None, "branch": None,
                        "origin_commit": None, "repo_subdir": None,
                        "dirty_patch_path": None, "dirty_files_count": None,
                        "untracked_skipped": [], "reproducible": True, "warnings": []}
         if ran:
-            run.setdefault("env", {}).setdefault("packages", {})["ultralytics"] = ran
+            run.setdefault("env", {}).setdefault("packages", {})[framework] = ran
         return run
 
     def test_a_pinned_framework_never_reports_a_missing_sha(self):
@@ -721,12 +726,19 @@ class AFrameworkStagesCodeAxisIsNotAMissingTree(ReproCase):
         must not read as `not_installed` anywhere, which is the unreachable/gone
         split the discovery engine turns on, wearing different words."""
         ax = repro.probe_code(self.project,
-                              self.framework_run(pinned="7.2.2", ran="7.2.2"),
+                              self.framework_run(pinned="7.2.2", ran="7.2.2",
+                                                 framework=self.ABSENT_PKG),
                               "evaluation", framework_python=sys.executable)
-        # The fixture pins `ultralytics`, which is not installed in the suite's
-        # stdlib-only interpreter: the honest verdict is `unverifiable`, and
-        # emphatically not `intact`. That is the same bar one step further out —
-        # a probe that could not run never collapses into a pass.
+        # The package has to be one that CANNOT be installed, not merely one the
+        # suite's own interpreter is expected to lack. Pinning a real package made
+        # the check assert a fact about the developer's site-packages: green under
+        # pixi, and `intact` on a conda base that happens to carry `ultralytics`,
+        # where it read as the contract breaking rather than the fixture being
+        # wrong. A check whose answer depends on the host is not a check.
+        #
+        # The honest verdict for an absent package is `unverifiable`, emphatically
+        # not `intact` — the same bar one step further out: a probe that could not
+        # run never collapses into a pass.
         self.assertEqual(ax["verdict"], "unverifiable")
         self.assertEqual(ax["integrity"]["state"], "not_installed")
         self.assertIn("NOT a statement about the environment that ran",

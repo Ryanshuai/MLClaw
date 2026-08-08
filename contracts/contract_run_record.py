@@ -77,7 +77,7 @@ class RunIdCollision(TempDirCase):
             rid = "run_" + (now + timedelta(seconds=delta)).strftime("%Y%m%d_%H%M%S")
             d = os.path.join(stage, "runs", rid)
             os.makedirs(d)
-            with open(os.path.join(d, "run.json"), "w") as fh:
+            with open(os.path.join(d, "run.json"), "w", encoding="utf-8") as fh:
                 fh.write("{}")
 
         rc, out, err = run_script("shared/create_run.py", stage, TEMPLATE)
@@ -91,7 +91,7 @@ class Finalize(TempDirCase):
     reported as such, never left null with no explanation.
     """
     def make_run(self, **fields):
-        with open(TEMPLATE) as f:
+        with open(TEMPLATE, encoding="utf-8") as f:
             run = json.load(f)
         run.update(fields)
         return self.write_json("run.json", run)
@@ -145,7 +145,7 @@ class Finalize(TempDirCase):
         path = self.make_run(started_at=datetime.now(timezone.utc).isoformat())
         run_script("shared/finalize_run.py", path, "failed")
 
-        with open(path) as f:
+        with open(path, encoding="utf-8") as f:
             self.assertEqual(json.load(f)["status"], "failed")
 
     def test_unknown_status_is_rejected(self):
@@ -168,7 +168,7 @@ class Template(unittest.TestCase):
     """
 
     def setUp(self):
-        with open(TEMPLATE) as f:
+        with open(TEMPLATE, encoding="utf-8") as f:
             self.t = json.load(f)
 
     def test_canonical_step_names(self):
@@ -204,7 +204,7 @@ class Template(unittest.TestCase):
             md = os.path.join(skills_dir, skill, "SKILL.md")
             if not os.path.isfile(md):
                 continue
-            with open(md) as f:
+            with open(md, encoding="utf-8") as f:
                 for name in re.findall(r"\(step `([a-z_]+)`\)", f.read()):
                     if name not in defined:
                         offenders.append(f"{skill}: `{name}`")
@@ -226,7 +226,7 @@ class Workload(unittest.TestCase):
     FIELDS = ("world_size", "batch_size", "grad_accum", "epochs", "samples_per_epoch")
 
     def setUp(self):
-        with open(TEMPLATE) as f:
+        with open(TEMPLATE, encoding="utf-8") as f:
             self.t = json.load(f)
 
     def test_block_exists_with_every_field(self):
@@ -266,7 +266,7 @@ class Workload(unittest.TestCase):
         """The template and the rule that tells skills to fill it must not drift.
         A field no document mentions is a field no skill writes."""
         with open(os.path.join(REPO_ROOT, "lifecycle", "references",
-                               "run-mechanics.md")) as f:
+                               "run-mechanics.md"), encoding="utf-8") as f:
             doc = f.read()
         missing = [k for k in self.FIELDS if f"`{k}`" not in doc]
         self.assertEqual(missing, [],

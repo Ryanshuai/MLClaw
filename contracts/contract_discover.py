@@ -22,7 +22,7 @@ import sys
 import unittest
 from datetime import datetime, timedelta, timezone
 
-from helpers import TempDirCase, load_script, run_script
+from helpers import TempDirCase, load_script, requires_posix_shims, run_script
 
 SCRIPT = "discover/discover.py"
 # The probe transports and the five vendor REST adapters live here; a probe
@@ -1039,7 +1039,7 @@ class SomethingWatchesTheExpiryDate(DiscoverCase):
 
     def test_the_conversation_start_pass_is_told_to_read_them(self):
         from helpers import REPO_ROOT
-        with open(os.path.join(REPO_ROOT, "CLAUDE.md")) as fh:
+        with open(os.path.join(REPO_ROOT, "CLAUDE.md"), encoding="utf-8") as fh:
             text = fh.read()
         block = text[text.index("On Conversation Start"):]
         block = block[:block.index("\n## ")] if "\n## " in block else block
@@ -1190,6 +1190,7 @@ class TheProbeUsesTheCredentialTheRegistryDeclares(DiscoverCase):
         The point of the fixture is the recording. Asserting on status alone would
         pass for the buggy version too — it also returned a plausible answer.
         """
+        requires_posix_shims()
         bindir = self.path("bin")
         os.makedirs(bindir, exist_ok=True)
         seen = os.path.join(bindir, "seen.txt")
@@ -1203,7 +1204,7 @@ class TheProbeUsesTheCredentialTheRegistryDeclares(DiscoverCase):
             "ok": ('echo "2026-06-22 10:52:43  647391178 a.tar.gz"; '
                    'echo "Total Objects: 1"; echo "   Total Size: 647391178"'),
         }[mode]
-        with open(os.path.join(bindir, "aws"), "w") as fh:
+        with open(os.path.join(bindir, "aws"), "w", encoding="utf-8") as fh:
             fh.write("#!/bin/sh\n"
                      f'printf "%s\\n" "${{AWS_ACCESS_KEY_ID:-<none>}}" >> {seen}\n'
                      f'printf "profile=%s\\n" "${{AWS_PROFILE:-<none>}}" >> {seen}\n'
@@ -1215,7 +1216,7 @@ class TheProbeUsesTheCredentialTheRegistryDeclares(DiscoverCase):
         return seen
 
     def credential_seen(self, seen):
-        with open(seen) as fh:
+        with open(seen, encoding="utf-8") as fh:
             return [l.strip() for l in fh if l.strip()]
 
     def registered(self, **extra):
@@ -1678,7 +1679,7 @@ class TheRecordIsKeptNotJustWritten(DiscoverCase):
         a commit about a discovery sweep."""
         self.init_repo()
         self.write_json("ws/proj/project.json", {"name": "proj", "edited": True})
-        with open(self.path("ws", "proj", "WIP.txt"), "w") as fh:
+        with open(self.path("ws", "proj", "WIP.txt"), "w", encoding="utf-8") as fh:
             fh.write("half-written thing\n")
         self.record("s3://b/x/")
         self.save()
@@ -1738,7 +1739,7 @@ class TheRecordIsKeptNotJustWritten(DiscoverCase):
         """`.gitignore` excluding the record would make every save a no-op that
         reported success. Projects legitimately ignore whole directories."""
         self.init_repo()
-        with open(self.path("ws", "proj", ".gitignore"), "w") as fh:
+        with open(self.path("ws", "proj", ".gitignore"), "w", encoding="utf-8") as fh:
             fh.write("discovery/\n")
         self.record("s3://b/x/")
         rc, out, _ = self.save()
@@ -1780,7 +1781,7 @@ class TheSweepSaysWhichCellsItNeverLookedIn(DiscoverCase):
     def brief(self):
         rc, out, err = run_script(SCRIPT, "brief", "--project", self.project)
         self.assertEqual(rc, 0, err)
-        with open(self.path("ws", "proj", "discovery", "brief.md")) as fh:
+        with open(self.path("ws", "proj", "discovery", "brief.md"), encoding="utf-8") as fh:
             return out, fh.read()
 
     def test_a_lead_records_which_search_it_belongs_to(self):
@@ -1870,7 +1871,7 @@ class AnomaliesAreComputedNotNoticed(DiscoverCase):
         looked and does not now."""
         d = self.path("vanishing")
         os.makedirs(d, exist_ok=True)
-        with open(os.path.join(d, "f.bin"), "w") as fh:
+        with open(os.path.join(d, "f.bin"), "w", encoding="utf-8") as fh:
             fh.write("x")
         self.record(d)
         self.probe()
@@ -1933,7 +1934,7 @@ class AnomaliesAreComputedNotNoticed(DiscoverCase):
         """A list where the deletion is third is a list that gets skimmed."""
         d = self.path("gonesoon")
         os.makedirs(d, exist_ok=True)
-        with open(os.path.join(d, "f"), "w") as fh:
+        with open(os.path.join(d, "f"), "w", encoding="utf-8") as fh:
             fh.write("x")
         e = self.path("empty2")
         os.makedirs(e, exist_ok=True)
@@ -1950,7 +1951,7 @@ class AnomaliesAreComputedNotNoticed(DiscoverCase):
     def test_a_quiet_sweep_reports_no_anomalies_rather_than_inventing_one(self):
         d = self.path("fine")
         os.makedirs(d, exist_ok=True)
-        with open(os.path.join(d, "f"), "w") as fh:
+        with open(os.path.join(d, "f"), "w", encoding="utf-8") as fh:
             fh.write("data")
         self.record(d)
         self.probe()
@@ -1975,7 +1976,7 @@ class TheBriefIsReadInTheOrderThatKeepsItHonest(DiscoverCase):
     def brief_text(self):
         rc, _out, err = run_script(SCRIPT, "brief", "--project", self.project)
         self.assertEqual(rc, 0, err)
-        with open(self.path("ws", "proj", "discovery", "brief.md")) as fh:
+        with open(self.path("ws", "proj", "discovery", "brief.md"), encoding="utf-8") as fh:
             return fh.read()
 
     def test_the_sections_are_ordered_gaps_before_findings(self):
@@ -2005,7 +2006,7 @@ class TheBriefIsReadInTheOrderThatKeepsItHonest(DiscoverCase):
     def test_a_lower_bound_is_named_as_one(self):
         d = self.path("some")
         os.makedirs(d, exist_ok=True)
-        with open(os.path.join(d, "f"), "w") as fh:
+        with open(os.path.join(d, "f"), "w", encoding="utf-8") as fh:
             fh.write("xyz")
         self.record(d)
         self.record("s3://b/unreachable/")   # never probed -> not sized
@@ -2054,7 +2055,7 @@ class ALinkIsAConvenienceNotAFinding(DiscoverCase):
     def brief_text(self):
         rc, _out, err = run_script(SCRIPT, "brief", "--project", self.project)
         self.assertEqual(rc, 0, err)
-        with open(self.path("ws", "proj", "discovery", "brief.md")) as fh:
+        with open(self.path("ws", "proj", "discovery", "brief.md"), encoding="utf-8") as fh:
             return fh.read()
 
     def test_the_thing_and_the_claim_get_separate_links(self):
@@ -2228,7 +2229,7 @@ class ALeadIsAmendedNotEdited(DiscoverCase):
         self.note("lead_0001", "recorded one level too deep", "correction",
                   "--supersedes", "lead_0002")
         run_script(SCRIPT, "brief", "--project", self.project)
-        with open(self.path("ws", "proj", "discovery", "brief.md")) as fh:
+        with open(self.path("ws", "proj", "discovery", "brief.md"), encoding="utf-8") as fh:
             t = fh.read()
         self.assertIn("Corrections recorded on leads", t)
         self.assertIn("recorded one level too deep", t)
@@ -2239,7 +2240,7 @@ class ALeadIsAmendedNotEdited(DiscoverCase):
         self.record("s3://b/x/")
         self.note("lead_0001", "counted 1,895 images and 1,888 annotations")
         run_script(SCRIPT, "brief", "--project", self.project)
-        with open(self.path("ws", "proj", "discovery", "brief.md")) as fh:
+        with open(self.path("ws", "proj", "discovery", "brief.md"), encoding="utf-8") as fh:
             t = fh.read()
         self.assertIn("counted 1,895 images", t)
         self.assertNotIn("Corrections recorded on leads", t)
@@ -2266,17 +2267,17 @@ class RegeneratingTheBriefDoesNotEatTheJudgment(DiscoverCase):
 
     def write_reading(self, text):
         p = self.brief()
-        with open(p) as fh:
+        with open(p, encoding="utf-8") as fh:
             t = fh.read()
         head, _, _ = t.partition("## Reading — filled in by hand")
-        with open(p, "w") as fh:
+        with open(p, "w", encoding="utf-8") as fh:
             fh.write(head + "## Reading — filled in by hand\n\n" + text + "\n")
 
     def test_a_hand_written_reading_survives_regeneration(self):
         self.record("s3://b/x/", "--subject", "data")
         self.write_reading("The Kontoor set is 1,895 images, not ~1,000.")
         self.record("s3://b/y/", "--subject", "data")      # something changed
-        with open(self.brief()) as fh:
+        with open(self.brief(), encoding="utf-8") as fh:
             t = fh.read()
         self.assertIn("The Kontoor set is 1,895 images", t)
         self.assertIn("2 lead(s)", t, "the computed part must still refresh")
@@ -2287,7 +2288,7 @@ class RegeneratingTheBriefDoesNotEatTheJudgment(DiscoverCase):
         self.record("s3://b/x/")
         self.brief()
         self.record("s3://b/y/")
-        with open(self.brief()) as fh:
+        with open(self.brief(), encoding="utf-8") as fh:
             t = fh.read()
         self.assertEqual(t.count("Empty until somebody writes it"), 1)
         self.assertNotIn("carried over", t)
@@ -2295,7 +2296,7 @@ class RegeneratingTheBriefDoesNotEatTheJudgment(DiscoverCase):
     def test_a_carried_section_says_it_is_carried(self):
         self.record("s3://b/x/")
         self.write_reading("judgment goes here")
-        with open(self.brief()) as fh:
+        with open(self.brief(), encoding="utf-8") as fh:
             t = fh.read()
         self.assertIn("never regenerated", t)
 
@@ -2622,6 +2623,12 @@ class AnEmptyWandbListingIsNotAnAbsence(DiscoverCase):
             return "verified", "ok", ["p"], {}
 
         d.probe_wandb_entity = fake_entity
+        # And the credential gate, which sits BEFORE the dispatch. Without this the
+        # check reads whatever wandb key the developer's own ~/.netrc happens to
+        # carry: green on a machine that has one, red on a machine that does not,
+        # and in neither case anything to do with prefix stripping. A check that
+        # answers a question about the host is not a check.
+        d.credential_present = lambda spec: (True, "stubbed for this check")
         for path in ("ent", "wandb:ent", "tracking:wandb:ent"):
             seen.clear()
             d.probe_tracking("tracking:wandb", path, 5.0)
@@ -2702,6 +2709,13 @@ class AnEmptyWandbListingIsNotAnAbsence(DiscoverCase):
             False: ("gone", "absent from the entity"),
             None: ("unreachable", "could not be read"),
         }
+        # Same credential gate as the prefix check above, reached through
+        # `__globals__` because `probe_tracking` is defined in `_probes` and only
+        # re-exported here — patching the name on `discover` would patch nothing.
+        g = d.probe_tracking.__globals__
+        real_cp = g["credential_present"]
+        g["credential_present"] = lambda spec: (True, "stubbed for this check")
+        self.addCleanup(g.__setitem__, "credential_present", real_cp)
         for exists, (want_status, fragment) in cases.items():
             d.subprocess.run = run_with({"n": 0, "names": [],
                                          "project_exists": exists})

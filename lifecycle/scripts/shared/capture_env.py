@@ -36,7 +36,7 @@ def run_cmd(cmd):
 
 
 def get_pip_packages(package_list):
-    output = run_cmd([sys.executable, "-m", "pip", "freeze"])
+    output = run_cmd([sys.executable, "-X", "utf8", "-m", "pip", "freeze"])
     if not output:
         return {pkg: None for pkg in package_list}
     installed = {}

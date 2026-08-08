@@ -120,12 +120,25 @@ def snapshot_units(snap) -> set[str]:
 def safe_unit_path(root: str, unit: str) -> str | None:
     """Join a location root and a census-listed unit id, or None if the result
     escapes the root. `..`, absolute unit ids and symlinked units all land here.
-    This is the last guard before an `rm -rf`, so it is deliberately blunt."""
-    root = os.path.expanduser(root).rstrip("/")
-    if not root or root == "/" or unit.startswith("/") or not unit.strip():
+    This is the last guard before an `rm -rf`, so it is deliberately blunt.
+
+    Separators come from `os.sep`, not a literal `/`. Hardcoding the slash made
+    the guard reject *every* unit on Windows — `os.path.join` produced
+    `...\\store\\260731` and the prefix test asked for `...\\store/`. It failed in
+    the safe direction, refusing to delete rather than deleting the wrong thing,
+    which is exactly why it could sit here unnoticed: a guard that says no to
+    everything looks identical to a guard that is working.
+
+    `os.path.dirname(p) == p` is the portable "is a filesystem root" test — true
+    for both `/` and `C:\\`, where the original only knew the first.
+    """
+    root = os.path.normpath(os.path.expanduser(root))
+    if (not root or not unit.strip()
+            or os.path.dirname(root) == root
+            or os.path.isabs(unit) or unit.startswith(("/", "\\"))):
         return None
     joined = os.path.normpath(os.path.join(root, unit))
-    if joined == root or not joined.startswith(root + "/"):
+    if joined == root or not joined.startswith(root + os.sep):
         return None
     return joined
 

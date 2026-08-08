@@ -61,12 +61,23 @@ TERMINAL = ("accepted", "rejected", "cancelled")
 
 def iter_files(root, include=None, exclude=None):
     """Relative paths under root, sorted. Sorted so a manifest is reproducible and
-    two manifests of the same tree diff cleanly."""
+    two manifests of the same tree diff cleanly.
+
+    Always forward slashes, whatever the OS separator is. A manifest item id is
+    not a path on this machine — it is the identifier a third party is sent, works
+    against for three weeks, and returns a listing under, and `receive` computes
+    completeness by comparing those strings. Let the separator follow the host and
+    a batch enumerated on Windows comes back from a vendor on Linux matching
+    nothing: every item reported missing, and the count is the record that
+    downstream inherits. The manifest is frozen at send time precisely so it can
+    outlive the machine that wrote it; an OS-dependent key defeats that.
+    """
     out = []
     for dirpath, dirnames, filenames in os.walk(root):
         dirnames[:] = [d for d in sorted(dirnames) if not d.startswith(".")]
         for name in sorted(filenames):
             rel = os.path.relpath(os.path.join(dirpath, name), root)
+            rel = rel.replace(os.sep, "/")
             if include and not any(fnmatch.fnmatch(rel, p) for p in include):
                 continue
             if exclude and any(fnmatch.fnmatch(rel, p) for p in exclude):

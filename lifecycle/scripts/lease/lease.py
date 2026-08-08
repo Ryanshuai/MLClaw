@@ -108,7 +108,7 @@ def call(provider, res_path, verb, *extra):
     script = os.path.join(HERE, f"provider_{provider}.py")
     if not os.path.exists(script):
         die("permission", f"no adapter for provider '{provider}' ({script})")
-    argv = [sys.executable, script, "--resources", res_path, verb, *map(str, extra)]
+    argv = [sys.executable, "-X", "utf8", script, "--resources", res_path, verb, *map(str, extra)]
     proc = subprocess.run(argv, capture_output=True, text=True, encoding="utf-8")
     out = proc.stdout.strip()
     try:

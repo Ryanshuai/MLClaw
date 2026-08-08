@@ -39,6 +39,79 @@ import unittest
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SCRIPTS = os.path.join(REPO_ROOT, "lifecycle", "scripts")
 
+# The harness reads and writes utf-8 regardless of the host's codepage. `-X utf8`
+# on the child (see run_script) covers the scripts run as subprocesses; this covers
+# the ones `load_script` calls IN-PROCESS, whose `print()` goes to the runner's own
+# stdout. On a cp1252 console that raises UnicodeEncodeError on the first arrow or
+# em-dash a script prints — a check failing because of the terminal it ran in, which
+# tells the reader nothing about the contract it was supposed to be checking.
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+
+
+def requires_posix_shims():
+    """Skip a check whose fixture fakes a CLI with a `#!/bin/sh` file on PATH.
+
+    That technique needs a kernel that honours a shebang and an executable bit,
+    so on Windows the shim is never run — the probe finds no `aws` at all and the
+    check fails describing a credential precedence that was never exercised.
+
+    Skip, not fail, and the distinction is the repo's own: a check that could not
+    run has *not* found a breach, and reporting it as one trains the reader to
+    dismiss red. Same shape as `unreachable` vs `gone` in `/discover`, which is
+    incidentally what several of these checks are about.
+    """
+    if os.name != "posix":
+        raise unittest.SkipTest(
+            "fixture fakes a CLI with a #!/bin/sh file on PATH; needs POSIX")
+
+
+def requires_symlinks(target, link):
+    """`os.symlink`, or skip when the OS refuses to let this process make one.
+
+    Windows needs Developer Mode or an elevated process (WinError 1314). The
+    contract being checked — an output path must not reach its own input, even
+    through a link — is real everywhere; the *fixture* is what the host declines.
+    Skip rather than fail, for the same reason as `requires_posix_shims`.
+    """
+    try:
+        os.symlink(target, link)
+    except (OSError, NotImplementedError, AttributeError) as exc:
+        raise unittest.SkipTest(f"cannot create a symlink on this host: {exc}")
+
+
+def requires_rsync_accepting_native_paths(tmpdir):
+    """Skip unless this host's rsync moves a file between two native paths.
+
+    Probed rather than keyed on `os.name`, because the thing that breaks is a
+    *combination*: an MSYS rsync spawned from a native Windows interpreter gets
+    `D:\\data\\src` and reads `D:` as a remote host, so it tries ssh and exits 1.
+    The same rsync driven from a shell that rewrites paths works fine, which is
+    why "is there an rsync" is the wrong question — `shutil.which` says yes on
+    exactly the host where this fails.
+
+    The limitation is real and belongs to `/data-collect`, whose design puts the
+    transfer in rsync's hands on purpose. Recording it as a skip says the check
+    did not run; letting it fail would say the contract is broken, and it is not.
+    """
+    src = os.path.join(tmpdir, "_rsync_probe_src")
+    dst = os.path.join(tmpdir, "_rsync_probe_dst")
+    os.makedirs(src, exist_ok=True)
+    os.makedirs(dst, exist_ok=True)
+    with open(os.path.join(src, "probe"), "w", encoding="utf-8") as fh:
+        fh.write("probe\n")
+    try:
+        p = subprocess.run(["rsync", "-a", src + os.sep, dst + os.sep],
+                           capture_output=True, text=True, encoding="utf-8",
+                           timeout=60)
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise unittest.SkipTest(f"rsync unusable on this host: {exc}")
+    if p.returncode != 0:
+        raise unittest.SkipTest(
+            "this host's rsync does not accept native paths from a spawned "
+            f"process (exit {p.returncode}): {(p.stderr or '').strip()[:200]}")
+
 
 def load_script(relpath):
     """Import a script by path, e.g. load_script('shared/create_run.py').
@@ -71,9 +144,31 @@ def load_script(relpath):
 
 
 def run_script(relpath, *args):
-    """Run a script as a subprocess. -> (returncode, parsed_stdout_or_raw, stderr)."""
+    """Run a script as a subprocess. -> (returncode, parsed_stdout_or_raw, stderr).
+
+    `sys.executable`, never a name off PATH. A hardcoded `python3` does not exist
+    on Windows, so every check that shells out errored at spawn — 400 of 666, and
+    they read as errors rather than skips, which is why the suite had been failing
+    loudly enough to stop being read. It is also the wrong interpreter even where
+    it resolves: the suite pins one via pixi, and `python3` off PATH is whatever
+    the shell finds. Same fix as the one already made in the code-snapshot checks;
+    this is the shared helper that was missed.
+
+    `-X utf8` because the parent decodes utf-8 and the child must therefore emit
+    it. Without it the child's stdio follows the ambient codepage — cp1252 on this
+    machine — and the scripts print em-dashes, so the decode blows up in
+    subprocess's reader *thread*. That failure mode is worth naming: the exception
+    lands off the main thread, `p.stdout` silently becomes `None`, and every check
+    then dies at `.strip()` on a line that has nothing to do with encoding. Forcing
+    the child's mode is what makes the checks read the same bytes on every host.
+
+    It does not fix the underlying thing, and it should not: MLClaw's scripts
+    printing non-ASCII to a cp1252 console is a real defect on Windows, owned by
+    the scripts. Pinning it here keeps the harness from depending on the host's
+    codepage, which is a separate contract from what the scripts print.
+    """
     path = os.path.join(SCRIPTS, relpath)
-    p = subprocess.run(["python3", path, *[str(a) for a in args]],
+    p = subprocess.run([sys.executable, "-X", "utf8", path, *[str(a) for a in args]],
                        capture_output=True, text=True, encoding="utf-8")
     try:
         out = json.loads(p.stdout) if p.stdout.strip() else None
@@ -92,10 +187,15 @@ class TempDirCase(unittest.TestCase):
     def path(self, *parts):
         return os.path.join(self.tmp, *parts)
 
+    # Fixtures are utf-8 on both sides, always. Left to the platform default the
+    # scripts and the checks disagree about the same bytes: a fixture written here
+    # as cp1252 hands `0x97` to a script that reads utf-8, and a brief the script
+    # wrote as utf-8 reads back here as `â€”`. Both surfaced as check failures
+    # about carried sections and dagger markers — nothing about encoding.
     def write(self, relpath, content):
         full = self.path(relpath)
         os.makedirs(os.path.dirname(full), exist_ok=True)
-        with open(full, "w") as f:
+        with open(full, "w", encoding="utf-8") as f:
             f.write(content)
         return full
 
@@ -103,11 +203,11 @@ class TempDirCase(unittest.TestCase):
         return self.write(relpath, json.dumps(obj, indent=2))
 
     def read(self, *parts):
-        with open(self.path(*parts)) as f:
+        with open(self.path(*parts), encoding="utf-8") as f:
             return f.read()
 
     def read_json(self, relpath):
-        with open(self.path(relpath)) as f:
+        with open(self.path(relpath), encoding="utf-8") as f:
             return json.load(f)
 
 

@@ -15,7 +15,7 @@ import json
 import os
 import unittest
 
-from helpers import TempDirCase, run_script
+from helpers import TempDirCase, requires_symlinks, run_script
 
 SCRIPT = "data-curate/curate.py"
 TEMPLATE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
@@ -202,7 +202,7 @@ class TheOutputNeverLandsInsideItsOwnInput(CurateCase):
     def test_a_symlink_into_the_source_does_not_get_past_it(self):
         os.makedirs(self.path("store", "boxes"), exist_ok=True)
         link = self.path("sneaky")
-        os.symlink(self.path("store", "boxes"), link)
+        requires_symlinks(self.path("store", "boxes"), link)
         rc, _, _ = self.plan(into=os.path.join(link, "v2"))
         self.assertEqual(rc, 1)
 

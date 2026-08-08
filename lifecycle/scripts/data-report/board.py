@@ -71,10 +71,17 @@ def e(x):
 
 
 def gather(verb, project, stale_days, *extra):
-    """Shell out rather than import: one computation of phase, in one file."""
+    """Shell out rather than import: one computation of phase, in one file.
+
+    `-X utf8` on the child because this end decodes utf-8 and the child's stdout
+    otherwise follows the console codepage — cp1252 on Windows, where `phase.py`
+    prints an em-dash and the decode blows up in subprocess's reader thread. The
+    flag is per-process and does NOT inherit, so it has to be passed at every
+    spawn; there are eight of them across `lifecycle/scripts/`.
+    """
     if not os.path.isfile(PHASE_PY):
         broke(f"phase.py not found at {PHASE_PY}")
-    p = subprocess.run([sys.executable, PHASE_PY, verb, "--project", project,
+    p = subprocess.run([sys.executable, "-X", "utf8", PHASE_PY, verb, "--project", project,
                         "--stale-days", str(stale_days), *extra],
                        capture_output=True, text=True, encoding="utf-8")
     if p.returncode != 0 or not p.stdout.strip():
