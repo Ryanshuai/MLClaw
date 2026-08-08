@@ -1,0 +1,57 @@
+{
+  "_comment": "One campaign to make a dataset satisfy the contract of the stage about to consume it, and the two-way record of everything that was tried, answered and refused along the way. Lives at {PROJECT}/adaptation/{session_id}/session.json — project-level rather than under a stage, for the same reason a repro session is: it spans two by construction, and a record filed under either side would be invisible to the other. Not written by any script yet; this template is the design. Like a handoff and a triage it has no `steps` block — most of its rounds end in somebody else's inbox.\n\nThe sibling templates it is built from: `lifecycle/repro/session.json` supplies the multi-round frame (target / measure_via / declared band / trials / verdict / attributed_to), and `lifecycle/eval-triage/session.json` supplies the per-item thread (many parties writing judgements into ONE case, overruled ones kept). This one is the first that needs both, because it is the first loop where the rounds and the disagreements are the same object.",
+
+  "session_id": "adapt_{YYYYMMDD}_{HHmmss}[_{slug}]",
+  "project": "",
+  "opened_at": "",
+  "closed_at": null,
+
+  "_comment_status": "open | resolved | degraded | abandoned. A session that stopped converging stays OPEN unless it was explicitly degraded or abandoned — 'we quit trying' and 'it works now' must never render the same, and closing a stalled loop silently is how the next person re-derives four rounds of findings from scratch.",
+  "status": "open",
+
+  "_comment_target": "The two things with a seam between them. `dataset` is the id being adapted and `snapshot` the frozen parent it derives from — an unfrozen parent is refused at open, because a derivation from a moving directory records what happened to be there that day (`/data-curate`, 'refuses to derive from a moving target'). `consumer` is the stage whose code sets the contract. A session with only one side is refused: the boundary rule is that a session spans exactly one artifact seam, and without two ends there is nothing to iterate between.",
+  "target": {
+    "dataset": "",
+    "snapshot": "",
+    "consumer_stage": "",
+    "consumer_config": ""
+  },
+
+  "_comment_contract_at_open": "What the consuming code requires, copied here at open and NOT read live — the same reason a repro session copies `mode` and `scope`. It is what every round gets judged against, and a contract edited mid-campaign silently invalidates every earlier round's verdict while the record goes on reading as one continuous loop. The live copy lives at {consumer_stage}/input.json -> items. When it does change, that is a finding like any other (`raised_against: contract`) and the session records the new one as a superseding entry rather than overwriting this.",
+  "contract_at_open": {},
+
+  "_comment_measure_via": "The oracle — what is allowed to say a round passed. Two layers, in order, and BOTH are required: `dataloader_probe` (does the consuming code accept it at all — fatal, catches format, field names, layout) and `audit` (`/data-audit` — semantic: values in range, category ids inside num_classes, distribution not absurd). The second layer is not optional politeness. A converter that writes every bbox as zeros loads perfectly, and a category id the dataloader silently clamps is not a crash — a loop that stops at 'it ran' certifies exactly those. There is no third layer and deliberately no metric: a training result is not this loop's oracle, because by the time it speaks the campaign is over.",
+  "measure_via": {
+    "dataloader_probe": { "entry": "", "batches": 1 },
+    "audit": { "fatal_checks": [], "advisory_checks": [] }
+  },
+
+  "_comment_declared_clean": "What would count as done, written down BEFORE the first round. Kept for the same reason `/repro` keeps `declared_tolerance` next to the measured `band`: at round six, with the deadline close, the definition of clean is under pressure from the person who has to meet it. A convergence criterion chosen once the results are in is a test written to its own answer. If it was widened mid-campaign, that widening is a `caveat`, not an edit.",
+  "declared_clean": { "dataloader_probe": "passes", "audit": "no fatal findings", "notes": "" },
+
+  "_comment_findings": "The spine of the record, and the thing that makes it two-way. One entry per raised issue, NOT one per round — a round produces findings, but a finding outlives the round and is what the other side actually answers.\n\nEntry: {n, raised_at, raised_by, raised_against, what, evidence, state, responses[], reverses?, superseded_by?}\n\n`raised_by` / `raised_against` are the two ENDS OF THE SEAM (`dataset` | `consumer` | `contract`), never people and never job titles. The same engineer routinely holds both ends, and the record is needed exactly as much then — ownership follows the defect, the way `/repro` attributes to an axis and `/eval-triage` to a verdict kind. `--to <who>` on the handoff that carries a finding out is an ADDRESS, for chasing; it is not a role and needs no taxonomy.\n\n`evidence` is what a reader can re-check without asking anyone: the probe's stderr, the audit finding id, the unit ids. A finding whose evidence is somebody's recollection is a `claim` and says so.\n\n`state`: open | addressed | refuted | blocked | reversed | superseded. `blocked` and `reversed` are the two that most designs collapse into 'still open', and they are the two that matter — `blocked` means the other side tried and cannot ('the source never captured that field'), `reversed` means the answer is that the OTHER end must move instead.",
+  "findings": [],
+
+  "_comment_responses": "Inside each finding: {by, at, action, detail, basis}. `action` is fixed: fixed | partially_fixed | cannot_fix | disagree | needs_from_other_side.\n\nThis block is the half no existing record has. `/data-label`'s handoff reconciles ARTIFACTS returned against a frozen manifest; it cannot say whether a finding was addressed, and a batch can come back 100% complete with every raised issue untouched. `receive` computing completeness and a finding being answered are different facts.\n\n`cannot_fix` and `disagree` are terminal FOR THE RESPONDER and not for the finding — they hand it back, they do not close it. Responses are appended, never edited away, including ones later overruled: whether this side's calls hold up is answerable only from how often the other end disagreed, which is `/eval-triage`'s rule for judgements one level up.\n\n`needs_from_other_side` is the reversal, and it does NOT mutate this finding's direction. It opens a NEW finding with the ends swapped, carrying `reverses: <n>`. One schema, flowing both ways — a direction field that flips in place would make every history read as though the original issue had been the other side's all along.",
+
+  "_comment_rounds": "One entry per attempt to satisfy the contract: {n, at, run, changed, probe_result, audit_result, findings_raised[], findings_closed[]}.\n\n`run` is an ORDINARY run in stages/<stage>/runs/ — the transform is the user's code through the normal run machinery, never a converter built into MLClaw. That is the boundary `/data-curate` draws and it stands: a built-in converter would be the first violation of zero code invasion. What is new here is only that the loop is now recorded; the script itself lives where every other piece of user code lives, in that run's code snapshot, so the conversion that produced a dataset is re-runnable rather than remembered.\n\nRounds are evidence and are never compressed away. `confirmed` / `refuted` below are DERIVED from them.",
+  "rounds": [],
+
+  "_comment_confirmed": "The compression, and the only part of this record that is safe to read alone. Standing conclusions distilled from the rounds — 'the source has no depth layer at all, three rounds established it' — each citing the rounds that established it.\n\nCompress conclusions; never compress evidence.",
+  "confirmed": [],
+
+  "_comment_refuted": "What has been ruled OUT, with the rounds that ruled it out. The half every summary drops, and dropping it is precisely how round five re-tries what round two eliminated — the single most common way loops like this fail to converge. A distillation carrying only what worked is not a shorter record, it is a record that has forgotten the expensive half.",
+  "refuted": [],
+
+  "_comment_open_questions": "Findings in a non-terminal state, mirrored here as a rendering only — never maintained by hand. The list is a QUERY over `findings` (state in open | blocked | reversed), for the same reason `handoff.py status --open-only` and `ask.py status --open-only` are queries: a hand-kept to-do list and the record it describes drift apart, and the day they disagree nothing raises. Anything genuinely waiting on a person belongs in `ask.py` as well, so it surfaces at conversation start instead of only when somebody opens this file.",
+  "open_questions": [],
+
+  "_comment_verdict": "adapted | degraded_to_rework | data_unusable | unverifiable.\n\n`degraded_to_rework` is the important one and it is not a failure: it means the loop established that no converter can fix this, so the fix moved upstream to whoever produces the data — a `/data-label` rework round, same destination as `/eval-triage`'s `label_wrong`, reached before a training run rather than through one. The oracle changed at that moment (from 'the dataloader accepts it' to 'the party that owns the data agrees'), which by the boundary rule ENDS this session and opens the next one. Two oracles are never one session; the successor cites this one.\n\n`unverifiable` when the probe could not be run at all — never `adapted`. A probe that fails open turns every unchecked round into a pass.",
+  "verdict": null,
+
+  "_comment_attributed_to": "converter | data | contract — where the campaign established the defect actually was. Required on every verdict except `adapted`. It exists so the next round of this argument starts from a conclusion instead of from opinions: 'are we fixing the converter or the data' is the question these loops re-litigate every time, and the answer is cheap to record and expensive to re-derive.",
+  "attributed_to": null,
+
+  "_comment_caveats": "Stamped in at close: every round whose probe could not run, any mid-campaign contract change, and any widening of `declared_clean`. They travel with the conclusion wherever it is later quoted — a campaign verdict is written once and read by people who can no longer re-run the probe.",
+  "caveats": []
+}

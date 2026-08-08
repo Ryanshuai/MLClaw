@@ -146,6 +146,99 @@ because only one side was ever recorded.
 Still to build: the comparison itself, the crash classifier, the hazard re-ask, and the cross-run
 frequency verb. Nothing in that list is blocked on a record any more.
 
+## Adaptation — the loop between two stages, and the record it writes
+
+Not a skill. The gap it fills is the one path in MLClaw that every skill points at and none of them
+walks: the code wants COCO, the labels on disk are YOLO txt, and `/train-init` can say
+`mismatch  needs conversion` ([its candidates table](../../.claude/skills/train-init/SKILL.md)) with
+nothing downstream to hand it to. `/data-curate` *records* a conversion and executes nothing, so the
+most common thing a user actually does has a diagnosis and no action.
+
+**Resist the obvious fix twice.** A `/data-convert` skill is wrong because convert is not a phase —
+it is one op inside Curate, and `dedup` / `relabel` / `sample` / `merge` have the identical shape, so
+the same argument yields sixteen skills on a five-phase line. The missing thing is not a skill, it is
+**execution inside `/data-curate`**, with `convert` as its first user. And a converter shipped in
+MLClaw is wrong for the reason curate already states — it would be the first violation of zero code
+invasion. What the tool contributes is the *loop and its record*; the transform stays the user's code
+in an ordinary run, which is also what makes it re-runnable rather than remembered.
+
+### The oracle is the consuming code, not the agent
+
+An agent that reads a sample, writes a converter and pronounces it correct has verified itself. The
+dataloader accepting the output is something else confirming — the same rule that keeps `/ask-human`
+from writing `verified` when nothing but a person's word backed it. Two layers, both required:
+`dataloader_probe` (fatal — format, field names, layout) then `/data-audit` (semantic — values in
+range, category ids inside `num_classes`). **Stopping at "it ran" certifies the worst converters**: a
+converter emitting all-zero boxes loads perfectly, and a category id the dataloader silently clamps
+is not a crash. `/data-audit` is already the thing that opens the file; nothing new is needed for the
+second layer, only the refusal to skip it.
+
+### Two loops, and the transition between them is the design
+
+| | oracle | closes in | needs a human handoff |
+|---|---|---|---|
+| **A — the converter is wrong** | dataloader + audit | seconds, unattended | **no** |
+| **B — the data is wrong** | the party that owns the data | days | yes |
+
+The test for which one you are in is `--verify`'s, unchanged: *can you write a command that answers
+this without a person?* Putting a handoff inside loop A is not ceremony, it is a **deadlock** — this
+runs unattended, and CLAUDE.md's rule about questions applies exactly.
+
+So the thing to build carefully is the **degradation**: when N rounds leave the audit dirty, the
+finding stops being a converter bug and becomes a defect in the data, and the campaign hands off to a
+`/data-label` rework — the same destination as `/eval-triage`'s `label_wrong`, reached *before* a
+training run instead of through one. **Same backward edge, second entrance.** By the boundary rule
+below the oracle has changed, so that ends the session and opens a successor rather than continuing.
+
+### Its record is two-way, which is what makes it new
+
+`lifecycle/adaptation/session.json`. It borrows the multi-round frame from
+`lifecycle/repro/session.json` and the per-item thread from `lifecycle/eval-triage/session.json`, and
+it is the first record that needs both — here the rounds and the disagreements are the same object.
+
+- **The unit is a finding, not a round.** A round raises findings; a finding outlives the round,
+  because what the other end answers is the finding.
+- **Responses are the half nothing currently has.** `handoff.py receive` reconciles *artifacts*
+  against a frozen manifest — a batch can return 100% complete with every raised issue untouched.
+  "The delivery is complete" and "the finding was addressed" are different facts.
+- **`cannot_fix` and `disagree` hand a finding back; they do not close it.** `needs_from_other_side`
+  opens a *new* finding with the ends swapped and `reverses: <n>` — one schema flowing both
+  directions. A direction field that flipped in place would rewrite history so the issue reads as
+  having always been the other end's.
+- **Ends of the seam, never roles**: `dataset` | `consumer` | `contract`. The same engineer routinely
+  holds both ends and the record is needed exactly as much then. Ownership follows the defect —
+  `/repro` attributes to an axis, `/eval-triage` to a verdict kind, and neither needed a job title.
+  `--to <who>` on a handoff is an *address*, for chasing.
+- **The to-do list is a query**, never a maintained list: `state in open | blocked | reversed`. Same
+  reason `handoff.py status --open-only` is a query — a hand-kept list and the record it describes
+  drift, and the day they disagree nothing raises.
+- **Compress conclusions; never compress evidence — and keep `refuted`.** A distillation carrying
+  only what worked is how round five re-tries what round two eliminated, which is the most common way
+  these loops fail to converge. `/train-tune-report`'s `chain.md` already pairs Confirmed with
+  Refuted; this is that rule one level up, and `chain.md` renders this session unchanged.
+
+### The boundary rule — how big is one loop
+
+**One oracle plus one convergence criterion declared at open.** When `measure_via` changes, that is a
+new session citing the old one. This is a property of the work rather than of who does it, which is
+why the loop still has a boundary when one person holds both ends.
+
+`declared_clean` is written before round one and kept beside the result for the reason `/repro` keeps
+`declared_tolerance` beside the measured `band`: at round six, under a deadline, the definition of
+clean is under pressure from whoever has to meet it. Widening it later is a `caveat`, not an edit.
+
+### Order to build
+
+`{consumer}/input.json -> items` first — it is already declared as *"what the code needs (schema,
+survives moving machines)"* and is empty, so the contract lands there rather than in a new file, and
+it must not land in `dataset.json -> consumers` (that is an advisory back-pointer, and a contract is a
+property of the consuming *code* — two datasets feeding one trainer share it, so a per-dataset copy is
+two copies that drift). Filling it converts `candidates -> match: "mismatch"` from a bare judgement
+into a **diff**, which is both the converter's first spec and the loop's progress bar. Then execution
+in `/data-curate` with the degradation, then `/train-init`'s `mismatch` row driving
+check → freeze → curate over the workflow stack so the user sees one flow rather than three skill
+names.
+
 ## Identity — what `<id>@<pin>` is for, and what it is not
 
 Read before `models/` below: that section is an *instance* of this one, and building it without

@@ -135,6 +135,7 @@ contracts/                          ← executable form of this file's contracts
   contract_data_board.py            ← a partial census never renders as an inventory
   contract_data_curate.py           ← a derivation is checked against the run, or marked claimed
   contract_data_retire.py           ← only a census-listed path is deletable; the log outlives it
+  contract_adaptation.py            ← a handed-back finding is not a resolved one; loading is not correctness
   contract_docs.py                  ← this file, README, and .claude/skills/ must agree
 .github/workflows/ci.yml            ← contracts + compileall + JSON parse + no-credentials gate
 docs/                               ← README assets only; nothing here is read by a skill
@@ -190,6 +191,8 @@ lifecycle/
       discover.py                   ← sources / record / probe / report; `gone` ≠ `unreachable`
     repro/
       repro.py                      ← check/open/trial/band/attribute/close; five axes of rot
+    adaptation/
+      adapt.py                      ← open/raise/respond/round/distill/relax/close/status; the shared ledger
     data-report/
       board.py                      ← the whole line as one self-contained HTML page
     data/
@@ -236,6 +239,8 @@ lifecycle/
     session.json                    ← target run, five-axis audit, band, trials, attribution
   eval-triage/                      ← bad-case triage template (hangs off one eval run)
     session.json                    ← ranked units, per-unit verdict + provenance, routed piles
+  adaptation/                       ← data↔consumer adaptation template (project-level, spans two stages)
+    session.json                    ← contract at open, two-way findings + responses, rounds, refuted
   data/                             ← data-stage record templates (project-level, not a stage)
     dataset.json                    ← identity glob, layers + kind, locations + role, completeness
     rig.json                        ← the rig's facts, each with evidence and a breaks/shifts class
