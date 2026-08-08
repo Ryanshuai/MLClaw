@@ -416,5 +416,10 @@ value. A schema that assumes one binding per environment will not survive the fi
   never inherits the source model's metrics.**
 - **Exploration stage** — architecture search.
 - **`/train-compare`** — side-by-side metrics / params / env diff across runs.
-- **Data quality checks + format conversion.** Curate *records* a conversion and the census reads no
-  file content; neither performs one.
+- **Format conversion** — promoted out of this list; see **"Adaptation"** above, which is where the
+  design now lives. The short version that used to sit here still holds: curate *records* a
+  conversion and does not perform one, the reading half is built (`/data-audit` opens the file), and
+  the transform is deliberately an ordinary run rather than a verb inside a skill, because a
+  conversion nobody could re-run is the untraceable dataset the whole line exists to prevent. What
+  the Adaptation entry adds is the part that was missing: the loop that decides *when it is done*,
+  and the two-way record of what each side answered.
