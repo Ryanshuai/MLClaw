@@ -94,12 +94,18 @@ def parse_ts(v):
     return dt if dt.tzinfo is not None else None
 
 
-def age_days(iso, ndigits=1):
-    """Age in days, or None when the timestamp cannot be ordered at all."""
+def age_days(iso):
+    """Age in days (1 decimal place), or None when the timestamp cannot be
+    ordered at all.
+
+    `ndigits` used to be a parameter; every one of its 12 call sites across
+    the repo passed the same default (1) and none ever varied it, so it was
+    a single-value switch rather than a real axis -- inlined (scan.py `flag`).
+    """
     dt = parse_ts(iso)
     if dt is None:
         return None
-    return round((datetime.now(timezone.utc) - dt).total_seconds() / 86400, ndigits)
+    return round((datetime.now(timezone.utc) - dt).total_seconds() / 86400, 1)
 
 
 # There are deliberately TWO of each of the above, and picking the wrong one is
