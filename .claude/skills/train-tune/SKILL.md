@@ -113,8 +113,8 @@ comparable = [
 ]
 ```
 
-Do not hand-write this filter. `tune_comparable_runs` exists because the
-condition above is four clauses long and forgetting the fourth is invisible:
+Do not hand-write this filter. The condition above is four clauses long and
+forgetting the fourth is invisible — type all four flags, every time:
 
 ```bash
 python <mlclaw_root>/lifecycle/scripts/shared/list_runs.py <project_root> --stage training --mode production --commit <sha> --no-session

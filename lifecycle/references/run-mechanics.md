@@ -399,7 +399,7 @@ python .../list_runs.py <project_root> --stage training --mode production \
 python .../list_runs.py <project_root> --all-modes-not-comparable --sort created_at --limit 10
 ```
 
-From Python: `query_comparable_runs(root, *, mode, stage=None, status="completed", session="*", code_commit=None, sort_by="created_at", descending=True, limit=None)`, plus `tune_comparable_runs(root, code_commit, ...)` — kept as a named wrapper because its filter is four clauses long and dropping the fourth is invisible. Sentinels: `session="*"` doesn't filter, `session=None` means ad-hoc runs only.
+From Python: `query_comparable_runs(root, *, mode, stage=None, status="completed", session="*", code_commit=None, sort_by="created_at", descending=True, limit=None)`. Sentinels: `session="*"` doesn't filter, `session=None` means ad-hoc runs only. The `/train-tune` filter above is four clauses long (mode, status, commit, no-session) and dropping the fourth is invisible — there is no Python wrapper for it, only the CLI flags; type the four flags, don't reconstruct them from memory.
 
 Results carry `matched`, `excluded` (runs whose `mode` is null — reported, never silently included *or* silently dropped), `filtered_out_count`, `distinct_scopes`, `comparable`, and `errors`; a malformed `run.json` becomes one error entry instead of killing the scan. **Read `comparable` before ranking anything** — false means the matched runs span more than one scope, so their metrics are not a series. At 10k runs the scan is ~200 ms.
 

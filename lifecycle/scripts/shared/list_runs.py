@@ -35,7 +35,6 @@ are the source of truth and are rescanned per call.
 
     query_comparable_runs(root, *, mode, ...)    -> result   # the main door
     list_all_modes_not_comparable(root, ...)     -> result   # escape hatch
-    tune_comparable_runs(root, code_commit, ...) -> result   # 4-condition bundle
 
 The result keys are the dict literal returned by `_gather`; the per-entry keys
 are the dict literal built by `project_run`.
@@ -370,21 +369,6 @@ def list_all_modes_not_comparable(root, stage=None, status=None, session="*",
         "menus only; do not rank, diff, or aggregate their metrics. See "
         "lifecycle/references/run-mechanics.md 'Metric comparability'." % mixed))
     return result
-
-
-def tune_comparable_runs(root, code_commit, stage="training",
-                         sort_by="created_at", descending=True, limit=None):
-    """Runs comparable for /train-tune observation.
-
-    Four conditions that must all hold and are each easy to forget on their
-    own: production mode, status completed, the same code SHA, and ad-hoc only
-    (`lineage.session is None`) — so a previous tune session's trials do not
-    contaminate the population the next hypothesis is measured against.
-    """
-    return query_comparable_runs(root, mode="production", stage=stage,
-                                 status="completed", session=None,
-                                 code_commit=code_commit, sort_by=sort_by,
-                                 descending=descending, limit=limit)
 
 
 # ── CLI ──────────────────────────────────────────────────────────────────────
