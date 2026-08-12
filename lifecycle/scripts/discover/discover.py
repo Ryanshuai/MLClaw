@@ -1136,6 +1136,60 @@ def make_lead(rec, *, path, on, source_type, subject, evidence, what,
     }
 
 
+def _dispatch_probe(lead, resources, budget_seconds):
+    """-> (status, detail, sample, size). Which probe function to run, keyed by
+    `lead["on"]`'s kind -- or a fallback status for the three cases nothing
+    can be dispatched for: no machine attached, a person has to answer, or an
+    `on` value this code does not recognize."""
+    on = lead["on"]
+    kind = classify_on(on)
+    if on == "local":
+        return probe_local(lead["path"], budget_seconds)
+    if on == "s3":
+        return probe_s3(lead["path"], resources, budget_seconds)
+    if on.startswith("tracking:"):
+        return probe_tracking(on, lead["path"], budget_seconds)
+    if on.startswith("server:"):
+        return probe_server(on.split(":", 1)[1], lead["path"], resources, budget_seconds)
+    if kind == "no_probe":
+        # A path with no machine attached. Distinct from `ask` (somebody can
+        # answer it) and from a bad `on` (a typo): this IS the right value,
+        # and what is missing is the host. So the blocker names the actual
+        # task — identify the machine — and lands it on the access worklist,
+        # where a credential ask would not have helped.
+        # The shape of the path changes what the fix IS. `/workspace/...` is a
+        # container path: naming the host does not resolve it, because the host
+        # filesystem has no such path. Sending somebody to ssh in and `ls` sends
+        # them to look where the path was never at, and they come back with a
+        # `gone` that means nothing.
+        shape = lead.get("path_shape") or path_shape(lead.get("path"))
+        base = (f"the path is recorded but no machine is: `on: {on}`. Nothing "
+                f"can be dispatched until somebody says which host this path "
+                f"was on. That identification is the access task, not a key")
+        extra = {"blocker": "host_unidentified"}
+        if shape:
+            base = (f"the path is recorded but no machine is: `on: {on}` -- and "
+                    f"the path's own shape says naming one would not be enough. "
+                    f"{shape['why']}. What resolves it: {shape['resolved_by']}")
+            extra = {"blocker": f"{shape['environment']}_path_not_host_path",
+                     "path_shape": shape}
+            if shape.get("derived_lead"):
+                extra["open_this_instead"] = shape["derived_lead"]
+        return ("unreachable", base, None, extra)
+    if kind == "ask":
+        # Leave the status alone. Overwriting `claim` with `unreachable` here
+        # would say "we could not look" about something a person can simply
+        # answer, and would move the lead out of the set /ask-human works on.
+        return (lead["status"],
+                f"`{on}` is not machine-probeable — somebody has to answer it. "
+                f"/ask-human, and their answer is a claim until a probe agrees",
+                None, {})
+    # Unreachable in the most literal sense: this code cannot reach it,
+    # and saying so is better than guessing a probe.
+    return ("unreachable", f"unknown `on` value {on!r}; no probe dispatched",
+            None, {})
+
+
 def cmd_probe(a) -> None:
     project = os.path.expanduser(a.project)
     rec = read_json(leads_path(project), required=False)
@@ -1159,58 +1213,7 @@ def cmd_probe(a) -> None:
     probed = []
     for lead in todo:
         on = lead["on"]
-        kind = classify_on(on)
-        if on == "local":
-            status, detail, sample, size = probe_local(lead["path"], a.budget_seconds)
-        elif on == "s3":
-            status, detail, sample, size = probe_s3(lead["path"], resources,
-                                                    a.budget_seconds)
-        elif on.startswith("tracking:"):
-            status, detail, sample, size = probe_tracking(
-                on, lead["path"], a.budget_seconds)
-        elif on.startswith("server:"):
-            status, detail, sample, size = probe_server(
-                on.split(":", 1)[1], lead["path"], resources, a.budget_seconds)
-        elif kind == "no_probe":
-            # A path with no machine attached. Distinct from `ask` (somebody can
-            # answer it) and from a bad `on` (a typo): this IS the right value,
-            # and what is missing is the host. So the blocker names the actual
-            # task — identify the machine — and lands it on the access worklist,
-            # where a credential ask would not have helped.
-            # The shape of the path changes what the fix IS. `/workspace/...` is a
-            # container path: naming the host does not resolve it, because the host
-            # filesystem has no such path. Sending somebody to ssh in and `ls` sends
-            # them to look where the path was never at, and they come back with a
-            # `gone` that means nothing.
-            shape = lead.get("path_shape") or path_shape(lead.get("path"))
-            base = (f"the path is recorded but no machine is: `on: {on}`. Nothing "
-                    f"can be dispatched until somebody says which host this path "
-                    f"was on. That identification is the access task, not a key")
-            extra = {"blocker": "host_unidentified"}
-            if shape:
-                base = (f"the path is recorded but no machine is: `on: {on}` -- and "
-                        f"the path's own shape says naming one would not be enough. "
-                        f"{shape['why']}. What resolves it: {shape['resolved_by']}")
-                extra = {"blocker": f"{shape['environment']}_path_not_host_path",
-                         "path_shape": shape}
-                if shape.get("derived_lead"):
-                    extra["open_this_instead"] = shape["derived_lead"]
-            status, detail, sample, size = ("unreachable", base, None, extra)
-        elif kind == "ask":
-            # Leave the status alone. Overwriting `claim` with `unreachable` here
-            # would say "we could not look" about something a person can simply
-            # answer, and would move the lead out of the set /ask-human works on.
-            status, detail, sample, size = (
-                lead["status"],
-                f"`{on}` is not machine-probeable — somebody has to answer it. "
-                f"/ask-human, and their answer is a claim until a probe agrees",
-                None, {})
-        else:
-            # Unreachable in the most literal sense: this code cannot reach it,
-            # and saying so is better than guessing a probe.
-            status, detail, sample, size = (
-                "unreachable", f"unknown `on` value {on!r}; no probe dispatched",
-                None, {})
+        status, detail, sample, size = _dispatch_probe(lead, resources, a.budget_seconds)
         lead["probes"].append({"at": now_utc(), "result": status, "detail": detail,
                                "sample": sample, **size})
         lead["status"] = status
