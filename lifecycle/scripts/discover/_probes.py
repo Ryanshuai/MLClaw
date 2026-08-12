@@ -96,8 +96,8 @@ def probe_local(path, budget_s):
 SIZE, FILES = "__MLCLAW_SIZE__", "__MLCLAW_FILES__"
 
 
-def probe_server(key, path, res, budget_s):
-    srv = ((res or {}).get("servers") or {}).get(key)
+def probe_server(key, path, resources, budget_s):
+    srv = ((resources or {}).get("servers") or {}).get(key)
     if not srv:
         return ("unreachable", f"no server {key!r} in resources.json", None,
                 {"blocker": f"server:{key}:not_registered"})
@@ -130,19 +130,19 @@ def probe_server(key, path, res, budget_s):
         err = (p.stderr or "").strip().splitlines()
         return ("unreachable",
                 f"exit {p.returncode}: {err[-1] if err else 'no sentinel'}", None, {})
-    out = p.stdout.splitlines()
-    if "MISSING" in out:
+    stdout_lines = p.stdout.splitlines()
+    if "MISSING" in stdout_lines:
         return "gone", f"{host} answered; that path is not there", None, {}
 
     def section(a, b):
         try:
-            i = out.index(a)
+            i = stdout_lines.index(a)
         except ValueError:
             return []
-        j = out.index(b) if b in out else len(out)
-        return [x.strip() for x in out[i + 1:j] if x.strip()]
+        j = stdout_lines.index(b) if b in stdout_lines else len(stdout_lines)
+        return [x.strip() for x in stdout_lines[i + 1:j] if x.strip()]
 
-    names = [x for x in out[:out.index(SIZE)] if x.strip()] if SIZE in out else []
+    names = [x for x in stdout_lines[:stdout_lines.index(SIZE)] if x.strip()] if SIZE in stdout_lines else []
     kb, nf = section(SIZE, FILES), section(FILES, OK)
     size = {}
     try:
@@ -169,7 +169,7 @@ def last_meaningful(text, limit=300):
     return (lines[-1] if lines else "")[:limit]
 
 
-def aws_env(res):
+def aws_env(resources):
     """-> (env, where, registered). The credential `resources.json` DECLARES.
 
     This function exists because it was missing, and the failure it caused is the
@@ -188,7 +188,7 @@ def aws_env(res):
     run skill reads through, so a probe resolving something else is answering
     about a different world than the one a run will execute in.
     """
-    aws = (res or {}).get("aws") or {}
+    aws = (resources or {}).get("aws") or {}
     key, secret = aws.get("access_key_id"), aws.get("secret_access_key")
     if not (key and secret):
         return (None, "no aws credential in resources.json — using whatever the "
@@ -209,10 +209,10 @@ def aws_env(res):
     return env, f"resources.json -> aws.access_key_id (…{key[-4:]})", True
 
 
-def probe_s3(path, res, budget_s):
+def probe_s3(path, resources, budget_s):
     if not path.startswith("s3://"):
         return "unreachable", "not an s3:// path", None, {"blocker": "s3:bad_uri"}
-    env, where, registered = aws_env(res)
+    env, where, registered = aws_env(resources)
     try:
         # `--summarize --recursive` is the only way to get a real total, and it
         # is also what makes this the slow probe. Bounded like the local walk.
@@ -264,7 +264,7 @@ def probe_s3(path, res, budget_s):
                 None, {"blocker": f"s3:exit_{p.returncode}"})
 
     lines = [x.strip() for x in p.stdout.splitlines() if x.strip()]
-    objs = [x for x in lines if not x.startswith("Total ")]
+    object_lines = [x for x in lines if not x.startswith("Total ")]
     size = {"bytes": None, "files": None}
     for ln in lines:
         if ln.startswith("Total Objects:"):
@@ -277,7 +277,7 @@ def probe_s3(path, res, budget_s):
                 size["bytes"] = int(ln.split(":", 1)[1].strip())
             except ValueError:
                 pass
-    if not objs and not size["files"]:
+    if not object_lines and not size["files"]:
         # Require POSITIVE evidence that the listing completed before calling a
         # prefix empty — the same reason census.py wants a sentinel and not just
         # a zero exit. `--summarize` always prints a Total line on success, so
@@ -293,7 +293,7 @@ def probe_s3(path, res, budget_s):
         return "gone", "the prefix listed successfully and is empty", None, size
     return ("verified",
             f"{size['files']} objects, {human(size['bytes'])}",
-            objs[:20], size)
+            object_lines[:20], size)
 
 
 def credential_present(spec):
@@ -440,13 +440,13 @@ def http_json(url, payload=None, token=None, timeout=20.0, headers=None):
     """
     import urllib.error
     import urllib.request
-    data = json.dumps(payload).encode() if payload is not None else None
-    req = urllib.request.Request(url, data=data, method="POST" if data else "GET")
+    body = json.dumps(payload).encode() if payload is not None else None
+    req = urllib.request.Request(url, data=body, method="POST" if body else "GET")
     req.add_header("Content-Type", "application/json")
     if token:
         req.add_header("Authorization", f"Bearer {token}")
-    for key, val in (headers or {}).items():
-        req.add_header(key, val)
+    for key, header_value in (headers or {}).items():
+        req.add_header(key, header_value)
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:
             return r.status, json.loads(r.read() or b"{}"), None
@@ -522,8 +522,8 @@ def probe_mlflow_rest(path, where, budget_s):
     runs = (body or {}).get("runs") or []
     names = []
     for r in runs[:20]:
-        info = r.get("info") or {}
-        names.append(f"{info.get('run_id', '?')[:8]} [{info.get('status', '?')}]")
+        run_info = r.get("info") or {}
+        names.append(f"{run_info.get('run_id', '?')[:8]} [{run_info.get('status', '?')}]")
     if code != 200:
         # The experiments answered, so the server is real; the run listing did not.
         return ("verified",
@@ -553,12 +553,12 @@ def config_value(path, keys):
             text = fh.read()
     except OSError:
         return {}
-    out = {}
+    found = {}
     for key in keys:
         m = re.search(r'^[\s"]*' + re.escape(key) + r'"?\s*[:=]\s*"?([^"\s,]+)"?',
                       text, re.MULTILINE)
         if m:
-            out[key] = m.group(1)
+            found[key] = m.group(1)
     return out
 
 

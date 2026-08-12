@@ -207,19 +207,19 @@ def path_shape(path):
     for prefix, env, why, fix, derive in PATH_SHAPES:
         if not p.startswith(prefix):
             continue
-        out = {"environment": env, "why": why, "resolved_by": fix,
+        shape = {"environment": env, "why": why, "resolved_by": fix,
                "confidence": "conventional -- read off the path, not verified"}
         if derive == "repo_after_prefix":
             rest = p[len(prefix):].split("/")
             if rest and rest[0]:
-                out["likely_repo"] = rest[0]
-                out["derived_lead"] = (
+                shape["likely_repo"] = rest[0]
+                shape["derived_lead"] = (
                     f"`{rest[0]}` is almost certainly a REPO NAME. That is a "
                     f"`code` lead, it needs no access to the unidentified host, "
                     f"and the repo usually holds the training entry point, the "
                     f"env setup and the tracking project name -- i.e. most of "
                     f"what the unreachable path was wanted for")
-        return out
+        return shape
     return None
 
 # Every `on` below is dispatched. An unbuilt tracking BACKEND is refused by
@@ -351,17 +351,17 @@ def cmd_verify_framework(a) -> None:
     Records nothing: this is a reading about an interpreter, not a lead about a
     location, and the record that wants it is the run's repro check.
     """
-    res = framework_integrity(a.spec, python=a.python, budget_s=a.budget)
-    if res["state"] == "usage":
-        broke(res["detail"], hint="--spec takes <package>==<version>")
-    if res["state"] == "no_interpreter":
-        broke(res["detail"], hint="--python takes the interpreter of the RUN "
+    reading = framework_integrity(a.spec, python=a.python, budget_s=a.budget)
+    if reading["state"] == "usage":
+        broke(reading["detail"], hint="--spec takes <package>==<version>")
+    if reading["state"] == "no_interpreter":
+        broke(reading["detail"], hint="--python takes the interpreter of the RUN "
                                   "environment, not MLClaw's own")
     # `means` comes attached to the reading itself (framework_integrity ->
     # STATE_MEANS): a second copy here would be a second copy that drifts.
-    res["exit_meaning"] = ("0 -- a reading was taken; read `state`. Absence of a "
+    reading["exit_meaning"] = ("0 -- a reading was taken; read `state`. Absence of a "
                            "refusal is not a clean bill of health")
-    emit(res)
+    emit(reading)
 
 
 def surface_path(project) -> str:
@@ -405,7 +405,7 @@ def workspace_resources(project):
 # exists if something recorded it. Held in a person's head it is worth nothing a
 # week later; that is how this project lost a twenty-bucket sweep once already.
 
-def s3_buckets_visible(res, budget_s):
+def s3_buckets_visible(resources, budget_s):
     """-> (list[str] | None, why). Every bucket the credential can enumerate.
 
     A bare `aws s3 ls` is ListAllMyBuckets, which is an ACCOUNT-level permission and
@@ -413,7 +413,7 @@ def s3_buckets_visible(res, budget_s):
     means "could not enumerate", never "the key reaches nothing" — the same
     unreachable/gone split every probe in this file keeps.
     """
-    env, where, _registered = aws_env(res)
+    env, where, _registered = aws_env(resources)
     try:
         p = subprocess.run(["aws", "s3", "ls"], capture_output=True, text=True, encoding="utf-8",
                            env=env, timeout=max(30.0, budget_s))
@@ -437,7 +437,7 @@ def s3_buckets_visible(res, budget_s):
     return sorted(set(names)), f"enumerated with {where}"
 
 
-def s3_bucket_listable(bucket, res, budget_s):
+def s3_bucket_listable(bucket, resources, budget_s):
     """-> (state, detail) in listable | access_denied | empty | error.
 
     One cheap top-level listing per bucket. `access_denied` on a bucket the key can
@@ -445,7 +445,7 @@ def s3_bucket_listable(bucket, res, budget_s):
     owner, not a new key, and somebody sent to request a key they already hold comes
     back a week later with nothing.
     """
-    env, where, _ = aws_env(res)
+    env, where, _ = aws_env(resources)
     try:
         p = subprocess.run(["aws", "s3", "ls", f"s3://{bucket}/"],
                            capture_output=True, text=True, encoding="utf-8", env=env,
@@ -483,15 +483,15 @@ def cmd_surface(a) -> None:
     if not os.path.isdir(project):
         broke(f"project not found: {project}",
               hint="--project takes a PATH to the project directory, not a bare name")
-    res, rpath = workspace_resources(project)
-    if res is None:
+    resources, rpath = workspace_resources(project)
+    if resources is None:
         refuse(f"no resources.json at {rpath}",
                why="there is no credential declared to measure the reach of",
                fix="/resources")
 
-    aws = res.get("aws") or {}
+    aws = resources.get("aws") or {}
     declared = aws.get("s3_bucket") or None
-    buckets, why = s3_buckets_visible(res, a.budget)
+    buckets, why = s3_buckets_visible(resources, a.budget)
 
     rec = {"project": os.path.abspath(project), "measured_at": now_utc(),
            "s3": {"declared_bucket": declared,
@@ -513,12 +513,12 @@ def cmd_surface(a) -> None:
         # "reach unknown" while never trying the one bucket we were told about
         # would repeat the under-report in the other direction.
         if declared:
-            state, detail = s3_bucket_listable(declared, res, a.budget)
+            state, detail = s3_bucket_listable(declared, resources, a.budget)
             rec["s3"]["buckets"][declared] = {"state": state, "detail": detail,
                                               "declared": True}
     else:
         for b in buckets:
-            state, detail = s3_bucket_listable(b, res, a.budget)
+            state, detail = s3_bucket_listable(b, resources, a.budget)
             rec["s3"]["buckets"][b] = {"state": state, "detail": detail,
                                        "declared": b == declared}
 
@@ -532,7 +532,7 @@ def cmd_surface(a) -> None:
 
     listable = by_state.get("listable", [])
     denied = by_state.get("access_denied", [])
-    out = {"measured_at": rec["measured_at"],
+    summary = {"measured_at": rec["measured_at"],
            "s3_declared_bucket": declared,
            "s3_enumerated": buckets is not None,
            "s3_visible": rec["s3"]["visible_count"],
@@ -554,8 +554,8 @@ def cmd_surface(a) -> None:
         notes.append("bucket enumeration failed, so the reach is UNKNOWN, not "
                      "empty. Any count taken against this surface is a lower "
                      "bound and must be reported as one")
-    out["notes"] = notes
-    emit(out)
+    summary["notes"] = notes
+    emit(summary)
 
 
 # --------------------------------------------------------------------------- #
@@ -589,16 +589,16 @@ def cmd_sources(a) -> None:
     project = os.path.expanduser(a.project)
     if not os.path.isdir(project):
         broke(f"project not found: {project}")
-    res, rpath = workspace_resources(project)
+    resources, rpath = workspace_resources(project)
 
-    out = []
+    rows = []
 
     def add(source, kind, usable, why=None, blocked_by=None, fix=None, **extra):
         row = {"source": source, "kind": kind, "usable": bool(usable),
                "why": why, "blocked_by": None if usable else blocked_by,
                "fix": fix}
         row.update(extra)
-        out.append(row)
+        rows.append(row)
 
     stages_dir = os.path.join(project, "stages")
     stages = sorted(os.listdir(stages_dir)) if os.path.isdir(stages_dir) else []
@@ -615,7 +615,7 @@ def cmd_sources(a) -> None:
     # key) and because what it names was written by the training process rather
     # than asserted by a person. Always `usable`: unlike every other row this one
     # is not contingent on the project's state, only on the caller having a file.
-    ckpts = local_checkpoints(project, res)
+    ckpts = local_checkpoints(project, resources)
     add("checkpoint", "mine", True,
         why="`introspect` a .pt and read what the run itself recorded: the val "
             "split it measured on (train_args.data), the checkpoint it was "
@@ -648,7 +648,7 @@ def cmd_sources(a) -> None:
     # tracking, disk family — no import, no network, no key. The one tracking
     # history readable on day one, which is why it outranks every service backend.
     disk = sorted(k for k, s in TRACKING.items() if s["family"] == "disk")
-    somewhere = bool(code_dirs) or bool((res or {}).get("local", {}).get("base_paths"))
+    somewhere = bool(code_dirs) or bool((resources or {}).get("local", {}).get("base_paths"))
     add("tracking_disk", "probe", somewhere,
         backends=disk,
         why=f"glob for {', '.join(sorted({m for k in disk for m in TRACKING[k]['markers']}))}"
@@ -668,7 +668,7 @@ def cmd_sources(a) -> None:
 
     # --- registered, and therefore contingent on somebody having registered it.
 
-    if res is None:
+    if resources is None:
         add("resources.json", "probe", False, blocked_by="registration",
             why=f"not found at {rpath} — no server, S3 or vendor is registered "
                 f"yet, so none of them can be swept", fix="/resources")
@@ -678,8 +678,8 @@ def cmd_sources(a) -> None:
         # read `resources.json` while `probe_s3` inherited whatever the CLI
         # resolved — so the checklist could call s3 usable on the strength of a key
         # nothing then used, and the sweep reported no access over readable data.
-        aws = res.get("aws") or {}
-        _env, where, registered = aws_env(res)
+        aws = resources.get("aws") or {}
+        _env, where, registered = aws_env(resources)
         has_aws = bool(registered or os.environ.get("AWS_ACCESS_KEY_ID")
                        or os.path.isfile(os.path.expanduser("~/.aws/credentials")))
         # The declared bucket is a run's default, NOT the sweepable surface, and
@@ -715,7 +715,7 @@ def cmd_sources(a) -> None:
                  "is not the same as empty"),
             blocked_by="credential", fix=None if has_aws else "/resources",
             **s3_extra)
-        for key, srv in (res.get("servers") or {}).items():
+        for key, srv in (resources.get("servers") or {}).items():
             if key.startswith("_"):
                 continue
             ok = bool(srv.get("host") or srv.get("alias"))
@@ -723,12 +723,12 @@ def cmd_sources(a) -> None:
                 root=srv.get("mlclaw_root") or None,
                 why=None if ok else "no host or alias recorded",
                 blocked_by="registration", fix=None if ok else "/resources")
-        for p in (res.get("local") or {}).get("base_paths") or []:
+        for p in (resources.get("local") or {}).get("base_paths") or []:
             there = os.path.isdir(os.path.expanduser(p))
             add("local", "probe", there, root=p,
                 why=None if there else "the base path is not on this machine",
                 blocked_by="absent")
-        for key, _party in (res.get("outsourcing") or {}).items():
+        for key, _party in (resources.get("outsourcing") or {}).items():
             if key.startswith("_"):
                 continue
             # A vendor can be holding the only copy of a batch. They are a source
@@ -750,9 +750,9 @@ def cmd_sources(a) -> None:
         why="the last resort and often the only one; their answer is a `claim` "
             "until something else agrees", fix="/ask-human")
 
-    usable = [s for s in out if s["usable"]]
+    usable = [s for s in rows if s["usable"]]
     tally = {}
-    for s in out:
+    for s in rows:
         if not s["usable"]:
             tally[s["blocked_by"] or "unstated"] = tally.get(s["blocked_by"] or "unstated", 0) + 1
     notes = []
@@ -772,9 +772,9 @@ def cmd_sources(a) -> None:
                      f"{', '.join(free)}. Start here.")
     emit({
         "project": project,
-        "sources": out,
-        "counts": {"total": len(out), "usable_now": len(usable),
-                   "blocked": len(out) - len(usable)},
+        "sources": rows,
+        "counts": {"total": len(rows), "usable_now": len(usable),
+                   "blocked": len(rows) - len(usable)},
         "blocked_by": tally,
         # Said plainly, because on a handover this number is large and shrinking,
         # and a sweep run today is a sweep of a fraction of the world.
@@ -884,9 +884,9 @@ def plain(v):
     if isinstance(v, (str, int, float, bool, type(None))):
         return v
     if isinstance(v, (list, tuple)):
-        out = [plain(x) for x in v]
+        cleaned = [plain(x) for x in v]
         return None if any(x is None and y is not None
-                           for x, y in zip(out, v)) else out
+                           for x, y in zip(cleaned, v)) else cleaned
     if isinstance(v, dict):
         return {str(k): plain(x) for k, x in v.items()
                 if isinstance(x, (str, int, float, bool, type(None), list, dict))}
@@ -912,13 +912,13 @@ def leads_from_ultralytics(top, ckpt_path):
     ta = top.get("train_args") or {}
     if not isinstance(ta, dict):
         ta = {}
-    out = []
+    leads = []
     ck = os.path.basename(ckpt_path)
 
-    data = ta.get("data")
-    if isinstance(data, str) and data:
-        out.append({
-            "path": data, "subject": "data", "on": ON_HOST_UNKNOWN,
+    data_path = ta.get("data")
+    if isinstance(data_path, str) and data_path:
+        leads.append({
+            "path": data_path, "subject": "data", "on": ON_HOST_UNKNOWN,
             "what": "THE VAL SPLIT — this file declares which units are train and "
                     "which are val, so it is the only definition of the quantity "
                     "this checkpoint's recorded metrics refer to. Without it a "
@@ -927,7 +927,7 @@ def leads_from_ultralytics(top, ckpt_path):
         })
     parent = ta.get("model")
     if isinstance(parent, str) and parent and parent.endswith((".pt", ".pth")):
-        out.append({
+        leads.append({
             "path": parent, "subject": "weights", "on": ON_HOST_UNKNOWN,
             "what": "the checkpoint this one was fine-tuned FROM — one edge of the "
                     "lineage chain, recorded by the training process rather than "
@@ -936,7 +936,7 @@ def leads_from_ultralytics(top, ckpt_path):
         })
     metrics = plain(top.get("train_metrics")) or {}
     if metrics:
-        out.append({
+        leads.append({
             "path": ckpt_path, "subject": "results", "on": "local",
             "what": "metrics this checkpoint records about ITSELF: "
                     + ", ".join(f"{k}={v}" for k, v in sorted(metrics.items())[:6])
@@ -945,10 +945,10 @@ def leads_from_ultralytics(top, ckpt_path):
                       "split above is found. A claim, from an artifact",
             "evidence": f"train_metrics, read out of {ck}",
         })
-    return out
+    return leads
 
 
-def local_checkpoints(project, res, cap=200):
+def local_checkpoints(project, resources, cap=200):
     """-> [paths] of checkpoint-shaped files already on this disk.
 
     A convenience for `sources`, not a search: it looks in the project and in the
@@ -958,7 +958,7 @@ def local_checkpoints(project, res, cap=200):
     real claim is "this needs nothing", which stays true with zero files found.
     """
     roots = [project]
-    for base in ((res or {}).get("local") or {}).get("base_paths") or []:
+    for base in ((resources or {}).get("local") or {}).get("base_paths") or []:
         p = os.path.expanduser(base if isinstance(base, str) else base.get("path", ""))
         if p and os.path.isdir(p):
             roots.append(p)
@@ -1141,7 +1141,7 @@ def cmd_probe(a) -> None:
     rec = read_json(leads_path(project), required=False)
     if rec is None:
         refuse("no leads recorded yet", fix="discover.py record")
-    res, _ = workspace_resources(project)
+    resources, _ = workspace_resources(project)
 
     todo = [l for l in rec["leads"]
             if (a.id is None or l["lead_id"] == a.id)
@@ -1156,21 +1156,21 @@ def cmd_probe(a) -> None:
         return emit({"probed": [], "note": "every lead has a probe newer than "
                                            f"{a.recheck_days} days — --all to redo them"})
 
-    results = []
+    probed = []
     for lead in todo:
         on = lead["on"]
         kind = classify_on(on)
         if on == "local":
             status, detail, sample, size = probe_local(lead["path"], a.budget_seconds)
         elif on == "s3":
-            status, detail, sample, size = probe_s3(lead["path"], res,
+            status, detail, sample, size = probe_s3(lead["path"], resources,
                                                     a.budget_seconds)
         elif on.startswith("tracking:"):
             status, detail, sample, size = probe_tracking(
                 on, lead["path"], a.budget_seconds)
         elif on.startswith("server:"):
             status, detail, sample, size = probe_server(
-                on.split(":", 1)[1], lead["path"], res, a.budget_seconds)
+                on.split(":", 1)[1], lead["path"], resources, a.budget_seconds)
         elif kind == "no_probe":
             # A path with no machine attached. Distinct from `ask` (somebody can
             # answer it) and from a bad `on` (a typo): this IS the right value,
@@ -1219,7 +1219,7 @@ def cmd_probe(a) -> None:
         lead["bytes"] = size.get("bytes")
         lead["files"] = size.get("files")
         lead["size_not_measured"] = size.get("not_measured")
-        results.append({"lead_id": lead["lead_id"], "path": lead["path"],
+        probed.append({"lead_id": lead["lead_id"], "path": lead["path"],
                         # The sample IS the payload for some probes — a tracking
                         # entity's project names are the answer, not a garnish —
                         # so emit it rather than only persisting it.
@@ -1233,11 +1233,11 @@ def cmd_probe(a) -> None:
     rec["updated_at"] = now_utc()
     atomic_write_json(leads_path(project), rec)
 
-    gone = [r for r in results if r["status"] == "gone"]
-    unreachable = [r for r in results if r["status"] == "unreachable"]
+    gone = [r for r in probed if r["status"] == "gone"]
+    unreachable = [r for r in probed if r["status"] == "unreachable"]
     emit({
-        "probed": results,
-        "counts": {k: sum(1 for r in results if r["status"] == k) for k in STATUSES},
+        "probed": probed,
+        "counts": {k: sum(1 for r in probed if r["status"] == k) for k in STATUSES},
         # The handover finding, on its own line. A claim that probed to `gone`
         # is the one worth acting on today, while somebody might still remember.
         "gone": [{"path": r["path"], "claimed": r["was_claimed"],
@@ -1282,11 +1282,11 @@ def table(leads, recheck_days, unsaved=False):
             "never" if age is None else f"{age:g}d ago",
         ))
     w = [max(len(str(r[i])) for r in rows) for i in range(len(rows[0]))]
-    out = []
+    lines = []
     for n, r in enumerate(rows):
-        out.append("  ".join(str(c).ljust(w[i]) for i, c in enumerate(r)).rstrip())
+        lines.append("  ".join(str(c).ljust(w[i]) for i, c in enumerate(r)).rstrip())
         if n == 0:
-            out.append("─" * len(out[0]))
+            lines.append("─" * len(lines[0]))
 
     # Totals over measured rows only, said as a lower bound whenever anything
     # was not measured — the same rule as a partial census's counts.
@@ -1294,33 +1294,33 @@ def table(leads, recheck_days, unsaved=False):
                 and l.get("bytes") is not None]
     missing = [l for l in leads if l["status"] != "gone" and l not in measured]
     tb, tf = sum(l["bytes"] for l in measured), sum(l.get("files") or 0 for l in measured)
-    out.append("")
+    lines.append("")
     if measured:
-        out.append(f"measured: {human(tb)} in {tf:,} files across "
+        lines.append(f"measured: {human(tb)} in {tf:,} files across "
                    f"{len(measured)} location(s)")
     else:
         # Never "0 B". A zero total beside "1 location not measured" reads as
         # "there is no data", which is the opposite of what it means, and it is
         # the sentence somebody would repeat in a handover meeting.
-        out.append(f"measured: NOTHING yet — 0 of {len(missing)} location(s) "
+        lines.append(f"measured: NOTHING yet — 0 of {len(missing)} location(s) "
                    f"have been sized. This is not a statement about how much "
                    f"data there is.")
     if missing and measured:
-        out.append(f"NOT measured: {len(missing)} location(s) — this total is a "
+        lines.append(f"NOT measured: {len(missing)} location(s) — this total is a "
                    f"LOWER BOUND, not an inventory")
     elif missing:
-        out.append(f"NOT measured: {len(missing)} location(s) — any total from "
+        lines.append(f"NOT measured: {len(missing)} location(s) — any total from "
                    f"this sweep would be a LOWER BOUND, not an inventory")
     for l in leads:
         if l["status"] == "gone":
-            out.append(f"GONE: {l['path']} — claimed as {l.get('what') or '?'}; "
+            lines.append(f"GONE: {l['path']} — claimed as {l.get('what') or '?'}; "
                        f"evidence was {l.get('evidence')}")
     if unsaved:
-        out.append("UNSAVED: this record is not tracked by git. It survives on "
+        lines.append("UNSAVED: this record is not tracked by git. It survives on "
                    "this disk and goes nowhere on a clone, a push or a `git "
                    "clean` — which is how a handover happens. `discover.py save "
                    "--project <p>`")
-    return "\n".join(out)
+    return "\n".join(lines)
 
 
 def cmd_reconcile(a) -> None:
@@ -1400,7 +1400,7 @@ def cmd_reconcile(a) -> None:
         and not any(e[1] == name and e[3].get("lead_id") for e in entries)
     ]
 
-    out = {"project": project, "stage": a.stage,
+    report = {"project": project, "stage": a.stage,
            "checked": {"candidate_entries": len(entries),
                        "declared_items": len(declared),
                        "leads_linked": len(linked_leads)},
@@ -1411,9 +1411,9 @@ def cmd_reconcile(a) -> None:
            "note": "unlinked is normal for `code_default` and `downloadable` — "
                    "those come from the code, not from a sweep"}
     if drift or coverage:
-        emit(out)
+        emit(report)
         sys.exit(1)
-    emit(out | {"consistent": True})
+    emit(report | {"consistent": True})
 
 
 def access_worklist(leads):
@@ -1530,7 +1530,7 @@ def _sample_objects(lead):
     Best-effort by design: a line this cannot parse is skipped rather than
     guessed at. A duplicate detector that invents a size is worse than none.
     """
-    out = []
+    objects = []
     for line in lead.get("probes", [{}])[-1].get("sample") or []:
         parts = str(line).split()
         if len(parts) < 4:
@@ -1539,8 +1539,8 @@ def _sample_objects(lead):
             size = int(parts[2])
         except (ValueError, IndexError):
             continue
-        out.append((parts[-1].rsplit("/", 1)[-1], size))
-    return out
+        objects.append((parts[-1].rsplit("/", 1)[-1], size))
+    return objects
 
 
 def anomalies(leads):
@@ -1573,15 +1573,15 @@ def anomalies(leads):
       claim_never_checked  a `claim` old enough that nobody is going to check it.
                            Recorded is not verified, and the gap widens silently.
     """
-    out = []
+    findings = []
 
     for l in leads:
         probes = l.get("probes") or []
-        results = [p.get("result") for p in probes]
-        for i in range(1, len(results)):
-            before, after = results[i - 1], results[i]
+        probe_statuses = [p.get("result") for p in probes]
+        for i in range(1, len(probe_statuses)):
+            before, after = probe_statuses[i - 1], probe_statuses[i]
             if before == "verified" and after == "gone":
-                out.append({
+                findings.append({
                     "kind": "status_flip", "severity": "urgent",
                     "lead_id": l["lead_id"], "path": l["path"],
                     "observed": f"verified at {probes[i-1]['at']}, gone at "
@@ -1590,7 +1590,7 @@ def anomalies(leads):
                              "Escalate while somebody still remembers — that is "
                              "/ask-human"})
             elif before == "gone" and after == "verified":
-                out.append({
+                findings.append({
                     "kind": "status_flip", "severity": "watch",
                     "lead_id": l["lead_id"], "path": l["path"],
                     "observed": f"gone at {probes[i-1]['at']}, verified at "
@@ -1601,7 +1601,7 @@ def anomalies(leads):
 
         if l.get("status") == "verified" and (l.get("files") == 0
                                               or l.get("bytes") == 0):
-            out.append({
+            findings.append({
                 "kind": "verified_but_empty", "severity": "watch",
                 "lead_id": l["lead_id"], "path": l["path"],
                 "observed": "the location answered and holds 0 bytes / 0 files",
@@ -1618,7 +1618,7 @@ def anomalies(leads):
     for (name, size), where in seen.items():
         if len(where) < 2:
             continue
-        out.append({
+        findings.append({
             "kind": "duplicate_objects", "severity": "watch",
             "lead_id": where[0]["lead_id"],
             "path": ", ".join(l["path"] for l in where),
@@ -1637,7 +1637,7 @@ def anomalies(leads):
         same = [l for l in leads if l.get("evidence") == evidence]
         if len(same) < 2:
             continue
-        out.append({
+        findings.append({
             "kind": "source_now_doubted", "severity": "watch",
             "lead_id": wrong[0]["lead_id"], "path": evidence,
             "observed": f"this source was wrong about {len(wrong)} of "
@@ -1651,7 +1651,7 @@ def anomalies(leads):
             continue
         age = age_days(l.get("recorded_at"))
         if age is not None and age >= 14:
-            out.append({
+            findings.append({
                 "kind": "claim_never_checked", "severity": "watch",
                 "lead_id": l["lead_id"], "path": l["path"],
                 "observed": f"recorded {age} days ago and never probed",
@@ -1659,8 +1659,8 @@ def anomalies(leads):
                          "nobody is going to get to on their own"})
 
     rank = {"urgent": 0, "watch": 1}
-    out.sort(key=lambda a: (rank.get(a["severity"], 9), a["kind"]))
-    return out
+    findings.sort(key=lambda a: (rank.get(a["severity"], 9), a["kind"]))
+    return findings
 
 
 def usable_sources(project):
@@ -1668,7 +1668,7 @@ def usable_sources(project):
     source nobody can reach. Reuses cmd_sources' logic by calling it rather than
     restating it — a second copy of "what is available" is a second copy that
     drifts, which is the argument that moved the sweep into one engine."""
-    res, _rpath = workspace_resources(project)
+    resources, _rpath = workspace_resources(project)
     names = set()
     stages_dir = os.path.join(project, "stages")
     stages = sorted(os.listdir(stages_dir)) if os.path.isdir(stages_dir) else []
@@ -1682,12 +1682,12 @@ def usable_sources(project):
         if spec["family"] == "disk" or credential_present(spec)[0]:
             names.add("tracking")
             break
-    if res:
-        _e, _w, registered = aws_env(res)
+    if resources:
+        _e, _w, registered = aws_env(resources)
         if registered or os.environ.get("AWS_ACCESS_KEY_ID") or \
                 os.path.isfile(os.path.expanduser("~/.aws/credentials")):
             names.add("s3")
-        for key, srv in (res.get("servers") or {}).items():
+        for key, srv in (resources.get("servers") or {}).items():
             if not key.startswith("_") and (srv.get("host") or srv.get("alias")):
                 names.add("server")
                 break
@@ -1698,7 +1698,7 @@ def usable_sources(project):
     return names
 
 
-def lead_url(lead, res):
+def lead_url(lead, resources):
     """-> (url, derived) for a lead, or (None, False) when nothing can be built.
 
     **Derived at render time, never stored.** A console URL is a fact about
@@ -1843,10 +1843,10 @@ def cmd_brief(a) -> None:
     if not rec:
         refuse(f"no sweep to write up: {leads_path(project)} does not exist yet")
     leads = rec.get("leads") or []
-    res, _rp = workspace_resources(project)
+    resources, _rp = workspace_resources(project)
     link = {}
     for l in leads:
-        url, derived = lead_url(l, res)
+        url, derived = lead_url(l, resources)
         link[l["lead_id"]] = (url, derived)
 
     def anchor(lead_id):
