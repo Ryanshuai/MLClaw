@@ -179,34 +179,29 @@ def measurement_of(run):
     return settings, trained, weights
 
 
-def cmd_protocol(a):
+def _parse_waivers(waive_settings):
+    """-> (waived dict, exit_code). `exit_code` is None on success; a caller
+    sees a non-None code and returns it immediately without touching `waived`."""
     waived = {}
-    for w in a.waive_setting or []:
+    for w in waive_settings or []:
         if "=" not in w:
             print(json.dumps({"error": "--waive-setting takes KEY=REASON, got " + w}),
                   file=sys.stderr)
-            return 2
+            return None, 2
         k, reason = w.split("=", 1)
         if not reason.strip():
             print(json.dumps({"error": "--waive-setting needs a reason for " + k}),
                   file=sys.stderr)
-            return 2
+            return None, 2
         waived[k.strip()] = reason.strip()
+    return waived, None
 
-    try:
-        before, bpath = load_run(a.before)
-        after, apath = load_run(a.after)
-    except (IOError, OSError, ValueError) as exc:
-        print(json.dumps({"error": "cannot read a run.json: %s" % exc}), file=sys.stderr)
-        return 2
 
-    bs, bt, bw = measurement_of(before)
-    as_, at, aw = measurement_of(after)
+def _check_settings_recorded(bs, as_):
+    """No recorded settings is not a pass. It is the check being unable to
+    run, and the two must not read the same -- the same rule the repro axes
+    draw between `intact` and `unverifiable`."""
     findings = []
-
-    # No recorded settings is not a pass. It is the check being unable to run,
-    # and the two must not read the same -- the same rule the repro axes draw
-    # between `intact` and `unverifiable`.
     for name, s in (("before", bs), ("after", as_)):
         if not s:
             findings.append(finding(
@@ -214,7 +209,11 @@ def cmd_protocol(a):
                 "%s records no measurement settings, so it cannot be checked "
                 "against the other side or against its own weights. An "
                 "unrecorded protocol is not a matching one." % name, side=name))
+    return findings
 
+
+def _check_settings_differ(bs, as_, waived):
+    findings = []
     if bs and as_:
         for k in sorted(set(bs) | set(as_)):
             b, aa = bs.get(k, None), as_.get(k, None)
@@ -235,7 +234,11 @@ def cmd_protocol(a):
                     "nothing downstream can tell. Re-measure, or waive with "
                     "--waive-setting %s='<why it cannot matter>'." % (k, b, aa, k),
                     **d))
+    return findings
 
+
+def _check_measured_against_trained(bs, as_, bt, at, waived):
+    findings = []
     for name, s, t in (("before", bs, bt), ("after", as_, at)):
         if not t:
             if s:
@@ -267,6 +270,26 @@ def cmd_protocol(a):
                     "cannot see this: the mode and the scope are both fine. "
                     "Re-measure, or waive with --waive-setting %s='<why>'."
                     % (name, k, s[k], t[k], k), **d))
+    return findings
+
+
+def cmd_protocol(a):
+    waived, err = _parse_waivers(a.waive_setting)
+    if err is not None:
+        return err
+
+    try:
+        before, bpath = load_run(a.before)
+        after, apath = load_run(a.after)
+    except (IOError, OSError, ValueError) as exc:
+        print(json.dumps({"error": "cannot read a run.json: %s" % exc}), file=sys.stderr)
+        return 2
+
+    bs, bt, bw = measurement_of(before)
+    as_, at, aw = measurement_of(after)
+    findings = (_check_settings_recorded(bs, as_)
+                + _check_settings_differ(bs, as_, waived)
+                + _check_measured_against_trained(bs, as_, bt, at, waived))
 
     report = {
         "verdict": verdict_of(findings),

@@ -175,6 +175,66 @@ def cmd_plan(a):
           "overwrite_existing": bool(a.overwrite)})
 
 
+def _resolve_cited_window(project, cite_window, session):
+    """Mutates session["cited_window"] in place. The denominator, when this
+    pull is a biased sample of production. A biased pull is the right thing
+    to do — you want the hard frames, not a random five hundred — but the
+    bias is invisible afterwards: once the frames are on disk they look
+    exactly like data somebody captured. `/data-online-sample`'s uniform
+    reading is the only thing that can say what they were drawn FROM, so the
+    citation is what keeps the selection computable rather than a memory."""
+    if not cite_window:
+        return
+    ds, _, wid = cite_window.partition("/")
+    if not ds or not wid:
+        broke("--cite-window must be <dataset>/<window_id>",
+              got=cite_window)
+    wpath = os.path.join(project, "datasets", ds, "online", f"{wid}.json")
+    w = read_json(wpath) if os.path.isfile(wpath) else None
+    if not w:
+        refuse(f"no online reading {cite_window}",
+               why="a denominator that is not on record is not a "
+                   "denominator; recording the citation without it would "
+                   "make an unmeasured bias read as a measured one",
+               looked_at=wpath,
+               fix="/data-online-sample sample, over the window this pull "
+                   "drew from")
+    session["cited_window"] = {
+        "window": f"{ds}/{wid}", "record": wpath,
+        "interval": w.get("window"),
+        "population": w.get("population"),
+        "population_basis": w.get("population_basis"),
+        "enumerated": w.get("enumerated"),
+        # Carried through rather than recomputed, so a rate quoted off this
+        # pull inherits the reading's own honesty about its denominator.
+        "rates_are": w.get("rates_are"),
+        "window_complete": w.get("complete"),
+    }
+
+
+def _stamp_rig(a, dest, session):
+    """Mutates session["rig_stamp"] in place. Optional provenance. A rig is
+    one KIND of source and most are not: an S3 prefix has no serial number.
+    When the resource is a declared rig, stamp it into the tree that was
+    just pulled, so what produced the data travels with the data. Failure to
+    stamp never fails the pull — the bytes are already in."""
+    if not a.rig:
+        return
+    rig_py = os.path.join(os.path.dirname(os.path.abspath(__file__)), "rig.py")
+    p = subprocess.run([sys.executable, "-X", "utf8", rig_py, "stamp", "--project", a.project,
+                        "--rig", a.rig, "--into", dest] +
+                       (["--session", a.session] if a.session else []) +
+                       (["--overwrite"] if a.overwrite else []),
+                       capture_output=True, text=True, encoding="utf-8")
+    try:
+        session["rig_stamp"] = json.loads(p.stdout) if p.stdout.strip() else None
+    except json.JSONDecodeError:
+        session["rig_stamp"] = {"error": (p.stderr or p.stdout).strip()[:300]}
+    if p.returncode != 0:
+        session["rig_stamp"] = {"failed": True,
+                                "detail": (p.stderr or p.stdout).strip()[:300]}
+
+
 def cmd_pull(a):
     project = os.path.expanduser(a.project)
     if not os.path.isdir(project):
@@ -212,57 +272,8 @@ def cmd_pull(a):
         "cited_window": None,
     }
 
-    # The denominator, when this pull is a biased sample of production. A biased
-    # pull is the right thing to do — you want the hard frames, not a random
-    # five hundred — but the bias is invisible afterwards: once the frames are on
-    # disk they look exactly like data somebody captured. `/data-online-sample`'s
-    # uniform reading is the only thing that can say what they were drawn FROM,
-    # so the citation is what keeps the selection computable rather than a memory.
-    if a.cite_window:
-        ds, _, wid = a.cite_window.partition("/")
-        if not ds or not wid:
-            broke("--cite-window must be <dataset>/<window_id>",
-                  got=a.cite_window)
-        wpath = os.path.join(project, "datasets", ds, "online", f"{wid}.json")
-        w = read_json(wpath) if os.path.isfile(wpath) else None
-        if not w:
-            refuse(f"no online reading {a.cite_window}",
-                   why="a denominator that is not on record is not a "
-                       "denominator; recording the citation without it would "
-                       "make an unmeasured bias read as a measured one",
-                   looked_at=wpath,
-                   fix="/data-online-sample sample, over the window this pull "
-                       "drew from")
-        session["cited_window"] = {
-            "window": f"{ds}/{wid}", "record": wpath,
-            "interval": w.get("window"),
-            "population": w.get("population"),
-            "population_basis": w.get("population_basis"),
-            "enumerated": w.get("enumerated"),
-            # Carried through rather than recomputed, so a rate quoted off this
-            # pull inherits the reading's own honesty about its denominator.
-            "rates_are": w.get("rates_are"),
-            "window_complete": w.get("complete"),
-        }
-
-    # Optional provenance. A rig is one KIND of source and most are not: an S3
-    # prefix has no serial number. When the resource is a declared rig, stamp it
-    # into the tree that was just pulled, so what produced the data travels with
-    # the data. Failure to stamp never fails the pull — the bytes are already in.
-    if a.rig:
-        rig_py = os.path.join(os.path.dirname(os.path.abspath(__file__)), "rig.py")
-        p = subprocess.run([sys.executable, "-X", "utf8", rig_py, "stamp", "--project", a.project,
-                            "--rig", a.rig, "--into", dest] +
-                           (["--session", a.session] if a.session else []) +
-                           (["--overwrite"] if a.overwrite else []),
-                           capture_output=True, text=True, encoding="utf-8")
-        try:
-            session["rig_stamp"] = json.loads(p.stdout) if p.stdout.strip() else None
-        except json.JSONDecodeError:
-            session["rig_stamp"] = {"error": (p.stderr or p.stdout).strip()[:300]}
-        if p.returncode != 0:
-            session["rig_stamp"] = {"failed": True,
-                                    "detail": (p.stderr or p.stdout).strip()[:300]}
+    _resolve_cited_window(project, a.cite_window, session)
+    _stamp_rig(a, dest, session)
 
     stamp = os.path.join(dest, "_collect",
                          f"collect_{(a.session or finished).replace(':', '').replace('-', '')}.json")
