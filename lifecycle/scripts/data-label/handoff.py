@@ -115,8 +115,17 @@ def write_manifest(path, records, algo):
             fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
 
 
+def _manifest_line(path, n, line):
+    """-> parsed JSON object for one manifest line, or `broke()` on bad JSON."""
+    try:
+        return json.loads(line)
+    except json.JSONDecodeError as exc:
+        broke(f"{path}:{n} is not valid JSON: {exc}")
+
+
 def read_manifest(path):
-    """-> (header, [record]). JSONL because a manifest of 100k images should stream."""
+    """-> (header, [record]). JSONL because a manifest of 100k images should stream:
+    each line is parsed and discarded as it is read, never all held at once."""
     header, records = {}, []
     try:
         with open(path, encoding="utf-8") as fh:
@@ -124,10 +133,7 @@ def read_manifest(path):
                 line = line.strip()
                 if not line:
                     continue
-                try:
-                    obj = json.loads(line)
-                except json.JSONDecodeError as exc:
-                    broke(f"{path}:{n} is not valid JSON: {exc}")
+                obj = _manifest_line(path, n, line)
                 if "_manifest" in obj:
                     header = obj["_manifest"]
                 else:
