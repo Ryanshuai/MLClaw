@@ -75,6 +75,12 @@ class DiscoverCase(TempDirCase):
     def leads(self):
         return self.read_json("ws/proj/discovery/leads.json")["leads"]
 
+    def brief_text(self):
+        rc, _out, err = run_script(SCRIPT, "brief", "--project", self.project)
+        self.assertEqual(rc, 0, err)
+        with open(self.path("ws", "proj", "discovery", "brief.md"), encoding="utf-8") as fh:
+            return fh.read()
+
 
 class CouldNotLookIsNeverGone(DiscoverCase):
     """CLAUDE.md -> "Never silently": never report data you could not look at.
@@ -1973,12 +1979,6 @@ class TheBriefIsReadInTheOrderThatKeepsItHonest(DiscoverCase):
     where the judgment came from.
     """
 
-    def brief_text(self):
-        rc, _out, err = run_script(SCRIPT, "brief", "--project", self.project)
-        self.assertEqual(rc, 0, err)
-        with open(self.path("ws", "proj", "discovery", "brief.md"), encoding="utf-8") as fh:
-            return fh.read()
-
     def test_the_sections_are_ordered_gaps_before_findings(self):
         self.record("s3://b/x/", "--subject", "data")
         t = self.brief_text()
@@ -2051,12 +2051,6 @@ class ALinkIsAConvenienceNotAFinding(DiscoverCase):
     dead link can do is waste a click, and only as long as nobody mistakes it for
     the status.
     """
-
-    def brief_text(self):
-        rc, _out, err = run_script(SCRIPT, "brief", "--project", self.project)
-        self.assertEqual(rc, 0, err)
-        with open(self.path("ws", "proj", "discovery", "brief.md"), encoding="utf-8") as fh:
-            return fh.read()
 
     def test_the_thing_and_the_claim_get_separate_links(self):
         self.record("s3://b/x/", "--url", "https://console/thing",
