@@ -37,6 +37,147 @@ from _stream import (StreamError, classify, emit, expected_direction, finding,
                      unnormalized_finding, verdict_of)
 
 
+def _check_declared_vs_observed(by_type, unclassified, declared_types, observed_types):
+    """-> [finding]. Declared record_types and their fields against what the
+    stream actually emits: a type or field named in output.json but never
+    seen, or records the stream emits that output.json never described."""
+    findings = []
+    for t, count in observed_types.items():
+        if count == 0:
+            findings.append(finding(
+                "fail", "record_type_never_emitted",
+                f"record_type `{t}` is declared but never appears in the stream",
+                record_type=t))
+    if unclassified:
+        findings.append(finding(
+            "warn", "unclassified_records",
+            f"{len(unclassified)} record(s) match no declared record_type — the stream emits "
+            f"more than output.json describes",
+            sample_keys=sorted(observed_fields(unclassified))[:12]))
+
+    for t, rs in by_type.items():
+        if not rs:
+            continue
+        present = observed_fields(rs)
+        for field in (declared_types.get(t, {}).get("fields") or []):
+            if field not in present:
+                findings.append(finding(
+                    "fail", "field_never_emitted",
+                    f"`{t}.{field}` is declared but no `{t}` record carries it",
+                    record_type=t, field=field,
+                    did_you_mean=near_misses(field, list(present))))
+    return findings
+
+
+def _check_primary_metric(primary, all_fields, by_type, records):
+    """-> [finding]. Whether the primary metric exists, is numeric, has more
+    than one point to rank by, is not a train-split metric masquerading as a
+    selection signal, and is not ambiguous across record types."""
+    findings = []
+    if not primary:
+        findings.append(finding(
+            "fail", "primary_metric_unset",
+            "metrics.primary_metric is empty — checkpoint selection has nothing to rank by"))
+        return findings
+    if primary not in all_fields:
+        findings.append(finding(
+            "fail", "primary_metric_absent",
+            f"primary_metric `{primary}` never appears in the stream",
+            metric=primary, did_you_mean=near_misses(primary, list(all_fields)),
+            available=sorted(all_fields)[:20]))
+        return findings
+
+    carriers = [t for t, rs in by_type.items() if any(primary in r for r in rs)]
+    series = numeric_series(records, primary)
+    if not series:
+        findings.append(finding(
+            "fail", "primary_metric_not_numeric",
+            f"`{primary}` appears {all_fields[primary]} time(s) but never as a number",
+            metric=primary))
+    elif len(series) == 1:
+        findings.append(finding(
+            "warn", "primary_metric_single_point",
+            f"`{primary}` has one value in the whole stream — nothing to rank",
+            metric=primary))
+
+    # The train_loss-as-val_loss case, stated explicitly.
+    if split_of(primary) == "train":
+        held_out = [f for f in all_fields if split_of(f) == "held_out"]
+        findings.append(finding(
+            "fail" if held_out else "warn", "primary_metric_is_train_split",
+            f"`{primary}` is a training-split metric being used to select checkpoints"
+            + (f"; the stream also emits held-out metrics: {', '.join(sorted(held_out)[:6])}"
+               if held_out else "; no held-out metric found in the stream either"),
+            metric=primary, held_out_alternatives=sorted(held_out)[:6]))
+    elif split_of(primary) == "unknown":
+        siblings = [f for f in all_fields if split_of(f) == "held_out"
+                    and f.endswith(primary)]
+        if siblings:
+            findings.append(finding(
+                "warn", "primary_metric_split_ambiguous",
+                f"`{primary}` carries no split prefix, and the stream also emits "
+                f"{', '.join(sorted(siblings))} — confirm which one selection should rank by",
+                metric=primary, held_out_alternatives=sorted(siblings)))
+
+    if len(carriers) > 1:
+        findings.append(finding(
+            "warn", "primary_metric_multi_type",
+            f"`{primary}` appears in more than one record type ({', '.join(sorted(carriers))}) "
+            f"— ranking will mix them unless selection filters by type",
+            metric=primary, record_types=sorted(carriers)))
+    return findings
+
+
+def _check_direction(direction, raw_direction, primary):
+    """-> [finding]. `direction` parses, and — when a primary metric is set —
+    agrees with the convention its own name implies (a `*_loss` should be
+    `min`, an `*_acc` should be `max`)."""
+    findings = []
+    if direction is None:
+        findings.append(finding(
+            "fail", "direction_invalid",
+            f"metrics.direction is {raw_direction!r}; expected 'max' or 'min' "
+            f"(or a recognized alias such as 'maximize' / 'lower_is_better')"))
+    elif primary:
+        expected = expected_direction(primary)
+        if expected and expected != direction:
+            findings.append(finding(
+                "fail", "direction_contradicts_name",
+                f"`{primary}` is ranked `{direction}`, but a metric with that name is "
+                f"normally `{expected}` — one of the two is wrong, and selection will "
+                f"pick the worst checkpoint if it is the direction",
+                metric=primary, declared=direction, expected=expected))
+    return findings
+
+
+def _check_watch_and_done(m, all_fields, declared_types, by_type):
+    """-> [finding]. watch_step/watch_epoch name fields the stream actually
+    emits, and done_signal's record_type is declared and has been seen."""
+    findings = []
+    for list_name in ("watch_step", "watch_epoch"):
+        for field in (m.get(list_name) or []):
+            if field not in all_fields:
+                findings.append(finding(
+                    "warn", "watched_field_absent",
+                    f"{list_name} names `{field}`, which never appears in the stream",
+                    field=field, did_you_mean=near_misses(field, list(all_fields))))
+
+    done = m.get("done_signal") or {}
+    if done.get("type") == "record":
+        rt = done.get("record_type")
+        if rt and rt not in declared_types:
+            findings.append(finding(
+                "warn", "done_signal_type_undeclared",
+                f"done_signal expects record_type `{rt}`, which is not in record_types",
+                record_type=rt))
+        elif rt and not by_type.get(rt):
+            findings.append(finding(
+                "warn", "done_signal_absent",
+                f"no `{rt}` record in the stream — this run has not signalled completion",
+                record_type=rt))
+    return findings
+
+
 def reconcile(output, records, line_errors):
     """Pure function. -> report dict."""
     m = output.get("metrics") or {}
@@ -66,127 +207,13 @@ def reconcile(output, records, line_errors):
     if note:
         findings.append(finding("warn", "type_key_uncertain", note, coverage=round(coverage, 3)))
     by_type, unclassified = classify(records, declared_types, type_key)
-
-    # --- declared record types vs observed -------------------------------
     observed_types = {t: len(rs) for t, rs in by_type.items()}
-    for t, count in observed_types.items():
-        if count == 0:
-            findings.append(finding(
-                "fail", "record_type_never_emitted",
-                f"record_type `{t}` is declared but never appears in the stream",
-                record_type=t))
-    if unclassified:
-        findings.append(finding(
-            "warn", "unclassified_records",
-            f"{len(unclassified)} record(s) match no declared record_type — the stream emits "
-            f"more than output.json describes",
-            sample_keys=sorted(observed_fields(unclassified))[:12]))
-
-    # --- declared fields vs observed, per type ---------------------------
-    for t, rs in by_type.items():
-        if not rs:
-            continue
-        present = observed_fields(rs)
-        for field in (declared_types.get(t, {}).get("fields") or []):
-            if field not in present:
-                findings.append(finding(
-                    "fail", "field_never_emitted",
-                    f"`{t}.{field}` is declared but no `{t}` record carries it",
-                    record_type=t, field=field,
-                    did_you_mean=near_misses(field, list(present))))
-
     all_fields = observed_fields(records)
 
-    # --- the primary metric ----------------------------------------------
-    if not primary:
-        findings.append(finding(
-            "fail", "primary_metric_unset",
-            "metrics.primary_metric is empty — checkpoint selection has nothing to rank by"))
-    elif primary not in all_fields:
-        findings.append(finding(
-            "fail", "primary_metric_absent",
-            f"primary_metric `{primary}` never appears in the stream",
-            metric=primary, did_you_mean=near_misses(primary, list(all_fields)),
-            available=sorted(all_fields)[:20]))
-    else:
-        carriers = [t for t, rs in by_type.items() if any(primary in r for r in rs)]
-        series = numeric_series(records, primary)
-        if not series:
-            findings.append(finding(
-                "fail", "primary_metric_not_numeric",
-                f"`{primary}` appears {all_fields[primary]} time(s) but never as a number",
-                metric=primary))
-        elif len(series) == 1:
-            findings.append(finding(
-                "warn", "primary_metric_single_point",
-                f"`{primary}` has one value in the whole stream — nothing to rank",
-                metric=primary))
-
-        # The train_loss-as-val_loss case, stated explicitly.
-        if split_of(primary) == "train":
-            held_out = [f for f in all_fields if split_of(f) == "held_out"]
-            findings.append(finding(
-                "fail" if held_out else "warn", "primary_metric_is_train_split",
-                f"`{primary}` is a training-split metric being used to select checkpoints"
-                + (f"; the stream also emits held-out metrics: {', '.join(sorted(held_out)[:6])}"
-                   if held_out else "; no held-out metric found in the stream either"),
-                metric=primary, held_out_alternatives=sorted(held_out)[:6]))
-        elif split_of(primary) == "unknown":
-            siblings = [f for f in all_fields if split_of(f) == "held_out"
-                        and f.endswith(primary)]
-            if siblings:
-                findings.append(finding(
-                    "warn", "primary_metric_split_ambiguous",
-                    f"`{primary}` carries no split prefix, and the stream also emits "
-                    f"{', '.join(sorted(siblings))} — confirm which one selection should rank by",
-                    metric=primary, held_out_alternatives=sorted(siblings)))
-
-        if len(carriers) > 1:
-            findings.append(finding(
-                "warn", "primary_metric_multi_type",
-                f"`{primary}` appears in more than one record type ({', '.join(sorted(carriers))}) "
-                f"— ranking will mix them unless selection filters by type",
-                metric=primary, record_types=sorted(carriers)))
-
-    # --- direction sanity --------------------------------------------------
-    if direction is None:
-        findings.append(finding(
-            "fail", "direction_invalid",
-            f"metrics.direction is {raw_direction!r}; expected 'max' or 'min' "
-            f"(or a recognized alias such as 'maximize' / 'lower_is_better')"))
-    elif primary:
-        expected = expected_direction(primary)
-        if expected and expected != direction:
-            findings.append(finding(
-                "fail", "direction_contradicts_name",
-                f"`{primary}` is ranked `{direction}`, but a metric with that name is "
-                f"normally `{expected}` — one of the two is wrong, and selection will "
-                f"pick the worst checkpoint if it is the direction",
-                metric=primary, declared=direction, expected=expected))
-
-    # --- watch lists --------------------------------------------------------
-    for list_name in ("watch_step", "watch_epoch"):
-        for field in (m.get(list_name) or []):
-            if field not in all_fields:
-                findings.append(finding(
-                    "warn", "watched_field_absent",
-                    f"{list_name} names `{field}`, which never appears in the stream",
-                    field=field, did_you_mean=near_misses(field, list(all_fields))))
-
-    # --- done signal --------------------------------------------------------
-    done = m.get("done_signal") or {}
-    if done.get("type") == "record":
-        rt = done.get("record_type")
-        if rt and rt not in declared_types:
-            findings.append(finding(
-                "warn", "done_signal_type_undeclared",
-                f"done_signal expects record_type `{rt}`, which is not in record_types",
-                record_type=rt))
-        elif rt and not by_type.get(rt):
-            findings.append(finding(
-                "warn", "done_signal_absent",
-                f"no `{rt}` record in the stream — this run has not signalled completion",
-                record_type=rt))
+    findings += _check_declared_vs_observed(by_type, unclassified, declared_types, observed_types)
+    findings += _check_primary_metric(primary, all_fields, by_type, records)
+    findings += _check_direction(direction, raw_direction, primary)
+    findings += _check_watch_and_done(m, all_fields, declared_types, by_type)
 
     return {
         "verdict": verdict_of(findings),
