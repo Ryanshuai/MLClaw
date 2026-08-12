@@ -45,9 +45,14 @@ GROUP_BY = ("step", "step+namespace", "step+wall_time")
 # The x-axis preference for *plotting*, which is deliberately not the ranking order
 # in `_stream.index_of`. Ranking asks "which observation is this" and prefers
 # `epoch`; a curve wants the densest monotone axis, and preferring `epoch` would
-# collapse every step inside an epoch onto one x. Same names (imported, so they
-# cannot drift), different order, stated rather than assumed.
+# collapse every step inside an epoch onto one x. Same names, different order,
+# stated rather than assumed -- and the assert below is what actually keeps the
+# two from drifting apart; retyping the five names here does not.
 PLOT_INDEX_KEYS = ("step", "global_step", "iteration", "iter", "epoch")
+assert set(PLOT_INDEX_KEYS) == set(INDEX_KEYS), (
+    "PLOT_INDEX_KEYS must name the same keys as _stream.INDEX_KEYS, only "
+    "reordered -- a key added to one and not the other silently drops out of "
+    "either ranking or plotting")
 
 # Keys that are never a curve: the indices themselves (a plot of `step` against
 # `step` is a diagonal), the record kind, and the timestamp.
