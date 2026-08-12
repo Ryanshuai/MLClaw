@@ -49,7 +49,7 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__))), "shared"))
 from _records import (age_days, atomic_write_json, broke, emit, now_utc,  # noqa: E402
-                      read_json, refuse, stamp)
+                      read_json, refuse, id_stamp)
 
 # The two ends of the seam plus the thing that defines it. A fixed vocabulary
 # because the whole design turns on these NOT being people: a role register would
@@ -157,7 +157,7 @@ def cmd_open(a):
                    "value ranges, num_classes) — /train-init's analysis has it")
 
     os.makedirs(sessions_dir(project), exist_ok=True)
-    base = stamp()
+    base = id_stamp()
     for suffix in [""] + [f"_{i}" for i in range(2, 100)]:
         sid = f"adapt_{base}{suffix}"
         if not os.path.exists(session_path(project, sid)):

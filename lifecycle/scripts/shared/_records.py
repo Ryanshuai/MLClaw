@@ -72,8 +72,14 @@ def now_utc():
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
-def stamp():
-    """`YYYYmmdd_HHMMSS` for record ids. Not a timestamp -- an identifier."""
+def id_stamp():
+    """`YYYYmmdd_HHMMSS` for record ids. Not a timestamp -- an identifier.
+
+    Named id_stamp, not stamp: `train-run/ingest.py` has its own unrelated
+    `stamp(records, src, group)` (attaches provenance to records, not an id
+    generator) -- scan.py collision, same name across two shared-ish modules
+    with different arities and different meanings.
+    """
     return datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
 
 

@@ -64,7 +64,7 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__))), "shared"))
-from _records import (atomic_write_json, broke, emit, now_utc, parse_ts, read_json, refuse, stamp)  # noqa: E402
+from _records import (atomic_write_json, broke, emit, now_utc, parse_ts, read_json, refuse, id_stamp)  # noqa: E402
 from framework_integrity import framework_integrity  # noqa: E402
 
 AXES = ("data", "code", "env", "params", "artifacts")
@@ -762,7 +762,7 @@ def cmd_check(a):
     report, rd = assess(project, a.run, skip_env=a.no_env,
                         framework_python=a.framework_python)
     if not a.no_write:
-        out = os.path.join(rd, "repro", f"check_{stamp()}.json")
+        out = os.path.join(rd, "repro", f"check_{id_stamp()}.json")
         atomic_write_json(out, report)
         report["written_to"] = os.path.relpath(out, project)
     if a.json:
@@ -904,7 +904,7 @@ def cmd_open(a):
     # share a directory and the second write would destroy the first record.
     # Suffix rather than refuse -- an id clash is not the user's mistake, and
     # `_2` is what run ids already do, so a reader has seen it before.
-    base_sid = f"repro_{stamp()}" + (f"_{a.name}" if a.name else "")
+    base_sid = f"repro_{id_stamp()}" + (f"_{a.name}" if a.name else "")
     sid, collision = base_sid, None
     for n in range(1, 1000):
         sid = base_sid if n == 1 else f"{base_sid}_{n}"
