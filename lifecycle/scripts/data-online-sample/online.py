@@ -166,16 +166,16 @@ def expand(online: dict, frm: datetime, to: datetime) -> list[str]:
         return [online.get("pattern") or ""]
     if online["partition"] == "external":
         return []
-    out, day = [], frm.astimezone(timezone.utc).date()
+    patterns, day = [], frm.astimezone(timezone.utc).date()
     end = to.astimezone(timezone.utc).date()
     while day <= end:
-        out.append(day.strftime(online["pattern"]))
+        patterns.append(day.strftime(online["pattern"]))
         day += timedelta(days=1)
-        if len(out) > 1000:
+        if len(patterns) > 1000:
             broke("the window expands to over 1000 prefixes",
                   why="almost certainly a pattern or a window that is not what "
                       "was meant; a reading is a sample, not a full scan")
-    return out
+    return patterns
 
 
 def list_prefix(online: dict, prefix: str, resources: str | None,
@@ -246,14 +246,14 @@ def list_prefix(online: dict, prefix: str, resources: str | None,
                            text=True, encoding="utf-8", timeout=600)
     except (subprocess.TimeoutExpired, OSError) as e:
         return {"reachable": False, "error": f"{type(e).__name__}: {e}"}
-    out = p.stdout
-    if p.returncode != 0 or (OK not in out and NOPREFIX not in out):
+    stdout = p.stdout
+    if p.returncode != 0 or (OK not in stdout and NOPREFIX not in stdout):
         err = (p.stderr or "").strip().splitlines()
         return {"reachable": False,
                 "error": f"exit {p.returncode}: {err[-1] if err else 'no sentinel'}"}
-    if NOPREFIX in out:
+    if NOPREFIX in stdout:
         return {"reachable": True, "missing": True, "ids": []}
-    ids = [l.strip() for l in out.splitlines() if l.strip() and l.strip() != OK]
+    ids = [l.strip() for l in stdout.splitlines() if l.strip() and l.strip() != OK]
     return {"reachable": True, "missing": False, "ids": ids}
 
 
@@ -412,33 +412,33 @@ def cmd_sample(a) -> None:
         "overlaps": overlaps(project, a.dataset, frm, to),
         "note": a.note,
     }
-    out = os.path.join(dataset_dir(project, a.dataset), "online", f"{rec['window_id']}.json")
-    atomic_write_json(out, rec)
+    out_path = os.path.join(dataset_dir(project, a.dataset), "online", f"{rec['window_id']}.json")
+    atomic_write_json(out_path, rec)
 
-    result = {k: rec[k] for k in
+    summary = {k: rec[k] for k in
               ("window_id", "dataset", "window", "policy", "enumerated",
                "population", "population_basis", "rates_are", "complete")}
-    result["selected"] = len(selected)
-    result["record"] = out
+    summary["selected"] = len(selected)
+    summary["record"] = out_path
     if not complete:
-        result["warning"] = (
+        summary["warning"] = (
             f"{len(unreachable)} prefix(es) did not answer, so `enumerated` is a "
             f"LOWER BOUND and this reading must not be compared — a drift verdict "
             f"against a window with a missing day is a verdict about the outage")
     if not known:
-        result["note_population"] = (
+        summary["note_population"] = (
             "population is unknown, so every rate off this reading is a lower "
             "bound and must be said as one. Request logging is itself sampled "
             "and rotated; the listing sees what reached the store, not what "
             "happened")
     if rec["overlaps"]:
-        result["note_overlaps"] = (
+        summary["note_overlaps"] = (
             f"{len(rec['overlaps'])} earlier reading(s) cover part of this "
             f"window; they double-count in any trend line")
-    result["next"] = ("a drift comparison against a frozen snapshot; "
+    summary["next"] = ("a drift comparison against a frozen snapshot; "
                       "/data-collect --cite-window to pull a biased sample with "
                       "this reading as its denominator")
-    emit(result)
+    emit(summary)
     if not complete:
         sys.exit(1)
 

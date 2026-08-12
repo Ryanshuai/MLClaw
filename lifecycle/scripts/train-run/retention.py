@@ -60,9 +60,9 @@ def _sort_index(f):
     return v if v is not None else -1
 
 
-def _policy_of(output):
+def _policy_of(output_json):
     """-> (policy, n). Accepts both the bare string and the {policy, n} form."""
-    raw = (output.get("checkpoints") or {}).get("retention", "keep_all")
+    raw = (output_json.get("checkpoints") or {}).get("retention", "keep_all")
     if isinstance(raw, dict):
         return raw.get("policy", "keep_all"), raw.get("n", DEFAULT_KEEP_LAST_N)
     return raw or "keep_all", DEFAULT_KEEP_LAST_N
@@ -136,16 +136,16 @@ def _abort_checks(inv, best_file, keep_reason, to_delete, to_keep):
     return findings
 
 
-def build_plan(output, records, output_dir):
+def build_plan(output_json, records, output_dir):
     """Pure planning. Never touches the filesystem beyond stat/glob."""
-    inv = inventory(output, records, output_dir)
+    inv = inventory(output_json, records, output_dir)
     findings = list(inv["findings"])
     files = inv["files"]
     best_by, direction = inv["best_by"], inv["direction"]
     # Not re-derived here: `best_file` is the same join the keeper selection used.
     best_file = inv["best_file"]
 
-    policy, n = _policy_of(output)
+    policy, n = _policy_of(output_json)
     if policy not in POLICIES:
         findings.append(finding("fail", "policy_unknown",
                                 f"retention policy {policy!r} is not one of {', '.join(POLICIES)}"))
@@ -252,8 +252,8 @@ def _print_table(plan):
     sys.stderr.write(f"\n  {'file'.ljust(w)}  {'idx':>6}  {(plan['metric'] or 'metric'):>12}  fate    why\n")
     for d in plan["decisions"]:
         idx = d["epoch"] if d["epoch"] is not None else d["step"]
-        val = "—" if d["metric"] is None else f"{d['metric']:.6g}"
-        sys.stderr.write(f"  {os.path.basename(d['path']).ljust(w)}  {str(idx):>6}  {val:>12}  "
+        metric_str = "—" if d["metric"] is None else f"{d['metric']:.6g}"
+        sys.stderr.write(f"  {os.path.basename(d['path']).ljust(w)}  {str(idx):>6}  {metric_str:>12}  "
                          f"{d['fate']:<6}  {d['reason']}\n")
     s = plan["summary"]
     sys.stderr.write(f"\n  keep {s['keep']} / delete {s['delete']} of {s['total']}"
@@ -281,13 +281,13 @@ def main(argv=None):
 
     if args.cmd == "plan":
         try:
-            output, records, _, _kind = load_inputs(args.output_json, args.jsonl,
+            output_json, records, _, _kind = load_inputs(args.output_json, args.jsonl,
                                                     args.run_dir)
         except StreamError as e:
             sys.stderr.write(f"retention: {e}\n")
             return 2
 
-        plan = build_plan(output, records, args.output_dir)
+        plan = build_plan(output_json, records, args.output_dir)
         dest = args.plan or os.path.join(args.output_dir, "retention_plan.json")
         try:
             with open(dest, "w") as f:

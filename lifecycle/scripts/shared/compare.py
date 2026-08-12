@@ -48,11 +48,11 @@ DIRECTION_ALIASES = {
 UNSPECIFIED_SCOPE = "unspecified"
 
 
-def normalize_direction(value):
+def normalize_direction(raw):
     """-> 'max' | 'min' | None. None means "not recorded or not recognized"."""
-    if not isinstance(value, str):
+    if not isinstance(raw, str):
         return None
-    return DIRECTION_ALIASES.get(value.strip().lower())
+    return DIRECTION_ALIASES.get(raw.strip().lower())
 
 
 def norm_scalar(v):
@@ -72,18 +72,18 @@ def normalize(value):
     """Recursively canonicalize a value: drop nulls and `_comment*` keys from
     dicts, order-normalize all-scalar lists, coerce numbers."""
     if isinstance(value, dict):
-        out = {}
+        normalized_dict = {}
         for k, v in value.items():
             if v is None or (isinstance(k, str) and k.startswith("_comment")):
                 continue
-            out[k] = normalize(v)
-        return out
+            normalized_dict[k] = normalize(v)
+        return normalized_dict
     if isinstance(value, list):
-        items = [normalize(v) for v in value]
-        if all(_is_scalar(v) for v in items):
+        normalized_items = [normalize(v) for v in value]
+        if all(_is_scalar(v) for v in normalized_items):
             # sort by (type name, repr) so mixed scalars stay orderable
-            return sorted(items, key=lambda x: (type(x).__name__, repr(x)))
-        return items
+            return sorted(normalized_items, key=lambda x: (type(x).__name__, repr(x)))
+        return normalized_items
     return norm_scalar(value)
 
 

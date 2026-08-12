@@ -45,9 +45,9 @@ from datetime import datetime, timezone
 # reported to the user as a finding.
 # --------------------------------------------------------------------------
 
-def emit(obj):
+def emit(payload):
     """Success payload on stdout. Machine-readable; the skill renders it."""
-    print(json.dumps(obj, indent=2, ensure_ascii=False))
+    print(json.dumps(payload, indent=2, ensure_ascii=False))
 
 
 def refuse(detail, **extra):
@@ -176,7 +176,7 @@ def read_json(path, required=True):
         broke(f"unreadable: {path}", why=str(exc))
 
 
-def atomic_write_json(path, obj, *, fsync=False, ensure_ascii=False):
+def atomic_write_json(path, payload, *, fsync=False, ensure_ascii=False):
     """Write via a temp file and `os.replace`, so a crash mid-write cannot
     leave a truncated record where a valid one used to be.
 
@@ -186,14 +186,14 @@ def atomic_write_json(path, obj, *, fsync=False, ensure_ascii=False):
     """
     parent = os.path.dirname(path)
     os.makedirs(parent or ".", exist_ok=True)
-    tmp = path + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as fh:
-        json.dump(obj, fh, indent=2, ensure_ascii=ensure_ascii)
+    tmp_path = path + ".tmp"
+    with open(tmp_path, "w", encoding="utf-8") as fh:
+        json.dump(payload, fh, indent=2, ensure_ascii=ensure_ascii)
         fh.write("\n")
         if fsync:
             fh.flush()
             os.fsync(fh.fileno())
-    os.replace(tmp, path)
+    os.replace(tmp_path, path)
 
 
 # --------------------------------------------------------------------------- #

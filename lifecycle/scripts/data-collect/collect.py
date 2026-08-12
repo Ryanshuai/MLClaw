@@ -161,17 +161,17 @@ def cmd_plan(a):
     dest = os.path.expanduser(a.into)
     os.makedirs(dest, exist_ok=True)
     cmd = build_cmd(kind, remote, dest.rstrip("/") + "/", a, dry=True)
-    rc, out, err = run(cmd, a.timeout)
+    rc, stdout, err = run(cmd, a.timeout)
     if rc is None or rc != 0:
         # Unreachable is a finding, not a crash — and it is the finding that
         # most often means a person has to go and do something.
         refuse(f"could not reach the source ({kind})",
-               source=described, tool_said=(err or out).strip()[:400],
+               source=described, tool_said=(err or stdout).strip()[:400],
                hint="if somebody has to go capture or connect it, that is an "
                     "exchange with a party MLClaw does not control — use /data-label "
                     "(kind: data_request) so it is tracked instead of remembered")
     emit({"would_pull_from": described, "into": dest, "dry_run": True,
-          "tool": cmd[0], "output": out.strip()[-1500:],
+          "tool": cmd[0], "output": stdout.strip()[-1500:],
           "overwrite_existing": bool(a.overwrite)})
 
 
@@ -186,7 +186,7 @@ def cmd_pull(a):
     before_n, before_b = count_dest(dest)
     started = now_utc()
     cmd = build_cmd(kind, remote, dest.rstrip("/") + "/", a, dry=False)
-    rc, out, err = run(cmd, a.timeout)
+    rc, stdout, err = run(cmd, a.timeout)
     finished = now_utc()
     after_n, after_b = count_dest(dest)
 
@@ -268,28 +268,28 @@ def cmd_pull(a):
                          f"collect_{(a.session or finished).replace(':', '').replace('-', '')}.json")
     atomic_write_json(stamp, session)
 
-    result = {k: session[k] for k in
+    summary = {k: session[k] for k in
               ("session", "source", "into", "complete", "exit_code",
                "files_added", "bytes_added")}
-    result["record"] = stamp
-    result["rig_stamped"] = bool(session["rig_stamp"])
+    summary["record"] = stamp
+    summary["rig_stamped"] = bool(session["rig_stamp"])
     if session["cited_window"]:
         cw = session["cited_window"]
-        result["denominator"] = {k: cw[k] for k in
+        summary["denominator"] = {k: cw[k] for k in
                                  ("window", "population", "population_basis",
                                   "rates_are")}
         if cw["population_basis"] != "declared":
-            result["note_denominator"] = (
+            summary["note_denominator"] = (
                 "the cited reading has no known population, so what fraction of "
                 "production this pull represents is a LOWER BOUND — say it as one")
     if not complete:
-        result["warning"] = ("the transfer did not finish cleanly, so files_added "
+        summary["warning"] = ("the transfer did not finish cleanly, so files_added "
                              "is a LOWER BOUND — re-run to continue, and do not "
                              "treat this session as a complete ingest")
-        emit(result)
+        emit(summary)
         sys.exit(1)
-    result["next"] = "census.py scan — confirms it landed and clears UNARCHIVED"
-    emit(result)
+    summary["next"] = "census.py scan — confirms it landed and clears UNARCHIVED"
+    emit(summary)
 
 
 def cmd_status(a):

@@ -92,15 +92,15 @@ def main():
         sys.stderr.write(f"create_run: cannot write {run_json_path}: {e}\n")
         sys.exit(2)
 
-    result = {"run_id": run_id, "run_dir": run_dir, "created_at": run_json["created_at"]}
+    payload = {"run_id": run_id, "run_dir": run_dir, "created_at": run_json["created_at"]}
     if run_id != base_id:
-        result["id_collision"] = (
+        payload["id_collision"] = (
             f"{base_id} was already taken; allocated {run_id} instead. Another run "
             f"started within the same second."
         )
-        sys.stderr.write(f"create_run: warning: {result['id_collision']}\n")
+        sys.stderr.write(f"create_run: warning: {payload['id_collision']}\n")
 
-    json.dump(result, sys.stdout, indent=2)
+    json.dump(payload, sys.stdout, indent=2)
     sys.stdout.write("\n")
 
 

@@ -140,7 +140,7 @@ def load_records(path, fmt, records_at):
     try:
         with open(path, encoding="utf-8") as fh:
             if fmt == "jsonl":
-                out = []
+                records = []
                 for n, line in enumerate(fh, 1):
                     line = line.strip()
                     if not line:
@@ -150,8 +150,8 @@ def load_records(path, fmt, records_at):
                     except json.JSONDecodeError as exc:
                         broke(f"{path}:{n} is not valid JSON: {exc}")
                     if isinstance(rec, dict):
-                        out.append(rec)
-                return out
+                        records.append(rec)
+                return records
             if fmt == "json":
                 blob = json.load(fh)
                 if records_at:
@@ -309,8 +309,8 @@ def cmd_rank(a) -> None:
                    "eval set, and nothing downstream would say so")
 
     stage = os.path.join(project, "stages", "evaluation")
-    out = read_json(os.path.join(stage, "output.json"))
-    ps = out.get("per_sample") or {}
+    output_json = read_json(os.path.join(stage, "output.json"))
+    ps = output_json.get("per_sample") or {}
     if not ps.get("path"):
         refuse("stages/evaluation/output.json -> per_sample.path is not declared",
                why="no per-sample records means there is nothing to rank. This is "
@@ -534,7 +534,7 @@ def cmd_route(a) -> None:
             "verified": sum(1 for c in piles[v] if c["provenance"] == "verified"),
         }
 
-    out = {
+    payload = {
         "session": session["session_id"],
         "run": session["run"],
         "routed": routed,
@@ -553,12 +553,12 @@ def cmd_route(a) -> None:
         "blind_to": BLIND_TO,
         "routed_at": now_utc(),
     }
-    session["routed"] = {k: v for k, v in out.items() if k != "routed"} | {"piles": routed}
+    session["routed"] = {k: v for k, v in payload.items() if k != "routed"} | {"piles": routed}
     if not unreviewed:
         session["status"] = "routed"
         session["closed_at"] = now_utc()
     atomic_write_json(path, session)
-    emit(out)
+    emit(payload)
 
 
 # --------------------------------------------------------------------------- #

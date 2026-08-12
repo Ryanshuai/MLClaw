@@ -178,9 +178,9 @@ def _check_watch_and_done(m, all_fields, declared_types, by_type):
     return findings
 
 
-def reconcile(output, records, line_errors):
+def reconcile(output_json, records, line_errors):
     """Pure function. -> report dict."""
-    m = output.get("metrics") or {}
+    m = output_json.get("metrics") or {}
     declared_types = m.get("record_types") or {}
     primary = m.get("primary_metric") or ""
     raw_direction = m.get("direction") or ""
@@ -236,14 +236,14 @@ def main(argv=None):
     args = ap.parse_args(argv)
 
     try:
-        output, records, line_errors, kind = load_inputs(args.output_json, args.jsonl,
+        output_json, records, line_errors, kind = load_inputs(args.output_json, args.jsonl,
                                                          args.run_dir)
     except StreamError as e:
         sys.stderr.write(f"reconcile_metrics: {e}\n")
         return 2
 
-    report = reconcile(output, records, line_errors)
-    path, _ = resolve_stream(output, args.jsonl, args.run_dir)
+    report = reconcile(output_json, records, line_errors)
+    path, _ = resolve_stream(output_json, args.jsonl, args.run_dir)
     report["stream"] = {"path": path, "kind": kind}
     unnormalized = unnormalized_finding(kind, path)
     if unnormalized:

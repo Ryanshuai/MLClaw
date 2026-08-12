@@ -153,19 +153,19 @@ def cmd_answer(a):
                    fix="file it as `claim` (which is what it is), or pass "
                        "--evidence '<what checked it>', or re-open with --verify")
         if rec.get("verify") and not a.skip_verify:
-            rc, out = run_verify(rec["verify"])
+            rc, verify_stdout = run_verify(rec["verify"])
             if rc is None:
                 refuse("the verify command could not run",
-                       detail=out, verify=rec["verify"],
+                       detail=verify_stdout, verify=rec["verify"],
                        fix="fix it, or file as `claim`, or --skip-verify to "
                            "record that it was not run")
             if rc != 0:
                 refuse("the verify command contradicted the answer",
-                       verify=rec["verify"], exit_code=rc, output=out,
+                       verify=rec["verify"], exit_code=rc, output=verify_stdout,
                        why="the person said one thing and the check said another; "
                            "recording `verified` here would file the wrong one")
             verified_by = {"verify": rec["verify"], "exit_code": rc,
-                           "output": out, "ran_at": now_utc()}
+                           "output": verify_stdout, "ran_at": now_utc()}
         elif rec.get("verify") and a.skip_verify:
             # A check that did not run is not a check. Letting --skip-verify
             # through with kind=`verified` would leave the machine-readable
@@ -202,14 +202,14 @@ def cmd_answer(a):
     rec["answered_at"] = now_utc()
     atomic_write_json(path, rec)
 
-    out = {"ask_id": a.id, "status": "answered", "kind": a.as_,
+    payload = {"ask_id": a.id, "status": "answered", "kind": a.as_,
            "by": rec["answer"]["by"], "valid_until": a.valid_until}
     if a.as_ == "claim":
-        out["note"] = ("recorded as a CLAIM — nothing verified it. Downstream "
+        payload["note"] = ("recorded as a CLAIM — nothing verified it. Downstream "
                        "must not treat this as a checked fact")
     if verified_by and verified_by.get("ran") is False:
-        out["warning"] = "verify was declared but skipped; this is not a passed check"
-    emit(out)
+        payload["warning"] = "verify was declared but skipped; this is not a passed check"
+    emit(payload)
 
 
 def cmd_cancel(a):

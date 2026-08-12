@@ -83,13 +83,13 @@ def snapshots(d) -> list[dict]:
     sdir = os.path.join(d, "snapshots")
     if not os.path.isdir(sdir):
         return []
-    out = []
+    snaps = []
     for sid in sorted(os.listdir(sdir)):
         rec = read_json(os.path.join(sdir, sid, "snapshot.json"), required=False)
         if rec:
             rec["_dir"] = os.path.join(sdir, sid)
-            out.append(rec)
-    return out
+            snaps.append(rec)
+    return snaps
 
 
 def snapshot_units(snap) -> set[str]:
@@ -522,11 +522,11 @@ def cmd_apply(a) -> None:
             if sid not in stamped:
                 stamped.append(sid)
 
-    out = {"retire_id": plan["retire_id"], "record": rpath,
+    payload = {"retire_id": plan["retire_id"], "record": rpath,
            "deleted": len(done), "failed": failed, "unreported": unreported,
            "already_absent": gone, "snapshots_stamped": stamped,
            "status": rec["status"]}
-    emit(out)
+    emit(payload)
     if failed or unreported:
         sys.exit(1)
 
@@ -544,7 +544,7 @@ def cmd_log(a) -> None:
         x for x in os.listdir(root)
         if os.path.isfile(os.path.join(root, x, "dataset.json")))
 
-    out = []
+    records = []
     for ds in names:
         rdir = os.path.join(root, ds, "retire")
         if not os.path.isdir(rdir):
@@ -555,14 +555,14 @@ def cmd_log(a) -> None:
             rec = read_json(os.path.join(rdir, f), required=False)
             if not rec:
                 continue
-            out.append({k: rec.get(k) for k in
+            records.append({k: rec.get(k) for k in
                         ("retire_id", "dataset", "at", "root", "status",
                          "finished_at", "because", "waived")} |
                        {"deleted": len(rec.get("deleted") or []),
                         "failed": len(rec.get("failed") or []),
                         "unreported": len(rec.get("unreported") or [])})
-    out.sort(key=lambda r: r.get("finished_at") or "")
-    emit({"retirements": out, "total_units_deleted": sum(r["deleted"] for r in out)})
+    records.sort(key=lambda r: r.get("finished_at") or "")
+    emit({"retirements": records, "total_units_deleted": sum(r["deleted"] for r in records)})
 
 
 def main() -> None:

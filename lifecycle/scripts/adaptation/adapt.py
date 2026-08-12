@@ -123,8 +123,8 @@ def contract_from(project, stage):
     cfg = read_json(path, required=False)
     if cfg is None:
         return None, path
-    items = cfg.get("items")
-    return (items if isinstance(items, dict) else None), path
+    session_items = cfg.get("items")
+    return (session_items if isinstance(session_items, dict) else None), path
 
 
 def cmd_open(a):
@@ -268,17 +268,17 @@ def cmd_respond(a):
         "basis": a.basis,
     })
 
-    out = {"session_id": a.id, "finding": a.n, "action": a.action}
+    payload = {"session_id": a.id, "finding": a.n, "action": a.action}
     if a.action == "fixed":
         f["state"] = "addressed"
     elif a.action == "partially_fixed":
         f["state"] = "open"
-        out["note"] = "still OPEN — a partial fix is not a fix"
+        payload["note"] = "still OPEN — a partial fix is not a fix"
     elif a.action in ("cannot_fix", "disagree"):
         # Terminal for the responder, not for the finding. Closing it here would
         # record "we stopped discussing it" as "it was resolved".
         f["state"] = "blocked"
-        out["note"] = ("finding is BLOCKED, not closed — the responder handed it "
+        payload["note"] = ("finding is BLOCKED, not closed — the responder handed it "
                        "back. It stays open in status until the other end moves "
                        "or the session is degraded")
     elif a.action == "needs_from_other_side":
@@ -301,14 +301,14 @@ def cmd_respond(a):
             "round": len(rec["rounds"]) or None,
         })
         f["state"] = "reversed"
-        out["opened_finding"] = n2
-        out["now_against"] = other
-        out["note"] = ("finding {} is REVERSED and a NEW finding {} was opened "
+        payload["opened_finding"] = n2
+        payload["now_against"] = other
+        payload["note"] = ("finding {} is REVERSED and a NEW finding {} was opened "
                        "against `{}` — one schema, flowing both ways".format(a.n, n2, other))
 
     save(a.project, a.id, rec)
-    out["open_findings"] = len([x for x in rec["findings"] if x["state"] in OPEN_STATES])
-    emit(out)
+    payload["open_findings"] = len([x for x in rec["findings"] if x["state"] in OPEN_STATES])
+    emit(payload)
 
 
 def _swap(current, explicit):
@@ -476,7 +476,7 @@ def cmd_close(a):
                attributed_to=a.attributed_to)
     save(a.project, a.id, rec)
 
-    out = {"session_id": a.id, "verdict": a.verdict,
+    payload = {"session_id": a.id, "verdict": a.verdict,
            "attributed_to": a.attributed_to,
            "rounds": len(rec["rounds"]),
            "confirmed": len(rec["confirmed"]), "refuted": len(rec["refuted"]),
@@ -484,17 +484,17 @@ def cmd_close(a):
     if a.verdict == "degraded_to_rework":
         # The oracle changed — from "the dataloader accepts it" to "the party
         # that owns the data agrees" — and two oracles are never one session.
-        out["next"] = ("the oracle changed, so this campaign ENDS here. Open a "
+        payload["next"] = ("the oracle changed, so this campaign ENDS here. Open a "
                        "/data-label rework handoff for the unresolved findings; a "
                        "successor adaptation session cites this one")
         # Every non-terminal state, not just `blocked`. A finding still `open`
         # when the campaign degrades is exactly the work the rework round has to
         # carry, and listing only the handed-back ones would drop it silently.
-        out["unresolved_findings"] = [{"n": f["n"], "state": f["state"],
+        payload["unresolved_findings"] = [{"n": f["n"], "state": f["state"],
                                        "against": f["raised_against"]}
                                       for f in rec["findings"]
                                       if f["state"] in OPEN_STATES]
-    emit(out)
+    emit(payload)
 
 
 def cmd_status(a):

@@ -159,26 +159,26 @@ def framework_integrity(spec, python=None, budget_s=120.0):
         return {"state": "unverifiable", "means": STATE_MEANS["unverifiable"],
                 "detail": f"{type(exc).__name__}: {exc}"}
     try:
-        res = json.loads((p.stdout or "").strip().splitlines()[-1])
+        parsed = json.loads((p.stdout or "").strip().splitlines()[-1])
     except Exception:
         return {"state": "unverifiable", "means": STATE_MEANS["unverifiable"],
                 "detail": (f"the integrity snippet produced no JSON "
                            f"(exit {p.returncode}): "
                            f"{((p.stderr or p.stdout) or '').strip()[:300]}")}
-    res["package"] = name
-    res["interpreter"] = interp
-    res["means"] = STATE_MEANS.get(res.get("state"))
-    res["pinned_version"] = want if sep else None
+    parsed["package"] = name
+    parsed["interpreter"] = interp
+    parsed["means"] = STATE_MEANS.get(parsed.get("state"))
+    parsed["pinned_version"] = want if sep else None
     # The version question is separate from the integrity question and both can
     # fail. A record pinning 8.4.40 against an installed 8.4.41 is a different
     # problem from an edited 8.4.40, and collapsing them loses the fix.
-    got = res.get("installed_version")
+    got = parsed.get("installed_version")
     if sep and got and got.split("+")[0] != want.split("+")[0]:
-        res["version_matches_pin"] = False
+        parsed["version_matches_pin"] = False
     elif sep and got:
-        res["version_matches_pin"] = True
+        parsed["version_matches_pin"] = True
     else:
-        res["version_matches_pin"] = None
-    return res
+        parsed["version_matches_pin"] = None
+    return parsed
 
 

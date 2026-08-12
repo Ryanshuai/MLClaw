@@ -72,19 +72,19 @@ def main():
         ssh_key = sys.argv[4] if len(sys.argv) > 4 else ""
         port = int(sys.argv[5]) if len(sys.argv) > 5 else 22
         remote_path = sys.argv[6] if len(sys.argv) > 6 else None
-        result = test_ssh(host, port, username, ssh_key, remote_path)
+        conn_result = test_ssh(host, port, username, ssh_key, remote_path)
 
     elif conn_type == "s3":
         path = sys.argv[2] if len(sys.argv) > 2 else ""
         region = sys.argv[3] if len(sys.argv) > 3 else None
         profile = sys.argv[4] if len(sys.argv) > 4 else None
-        result = test_s3(path, region, profile)
+        conn_result = test_s3(path, region, profile)
 
     else:
-        result = {"ok": False, "error": f"Unknown connection type: {conn_type}"}
+        conn_result = {"ok": False, "error": f"Unknown connection type: {conn_type}"}
 
-    json.dump(result, sys.stdout, indent=2)
-    sys.exit(0 if result["ok"] else 1)
+    json.dump(conn_result, sys.stdout, indent=2)
+    sys.exit(0 if conn_result["ok"] else 1)
 
 
 if __name__ == "__main__":

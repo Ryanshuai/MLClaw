@@ -112,20 +112,20 @@ def assess(facts, *, probe):
             # run-mechanics.md "Record integrity".
             row["state"] = "not_checked"
         else:
-            status, out = run_probe(f["probe"])
+            status, probe_out = run_probe(f["probe"])
             if status != "ok":
                 row["state"] = "probe_failed"
-                row["detail"] = out
+                row["detail"] = probe_out
             elif f.get("runtime_only"):
                 # Nothing to compare against by construction; the reading IS
                 # the product, and it goes into the stamp.
-                row["observed"] = out
+                row["observed"] = probe_out
                 row["state"] = "read"
-            elif str(f.get("value")) == out:
-                row["observed"] = out
+            elif str(f.get("value")) == probe_out:
+                row["observed"] = probe_out
                 row["state"] = "match"
             else:
-                row["observed"] = out
+                row["observed"] = probe_out
                 row["state"] = "CHANGED"
         rows.append(row)
     return rows
@@ -152,7 +152,7 @@ def cmd_check(a):
     cfg, facts, _ = load_rig(a.project, a.rig)
     rows = assess(facts, probe=not a.no_probe)
     s = summarize(rows)
-    out = {"rig_id": cfg.get("rig_id") or a.rig, "checked_at": now_utc(),
+    payload = {"rig_id": cfg.get("rig_id") or a.rig, "checked_at": now_utc(),
            "probed": not a.no_probe, "facts": rows, **s}
 
     if s["tripwires_fired"]:
@@ -160,14 +160,14 @@ def cmd_check(a):
         # something changed which changes what the data means. It does not stop
         # a capture — `stamp` deliberately still writes — but a caller that
         # ignores a non-zero exit here is ignoring the only warning there is.
-        out["verdict"] = "TRIPWIRE"
-        out["why"] = ("a `shifts` fact changed: the capture will work and the "
+        payload["verdict"] = "TRIPWIRE"
+        payload["why"] = ("a `shifts` fact changed: the capture will work and the "
                       "data will mean something different, with nothing else "
                       "raising anywhere downstream")
-        emit(out)
+        emit(payload)
         sys.exit(1)
-    out["verdict"] = "ok" if not (s["probe_failures"] or s["not_checked"]) else "incomplete"
-    emit(out)
+    payload["verdict"] = "ok" if not (s["probe_failures"] or s["not_checked"]) else "incomplete"
+    emit(payload)
 
 
 def cmd_stamp(a):

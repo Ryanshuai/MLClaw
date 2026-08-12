@@ -58,13 +58,13 @@ def _load():
 
 def _save(state):
     STATE.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=STATE.parent, prefix=".state.", suffix=".json")
+    fd, tmp_path = tempfile.mkstemp(dir=STATE.parent, prefix=".state.", suffix=".json")
     try:
         with os.fdopen(fd, "w") as f:
             json.dump(state, f, indent=2)
-        os.replace(tmp, STATE)
+        os.replace(tmp_path, STATE)
     except Exception:
-        try: os.unlink(tmp)
+        try: os.unlink(tmp_path)
         except OSError: pass
         raise
 

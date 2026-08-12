@@ -147,8 +147,8 @@ def _run(cmd, cwd, env=None):
 
 def _run_z(cmd, cwd):
     """Run a git command with -z output, return list of NUL-separated fields."""
-    out = _run(cmd, cwd).stdout
-    return [f for f in out.split("\0") if f]
+    stdout = _run(cmd, cwd).stdout
+    return [f for f in stdout.split("\0") if f]
 
 
 def _strip_prefix(path, prefix):
@@ -191,8 +191,8 @@ def _scan_status(code_dir, prefix):
       (`a/old b/new`) or as a delete plus an add depends on git's similarity
       detection, which is a property of the content, not of the status code.
     """
-    out = _run(["git", "status", "--porcelain", "-z", "-uall"] + SCOPE, code_dir).stdout
-    fields = out.split("\0")
+    stdout = _run(["git", "status", "--porcelain", "-z", "-uall"] + SCOPE, code_dir).stdout
+    fields = stdout.split("\0")
 
     tracked, untracked, ambiguous = [], [], []
     i = 0

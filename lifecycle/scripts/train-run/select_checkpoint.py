@@ -36,7 +36,7 @@ from _stream import (StreamError, emit, expected_direction, finding, find_type_k
 SCRIPT_SAVED_NAMES = ("best.pt", "best.pth", "best.ckpt", "best_model.pt", "model_best.pth.tar")
 
 
-def _check_selection(output, records, best_by, direction, raw_direction):
+def _check_selection(output_json, records, best_by, direction, raw_direction):
     """Everything wrong with the selection config, before a single record is ranked."""
     findings = []
     if not best_by:
@@ -48,7 +48,7 @@ def _check_selection(output, records, best_by, direction, raw_direction):
             f"checkpoints.selection.direction is {raw_direction!r}; expected 'max' or 'min' "
             f"(or a recognized alias such as 'maximize' / 'lower_is_better')"))
 
-    primary = ((output.get("metrics") or {}).get("primary_metric")) or ""
+    primary = ((output_json.get("metrics") or {}).get("primary_metric")) or ""
     if best_by and primary and best_by != primary:
         findings.append(finding(
             "warn", "best_by_differs_from_primary",
@@ -196,7 +196,7 @@ def _attach_records(records, declared_types, reportable):
         e["record_type"] = r.get(type_key) if type_key else None
 
 
-def inventory(output, records, output_dir, top=5):
+def inventory(output_json, records, output_dir, top=5):
     """The single source of ranking truth. -> dict, shared with retention.py.
 
     The ranking (best first), the checkpoint files on disk, and — already joined —
@@ -209,21 +209,21 @@ def inventory(output, records, output_dir, top=5):
     can be reported — the file-matched set and the top `top` — so read them with
     `.get()`; `record_index` rehydrates any other entry from the caller's own list.
     """
-    ck = (output.get("checkpoints") or {})
+    ck = (output_json.get("checkpoints") or {})
     sel = ck.get("selection") or {}
     best_by = sel.get("best_by") or ""
     raw_direction = sel.get("direction") or ""
     direction = normalize_direction(raw_direction)
     pattern = ck.get("path_pattern") or ""
 
-    findings = _check_selection(output, records, best_by, direction, raw_direction)
+    findings = _check_selection(output_json, records, best_by, direction, raw_direction)
     ranked, rank_findings = _rank(records, best_by, direction)
     findings += rank_findings
     files, file_findings = _scan_files(pattern, output_dir, ranked, best_by)
     findings += file_findings
 
     ranked_with_files = [e for e in ranked if e.get("file")]
-    _attach_records(records, (output.get("metrics") or {}).get("record_types"),
+    _attach_records(records, (output_json.get("metrics") or {}).get("record_types"),
                     ranked[:top] + ranked_with_files)
 
     return {"best_by": best_by, "direction": direction, "pattern": pattern,
@@ -258,9 +258,9 @@ def _cross_check_script_best(output_dir, chosen, findings):
     return script_best
 
 
-def select(output, records, output_dir, top=5):
+def select(output_json, records, output_dir, top=5):
     """-> report dict with the chosen checkpoint plus the evidence for it."""
-    inv = inventory(output, records, output_dir, top=top)
+    inv = inventory(output_json, records, output_dir, top=top)
     findings = list(inv["findings"])
     ranked, with_files = inv["ranked"], inv["ranked_with_files"]
     best_by = inv["best_by"]
@@ -321,12 +321,12 @@ def main(argv=None):
     args = ap.parse_args(argv)
 
     try:
-        output, records, _, kind = load_inputs(args.output_json, args.jsonl, args.run_dir)
+        output_json, records, _, kind = load_inputs(args.output_json, args.jsonl, args.run_dir)
     except StreamError as e:
         sys.stderr.write(f"select_checkpoint: {e}\n")
         return 2
 
-    report = select(output, records, args.output_dir, args.top)
+    report = select(output_json, records, args.output_dir, args.top)
     # Ranking off an un-normalized source is the case that matters most: for a
     # tfevents source there is nothing readable at metrics.log_path at all.
     unnormalized = unnormalized_finding(kind, args.jsonl or args.run_dir)
