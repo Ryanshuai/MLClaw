@@ -121,15 +121,15 @@ def load_run_file(path):
     """Load one run.json into a dict. Raises RunQueryError with a short reason."""
     try:
         with open(path, encoding="utf-8") as fh:
-            data = json.load(fh)
+            run = json.load(fh)
     except ValueError as exc:            # JSONDecodeError
         raise RunQueryError("invalid JSON: %s" % exc)
     except (OSError, UnicodeDecodeError) as exc:
         raise RunQueryError("%s: %s" % (type(exc).__name__, exc))
-    if not isinstance(data, dict):
+    if not isinstance(run, dict):
         raise RunQueryError("top-level JSON is %s, expected an object"
-                            % type(data).__name__)
-    return data
+                            % type(run).__name__)
+    return run
 
 
 def scan(root, stage=None):
@@ -356,19 +356,19 @@ def list_all_modes_not_comparable(root, stage=None, status=None, session="*",
     entry with `not_comparable_reason`, so a mixed population cannot be mistaken
     downstream for a ranked one.
     """
-    result = _gather(root, stage, None, status, session, code_commit,
+    report = _gather(root, stage, None, status, session, code_commit,
                      sort_by, descending, limit)
     mixed = "/".join(MODES)
-    for entry in result["matched"]:
+    for entry in report["matched"]:
         entry["not_comparable_reason"] = (
             "listed with the mode filter off — this population mixes %s "
             "workloads" % mixed)
-    result["filters"]["mode"] = "ALL_MODES_NOT_COMPARABLE"
-    result["warnings"].insert(0, (
+    report["filters"]["mode"] = "ALL_MODES_NOT_COMPARABLE"
+    report["warnings"].insert(0, (
         "MODE FILTER OFF — these entries mix %s workloads. Use for listing and "
         "menus only; do not rank, diff, or aggregate their metrics. See "
         "lifecycle/references/run-mechanics.md 'Metric comparability'." % mixed))
-    return result
+    return report
 
 
 # ── CLI ──────────────────────────────────────────────────────────────────────
@@ -423,15 +423,15 @@ def main(argv=None):
                   descending=not args.asc, limit=args.limit)
 
     if args.all_modes_not_comparable:
-        result = list_all_modes_not_comparable(args.root, **common)
+        report = list_all_modes_not_comparable(args.root, **common)
     else:
-        result = query_comparable_runs(args.root, mode=args.mode, **common)
+        report = query_comparable_runs(args.root, mode=args.mode, **common)
 
-    json.dump(result, sys.stdout, indent=2, default=str)
+    json.dump(report, sys.stdout, indent=2, default=str)
     sys.stdout.write("\n")
-    for err in result["errors"]:
+    for err in report["errors"]:
         sys.stderr.write("list_runs: skipped %s: %s\n" % (err["path"], err["error"]))
-    for warning in result["warnings"]:
+    for warning in report["warnings"]:
         sys.stderr.write("list_runs: warning: %s\n" % warning)
     return 0
 
