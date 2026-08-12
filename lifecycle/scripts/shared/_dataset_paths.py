@@ -28,6 +28,12 @@ from _records import read_json  # noqa: E402
 
 CENSUS_PREFIX = "census_"
 
+# `dataset.json -> replication.min_source_copies`, when the field is absent.
+# Was two independent `or 2` fallbacks (census.py and retire.py each wrote the
+# literal) -- the same drift this module's docstring already describes for
+# dataset_dir/latest_census, just in a config default instead of a path.
+DEFAULT_MIN_SOURCE_COPIES = 2
+
 
 def dataset_dir(project, dataset):
     """`{PROJECT}/datasets/<id>/`. Expands `~` here rather than trusting every

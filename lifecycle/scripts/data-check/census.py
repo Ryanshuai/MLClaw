@@ -83,7 +83,7 @@ from datetime import datetime, timezone
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__))), "shared"))
 from _records import (atomic_write_json, now_utc, read_json)  # noqa: E402
-from _dataset_paths import dataset_dir, latest_census_path  # noqa: E402
+from _dataset_paths import DEFAULT_MIN_SOURCE_COPIES, dataset_dir, latest_census_path  # noqa: E402
 
 # A label goes into a shell variable list as `label:marker`, and into a comma
 # separated field on the way back. Either character would silently corrupt the
@@ -321,7 +321,8 @@ def compute(cfg: dict, scans: dict) -> dict:
     by_label = {l["label"]: l for l in layers}
     locs = {x["key"]: x for x in cfg["locations"]}
     live = [k for k, s in scans.items() if s.get("reachable")]
-    min_copies = int((cfg.get("replication") or {}).get("min_source_copies") or 2)
+    min_copies = int((cfg.get("replication") or {}).get("min_source_copies")
+                    or DEFAULT_MIN_SOURCE_COPIES)
     comp = cfg.get("completeness") or {}
     has_marker = bool(comp.get("marker"))
 

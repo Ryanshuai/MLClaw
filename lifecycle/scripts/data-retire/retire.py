@@ -51,7 +51,7 @@ from datetime import datetime, timezone
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__))), "shared"))
 from _records import (atomic_write_json, broke, emit, now_utc, read_json, refuse)  # noqa: E402
-from _dataset_paths import dataset_dir, latest_census  # noqa: E402
+from _dataset_paths import DEFAULT_MIN_SOURCE_COPIES, dataset_dir, latest_census  # noqa: E402
 
 OK = "__MLCLAW_RETIRE_OK__"
 
@@ -220,7 +220,8 @@ def cmd_plan(a) -> None:
                    "proceed knowing these were never consulted")
 
     units = census.get("units") or {}
-    min_copies = int((cfg.get("replication") or {}).get("min_source_copies") or 2)
+    min_copies = int((cfg.get("replication") or {}).get("min_source_copies")
+                    or DEFAULT_MIN_SOURCE_COPIES)
     source_layers = {l["label"] for l in cfg.get("layers") or []
                      if l.get("kind") in ("source", "human_locked")}
 
