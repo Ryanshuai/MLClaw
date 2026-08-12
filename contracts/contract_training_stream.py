@@ -27,15 +27,25 @@ st = load_script("train-run/_stream.py")
 ACCS = {1: 0.80, 2: 0.88, 3: 0.94, 4: 0.91, 5: 0.90}
 
 
-def stream_records(accs=None, done=True):
-    accs = accs or ACCS
+def _step_and_epoch_records(accs):
     out = []
     for e, a in accs.items():
         out.append({"type": "train_step", "step": e * 100, "loss": 1.0 / e, "lr": 1e-3})
         out.append({"type": "val_epoch", "epoch": e, "val_loss": 1.5 - a, "val_acc": a})
-    if done:
-        out.append({"type": "done", "epoch": max(accs)})
     return out
+
+
+def stream_records(accs=None):
+    accs = accs or ACCS
+    return _step_and_epoch_records(accs) + [{"type": "done", "epoch": max(accs)}]
+
+
+def incomplete_stream_records(accs=None):
+    """A stream that never emits the `done` record type -- the one shape
+    `stream_records` cannot produce, for the test that needs a run to look
+    still-in-progress."""
+    accs = accs or ACCS
+    return _step_and_epoch_records(accs)
 
 
 def output_json(**over):
@@ -141,7 +151,7 @@ class ReconcileMetrics(Fixture):
         self.assertIn("direction_contradicts_name", self.codes(r["findings"]))
 
     def test_declared_record_type_never_emitted(self):
-        r = rm.reconcile(output_json(), stream_records(done=False), [])
+        r = rm.reconcile(output_json(), incomplete_stream_records(), [])
         self.assertIn("record_type_never_emitted", self.codes(r["findings"]))
 
     def test_declared_field_never_emitted(self):
