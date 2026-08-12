@@ -1554,38 +1554,11 @@ def _sample_objects(lead):
     return objects
 
 
-def anomalies(leads):
-    """-> the things worth a second look, computed rather than noticed.
-
-    Everything here is mechanical. That is the point and also the limit: a script
-    can say two objects share a name and a byte count, and cannot say whether that
-    matters. So each entry carries what was observed and what it would mean, and
-    the judgment stays with whoever reads it.
-
-    The detectors, and why each one earned its place:
-
-      status_flip          `verified` -> `gone` is data that disappeared between
-                           two probes, which is the single most urgent thing this
-                           tool can find. The reverse means an earlier probe was
-                           wrong, and every conclusion drawn from it is suspect.
-      duplicate_objects    same basename AND same byte count in two locations.
-                           The Kontoor handover page says this out loud — the
-                           fine-tune sets live in two prefixes and "sizes and
-                           dates are the only way to tell copies apart" — which
-                           is a job for a script, not a person.
-      verified_but_empty   a location that answered and holds nothing. Not `gone`
-                           (the path is there) and not a finding (nothing is in
-                           it), so it falls between the statuses and would
-                           otherwise read as a success.
-      source_now_doubted   a source whose claims a probe has already contradicted.
-                           One wrong path on a page does not make the page useless,
-                           but it does change what the REST of it is worth, and
-                           nothing else in the record carries that.
-      claim_never_checked  a `claim` old enough that nobody is going to check it.
-                           Recorded is not verified, and the gap widens silently.
-    """
+def _detect_status_flip(leads):
+    """`verified` -> `gone` is data that disappeared between two probes, which
+    is the single most urgent thing this tool can find. The reverse means an
+    earlier probe was wrong, and every conclusion drawn from it is suspect."""
     findings = []
-
     for l in leads:
         probes = l.get("probes") or []
         probe_statuses = [p.get("result") for p in probes]
@@ -1609,7 +1582,15 @@ def anomalies(leads):
                     "means": "an earlier probe said absent and was wrong. Anything "
                              "decided on that reading needs revisiting, and the "
                              "probe itself may be reporting absence too eagerly"})
+    return findings
 
+
+def _detect_verified_but_empty(leads):
+    """A location that answered and holds nothing. Not `gone` (the path is
+    there) and not a finding (nothing is in it), so it falls between the
+    statuses and would otherwise read as a success."""
+    findings = []
+    for l in leads:
         if l.get("status") == "verified" and (l.get("files") == 0
                                               or l.get("bytes") == 0):
             findings.append({
@@ -1619,7 +1600,15 @@ def anomalies(leads):
                 "means": "not `gone` — the path is there — but nothing is in it. "
                          "Between the statuses, so it reads as a success unless "
                          "somebody says otherwise"})
+    return findings
 
+
+def _detect_duplicate_objects(leads):
+    """Same basename AND same byte count in two locations. The Kontoor
+    handover page says this out loud — the fine-tune sets live in two
+    prefixes and "sizes and dates are the only way to tell copies apart" —
+    which is a job for a script, not a person."""
+    findings = []
     seen = {}
     for l in leads:
         if l.get("status") != "verified":
@@ -1639,7 +1628,14 @@ def anomalies(leads):
                      "any total, and deleting the wrong copy is not obviously a "
                      "deletion. Sizes and names are all a listing gives — a "
                      "checksum would settle it"})
+    return findings
 
+
+def _detect_source_now_doubted(leads):
+    """A source whose claims a probe has already contradicted. One wrong path
+    on a page does not make the page useless, but it does change what the
+    REST of it is worth, and nothing else in the record carries that."""
+    findings = []
     bad_sources = {}
     for l in leads:
         if l.get("status") == "gone" and l.get("evidence"):
@@ -1656,7 +1652,13 @@ def anomalies(leads):
             "means": "one wrong path does not make a source useless, but it "
                      "changes what the rest of it is worth. Re-probe its other "
                      "claims before relying on any of them"})
+    return findings
 
+
+def _detect_claim_never_checked(leads):
+    """A `claim` old enough that nobody is going to check it. Recorded is not
+    verified, and the gap widens silently."""
+    findings = []
     for l in leads:
         if l.get("status") != "claim":
             continue
@@ -1668,7 +1670,25 @@ def anomalies(leads):
                 "observed": f"recorded {age} days ago and never probed",
                 "means": "recorded is not checked. A `claim` this old is one "
                          "nobody is going to get to on their own"})
+    return findings
 
+
+def anomalies(leads):
+    """-> the things worth a second look, computed rather than noticed.
+
+    Everything here is mechanical. That is the point and also the limit: a script
+    can say two objects share a name and a byte count, and cannot say whether that
+    matters. So each entry carries what was observed and what it would mean, and
+    the judgment stays with whoever reads it.
+
+    The five detectors are each their own function (`_detect_*`, above) and why
+    each one earned its place is on that function's docstring — `status_flip`,
+    `duplicate_objects`, `verified_but_empty`, `source_now_doubted`,
+    `claim_never_checked`.
+    """
+    findings = (_detect_status_flip(leads) + _detect_verified_but_empty(leads)
+                + _detect_duplicate_objects(leads) + _detect_source_now_doubted(leads)
+                + _detect_claim_never_checked(leads))
     rank = {"urgent": 0, "watch": 1}
     findings.sort(key=lambda a: (rank.get(a["severity"], 9), a["kind"]))
     return findings

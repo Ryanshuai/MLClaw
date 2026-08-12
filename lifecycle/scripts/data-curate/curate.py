@@ -234,91 +234,109 @@ def find_run(project, ref) -> tuple[dict, str]:
     return rec, f"{stage}/{run_id}"
 
 
-def cmd_register(a) -> None:
-    project = os.path.expanduser(a.project)
-    plan = read_json(os.path.expanduser(a.plan))
-    target = plan["produces"]
+def _refuse_if_already_registered(project, target, out_cfg, re_register):
+    """Retrying a register that went wrong is legitimate; replacing a dataset
+    something has already looked at or cited is not. A census or a snapshot
+    is the evidence that the identity has left this command — after either,
+    re-registering makes existing records describe data that no longer
+    exists in that shape."""
+    if not os.path.exists(out_cfg):
+        return
+    d = dataset_dir(project, target)
+    witnessed = [w for w, sub in (("census", "census"), ("snapshot", "snapshots"))
+                 if os.path.isdir(os.path.join(d, sub))
+                 and os.listdir(os.path.join(d, sub))]
+    if witnessed:
+        refuse(f"dataset {target!r} already has a {' and a '.join(witnessed)}",
+               path=out_cfg,
+               why="the identity has been observed or cited; replacing its "
+                   "contract now makes those records describe something else")
+    if not re_register:
+        refuse(f"dataset {target!r} already has a dataset.json",
+               path=out_cfg,
+               why="registering over it would silently replace one "
+                   "derivation record with another",
+               fix="--re-register if the previous attempt was wrong — "
+                   "nothing has censused or cited this id yet")
 
-    out_cfg = os.path.join(dataset_dir(project, target), "dataset.json")
-    if os.path.exists(out_cfg):
-        # Retrying a register that went wrong is legitimate; replacing a
-        # dataset something has already looked at or cited is not. A census or a
-        # snapshot is the evidence that the identity has left this command —
-        # after either, re-registering makes existing records describe data that
-        # no longer exists in that shape.
-        d = dataset_dir(project, target)
-        witnessed = [w for w, sub in (("census", "census"), ("snapshot", "snapshots"))
-                     if os.path.isdir(os.path.join(d, sub))
-                     and os.listdir(os.path.join(d, sub))]
-        if witnessed:
-            refuse(f"dataset {target!r} already has a {' and a '.join(witnessed)}",
-                   path=out_cfg,
-                   why="the identity has been observed or cited; replacing its "
-                       "contract now makes those records describe something else")
-        if not a.re_register:
-            refuse(f"dataset {target!r} already has a dataset.json",
-                   path=out_cfg,
-                   why="registering over it would silently replace one "
-                       "derivation record with another",
-                   fix="--re-register if the previous attempt was wrong — "
-                       "nothing has censused or cited this id yet")
 
+def _resolve_provenance(project, a, plan):
+    """-> (prov, run_ref, run_status). Either an explicit `--claimed` (a
+    stated reason and no run behind it) or a completed run whose lineage
+    cites every one of the plan's declared parents."""
     if a.claimed:
         if not a.because:
             refuse("--claimed requires --because '<why there is no run>'",
                    why="an unverified derivation is a legitimate record; an "
                        "unverified derivation with no reason given is a hole "
                        "nobody can evaluate later")
-        prov, run_ref, run_status = "claimed", None, None
-    else:
-        rec, run_ref = find_run(project, a.run)
-        run_status = rec.get("status")
-        # --- a run that did not finish did not produce this dataset. The output
-        # directory exists either way, which is the whole problem: a crashed
-        # conversion leaves a partial tree that reads as a complete dataset in
-        # every record that follows. Same shape as CLAUDE.md "Never say a unit
-        # is complete because its directory exists", one level up.
-        if run_status != "completed":
-            refuse(f"run {run_ref} has status {run_status!r}, not 'completed'",
-                   why="a partial output tree is indistinguishable from a whole "
-                       "one once it is registered as a dataset",
-                   fix="finish or rerun it, or register --claimed --because ...")
-        cited = [p for p in (rec.get("lineage") or {}).get("parents") or []
-                 if isinstance(p, str)]
-        missing = [p for p in plan["parents"] if p not in cited]
-        if missing:
-            refuse(f"run {run_ref} does not cite {len(missing)} of the plan's "
-                   f"parents in lineage.parents",
-                   missing=missing, run_cites=cited,
-                   why="CLAUDE.md 'Never let somebody's word become a checked "
-                       "fact' — the run's own record is what makes this edge "
-                       "evidence rather than an assertion",
-                   fix="tag_lineage.py the run, or register --claimed")
-        prov = "run"
+        return "claimed", None, None
 
+    rec, run_ref = find_run(project, a.run)
+    run_status = rec.get("status")
+    # --- a run that did not finish did not produce this dataset. The output
+    # directory exists either way, which is the whole problem: a crashed
+    # conversion leaves a partial tree that reads as a complete dataset in
+    # every record that follows. Same shape as CLAUDE.md "Never say a unit
+    # is complete because its directory exists", one level up.
+    if run_status != "completed":
+        refuse(f"run {run_ref} has status {run_status!r}, not 'completed'",
+               why="a partial output tree is indistinguishable from a whole "
+                   "one once it is registered as a dataset",
+               fix="finish or rerun it, or register --claimed --because ...")
+    cited = [p for p in (rec.get("lineage") or {}).get("parents") or []
+             if isinstance(p, str)]
+    missing = [p for p in plan["parents"] if p not in cited]
+    if missing:
+        refuse(f"run {run_ref} does not cite {len(missing)} of the plan's "
+               f"parents in lineage.parents",
+               missing=missing, run_cites=cited,
+               why="CLAUDE.md 'Never let somebody's word become a checked "
+                   "fact' — the run's own record is what makes this edge "
+                   "evidence rather than an assertion",
+               fix="tag_lineage.py the run, or register --claimed")
+    return "run", run_ref, run_status
+
+
+def _resolve_layout_contract(project, a, plan, run_ref):
+    """-> cfg. Either an explicit `--declare` file, or a layout contract
+    inherited from a `--like` dataset — with `locations` always rebuilt
+    fresh, never inherited."""
     if a.declare:
-        cfg = read_json(os.path.expanduser(a.declare))
-    else:
-        like = a.like or plan.get("like") or parse_cite(plan["parents"][0])[0]
-        parent_cfg = read_json(os.path.join(dataset_dir(project, like), "dataset.json"),
-                               required=False)
-        if parent_cfg is None:
-            refuse(f"cannot inherit a layout contract: no dataset.json for "
-                   f"{like!r}",
-                   fix="--declare <file> with the new dataset's own contract, "
-                       "or --like <an existing dataset>")
-        cfg = {k: parent_cfg[k] for k in INHERITED if k in parent_cfg}
-        cfg["description"] = a.note or plan.get("note")
-        # Locations are never inherited: the derived data is somewhere new by
-        # construction, and copying the parent's roots would declare the output
-        # to be at machines that have never held it.
-        cfg["locations"] = [{
-            "key": plan.get("at") or "local",
-            "role": "authority", "via": "local", "server": None,
-            "root": plan["into"], "has_layers": None,
-            "note": f"written by {run_ref or 'an unrecorded process'}",
-        }]
-        cfg["consumers"] = []
+        return read_json(os.path.expanduser(a.declare))
+
+    like = a.like or plan.get("like") or parse_cite(plan["parents"][0])[0]
+    parent_cfg = read_json(os.path.join(dataset_dir(project, like), "dataset.json"),
+                           required=False)
+    if parent_cfg is None:
+        refuse(f"cannot inherit a layout contract: no dataset.json for "
+               f"{like!r}",
+               fix="--declare <file> with the new dataset's own contract, "
+                   "or --like <an existing dataset>")
+    cfg = {k: parent_cfg[k] for k in INHERITED if k in parent_cfg}
+    cfg["description"] = a.note or plan.get("note")
+    # Locations are never inherited: the derived data is somewhere new by
+    # construction, and copying the parent's roots would declare the output
+    # to be at machines that have never held it.
+    cfg["locations"] = [{
+        "key": plan.get("at") or "local",
+        "role": "authority", "via": "local", "server": None,
+        "root": plan["into"], "has_layers": None,
+        "note": f"written by {run_ref or 'an unrecorded process'}",
+    }]
+    cfg["consumers"] = []
+    return cfg
+
+
+def cmd_register(a) -> None:
+    project = os.path.expanduser(a.project)
+    plan = read_json(os.path.expanduser(a.plan))
+    target = plan["produces"]
+
+    out_cfg = os.path.join(dataset_dir(project, target), "dataset.json")
+    _refuse_if_already_registered(project, target, out_cfg, a.re_register)
+    prov, run_ref, run_status = _resolve_provenance(project, a, plan)
+    cfg = _resolve_layout_contract(project, a, plan, run_ref)
 
     cfg["dataset_id"] = target
     cfg["project"] = project
