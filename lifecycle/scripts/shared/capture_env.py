@@ -48,15 +48,15 @@ def get_pip_packages(package_list):
 
 
 def get_gpu_info():
-    info = {"nvidia_driver": None, "gpu": None, "gpu_count": 0}
+    gpu_info = {"nvidia_driver": None, "gpu": None, "gpu_count": 0}
     output = run_cmd(["nvidia-smi", "--query-gpu=name,driver_version,count", "--format=csv,noheader,nounits"])
     if output:
         parts = output.splitlines()[0].split(", ")
         if len(parts) >= 2:
-            info["gpu"] = parts[0].strip()
-            info["nvidia_driver"] = parts[1].strip()
-        info["gpu_count"] = len(output.splitlines())
-    return info
+            gpu_info["gpu"] = parts[0].strip()
+            gpu_info["nvidia_driver"] = parts[1].strip()
+        gpu_info["gpu_count"] = len(output.splitlines())
+    return gpu_info
 
 
 def get_cuda_version():
