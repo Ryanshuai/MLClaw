@@ -104,24 +104,31 @@ def snapshot_units(snap) -> set[str]:
     caller already refuses (or requires --allow-unreadable-snapshots) for the
     whole-file version of this same failure two lines below."""
     path = os.path.join(snap["_dir"], snap.get("manifest") or "manifest.jsonl")
-    units = set()
     try:
         with open(path, encoding="utf-8") as fh:
-            for line in fh:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    rec = json.loads(line)
-                except json.JSONDecodeError:
-                    return None
-                if "unit" in rec:
-                    units.add(rec["unit"])
+            return _manifest_unit_ids(fh)
     except FileNotFoundError:
         # A snapshot whose manifest is missing cannot be checked against, and a
         # snapshot that cannot be checked against must not read as "names
         # nothing". Signalled by the caller as an unusable snapshot.
         return None
+
+
+def _manifest_unit_ids(fh) -> set[str] | None:
+    """-> the unit ids named on each non-blank line, or None the moment one
+    line fails to parse — see `snapshot_units`' docstring for why that is
+    `None` and not a silently-skipped line."""
+    units = set()
+    for line in fh:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            rec = json.loads(line)
+        except json.JSONDecodeError:
+            return None
+        if "unit" in rec:
+            units.add(rec["unit"])
     return units
 
 

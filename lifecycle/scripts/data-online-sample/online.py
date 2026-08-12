@@ -286,42 +286,36 @@ def digest(ids: list[str]) -> str:
 # sample
 # --------------------------------------------------------------------------- #
 
-def _enumerate_units(a, online, prefixes, project):
-    """-> (ids, paths, unreachable, missing). Either read from an external
-    tool's own enumeration (--units-from) or list every expanded prefix.
+def _units_from_file(units_from):
+    """-> (ids, paths). Reads an external tool's own enumeration, one unit per
+    line as `unit_id[\\tpath]` — see `_enumerate_units` for why this branch is
+    first-class rather than a fallback."""
+    ids, paths = [], {}
+    try:
+        with open(units_from, encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                uid, _, p = line.partition("\t")
+                ids.append(uid)
+                if p:
+                    paths[uid] = p
+    except OSError as e:
+        broke(f"cannot read --units-from: {e}")
+    if not ids:
+        refuse(f"{units_from} lists no units",
+               why="an empty enumeration from an external tool is not a "
+                   "quiet window — nothing here can tell those apart, which "
+                   "is exactly why it is not assumed")
+    return ids, paths
 
-    First-class, not a fallback: whatever a project's layout is, its own
-    tooling can enumerate it; this records that rather than reimplementing
-    it. The trade is stated in the record: nothing here looked, so
-    reachability is somebody else's claim.
-    """
+
+def _units_from_prefixes(online, prefixes, resources, project):
+    """-> (ids, paths, unreachable, missing). Lists every expanded prefix."""
     ids, paths, unreachable, missing = [], {}, [], []
-
-    if a.units_from:
-        try:
-            with open(a.units_from, encoding="utf-8") as fh:
-                for line in fh:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    uid, _, p = line.partition("\t")
-                    ids.append(uid)
-                    if p:
-                        paths[uid] = p
-        except OSError as e:
-            broke(f"cannot read --units-from: {e}")
-        if not ids:
-            refuse(f"{a.units_from} lists no units",
-                   why="an empty enumeration from an external tool is not a "
-                       "quiet window — nothing here can tell those apart, which "
-                       "is exactly why it is not assumed")
-        return ids, paths, unreachable, missing
-
-    if online["partition"] == "external":
-        broke("this dataset declares partition `external`, so a reading "
-              "needs --units-from: nothing here expands the window")
     for pref in prefixes:
-        r = list_prefix(online, pref, a.resources, project)
+        r = list_prefix(online, pref, resources, project)
         if not r["reachable"]:
             unreachable.append({"prefix": pref, "error": r.get("error")})
             continue
@@ -332,6 +326,25 @@ def _enumerate_units(a, online, prefixes, project):
             ids.append(uid)
             paths[uid] = f"{pref.rstrip('/')}/{uid}"
     return ids, paths, unreachable, missing
+
+
+def _enumerate_units(a, online, prefixes, project):
+    """-> (ids, paths, unreachable, missing). Either read from an external
+    tool's own enumeration (--units-from) or list every expanded prefix.
+
+    First-class, not a fallback: whatever a project's layout is, its own
+    tooling can enumerate it; this records that rather than reimplementing
+    it. The trade is stated in the record: nothing here looked, so
+    reachability is somebody else's claim.
+    """
+    if a.units_from:
+        ids, paths = _units_from_file(a.units_from)
+        return ids, paths, [], []
+
+    if online["partition"] == "external":
+        broke("this dataset declares partition `external`, so a reading "
+              "needs --units-from: nothing here expands the window")
+    return _units_from_prefixes(online, prefixes, a.resources, project)
 
 
 def cmd_sample(a) -> None:

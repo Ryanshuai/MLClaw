@@ -90,45 +90,47 @@ def run_probe(cmd):
     return "ok", p.stdout.strip()
 
 
+def _assess_row(name, f, probe):
+    """One fact's row: state + observed value, against the hardware if a
+    probe actually ran."""
+    row = {"fact": name, "on_change": f["on_change"],
+           "runtime_only": bool(f.get("runtime_only")),
+           "recorded": f.get("value"), "evidence": f.get("evidence"),
+           "observed": None, "state": None}
+
+    if not f.get("probe"):
+        # No probe means no tripwire. For a `shifts` fact that is a stated
+        # risk, and it has to read as one: the whole point of `shifts` is
+        # that its change is invisible, so an unwatchable one is invisible
+        # twice over.
+        row["state"] = "unwatchable" if f["on_change"] == "shifts" else "no_probe"
+    elif not probe:
+        # "Not checked" and "checked, unchanged" are different facts, and
+        # collapsing them is the extraction-failure-vs-absence bug from
+        # run-mechanics.md "Record integrity".
+        row["state"] = "not_checked"
+    else:
+        status, probe_out = run_probe(f["probe"])
+        if status != "ok":
+            row["state"] = "probe_failed"
+            row["detail"] = probe_out
+        elif f.get("runtime_only"):
+            # Nothing to compare against by construction; the reading IS
+            # the product, and it goes into the stamp.
+            row["observed"] = probe_out
+            row["state"] = "read"
+        elif str(f.get("value")) == probe_out:
+            row["observed"] = probe_out
+            row["state"] = "match"
+        else:
+            row["observed"] = probe_out
+            row["state"] = "CHANGED"
+    return row
+
+
 def assess(facts, *, probe):
     """Compare every probeable fact against what the hardware says now."""
-    rows = []
-    for name in sorted(facts):
-        f = facts[name]
-        row = {"fact": name, "on_change": f["on_change"],
-               "runtime_only": bool(f.get("runtime_only")),
-               "recorded": f.get("value"), "evidence": f.get("evidence"),
-               "observed": None, "state": None}
-
-        if not f.get("probe"):
-            # No probe means no tripwire. For a `shifts` fact that is a stated
-            # risk, and it has to read as one: the whole point of `shifts` is
-            # that its change is invisible, so an unwatchable one is invisible
-            # twice over.
-            row["state"] = "unwatchable" if f["on_change"] == "shifts" else "no_probe"
-        elif not probe:
-            # "Not checked" and "checked, unchanged" are different facts, and
-            # collapsing them is the extraction-failure-vs-absence bug from
-            # run-mechanics.md "Record integrity".
-            row["state"] = "not_checked"
-        else:
-            status, probe_out = run_probe(f["probe"])
-            if status != "ok":
-                row["state"] = "probe_failed"
-                row["detail"] = probe_out
-            elif f.get("runtime_only"):
-                # Nothing to compare against by construction; the reading IS
-                # the product, and it goes into the stamp.
-                row["observed"] = probe_out
-                row["state"] = "read"
-            elif str(f.get("value")) == probe_out:
-                row["observed"] = probe_out
-                row["state"] = "match"
-            else:
-                row["observed"] = probe_out
-                row["state"] = "CHANGED"
-        rows.append(row)
-    return rows
+    return [_assess_row(name, facts[name], probe) for name in sorted(facts)]
 
 
 def summarize(rows):

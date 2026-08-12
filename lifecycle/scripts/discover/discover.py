@@ -964,14 +964,22 @@ def local_checkpoints(project, resources, cap=200):
             roots.append(p)
     hits = []
     for root in roots:
-        for dirpath, dirs, names in os.walk(root, onerror=lambda e: None):
-            dirs[:] = [d for d in dirs if not d.startswith((".git", "__pycache__"))]
-            for n in names:
-                if n.endswith((".pt", ".pth", ".ckpt", ".safetensors")):
-                    hits.append(os.path.join(dirpath, n))
-                    if len(hits) >= cap:
-                        return sorted(hits)
+        _checkpoint_paths_under(root, hits, cap)
+        if len(hits) >= cap:
+            return sorted(hits)
     return sorted(hits)
+
+
+def _checkpoint_paths_under(root, hits, cap):
+    """Walk one root, appending checkpoint-shaped file paths to `hits` in
+    place, stopping the moment `cap` is reached."""
+    for dirpath, dirs, names in os.walk(root, onerror=lambda e: None):
+        dirs[:] = [d for d in dirs if not d.startswith((".git", "__pycache__"))]
+        for n in names:
+            if n.endswith((".pt", ".pth", ".ckpt", ".safetensors")):
+                hits.append(os.path.join(dirpath, n))
+                if len(hits) >= cap:
+                    return
 
 
 def cmd_introspect(a) -> None:

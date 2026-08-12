@@ -209,10 +209,10 @@ def aws_env(resources):
     return env, f"resources.json -> aws.access_key_id (…{key[-4:]})", True
 
 
-def probe_s3(path, resources, budget_s):
-    if not path.startswith("s3://"):
-        return "unreachable", "not an s3:// path", None, {"blocker": "s3:bad_uri"}
-    env, where, registered = aws_env(resources)
+def _run_s3_ls(path, env, budget_s):
+    """-> (proc, early_return). `early_return` is a full `probe_s3` tuple to
+    hand straight back when the subprocess itself never produced a listing;
+    `None` means it ran and `proc` is ready for the exit-code branch."""
     try:
         # `--summarize --recursive` is the only way to get a real total, and it
         # is also what makes this the slow probe. Bounded like the local walk.
@@ -220,50 +220,60 @@ def probe_s3(path, resources, budget_s):
                            capture_output=True, text=True, encoding="utf-8", env=env,
                            timeout=max(60.0, budget_s * 4))
     except FileNotFoundError:
-        return ("unreachable", "the aws CLI is not installed", None,
-                {"blocker": "s3:no_cli"})
+        return None, ("unreachable", "the aws CLI is not installed", None,
+                      {"blocker": "s3:no_cli"})
     except subprocess.TimeoutExpired:
-        return ("unreachable",
-                f"the recursive listing exceeded its budget — size is NOT "
-                f"MEASURED; the prefix may still be fine", None, {})
+        return None, ("unreachable",
+                      f"the recursive listing exceeded its budget — size is NOT "
+                      f"MEASURED; the prefix may still be fine", None, {})
     except OSError as exc:
-        return "unreachable", f"{type(exc).__name__}: {exc}", None, {}
-    if p.returncode != 0:
-        err = (p.stderr or "").strip()
-        # An empty prefix exits NON-ZERO. `aws s3 ls` returns 1 when it matched
-        # nothing, which is indistinguishable from failure by exit code alone —
-        # and that is why `--summarize` is worth its cost: it prints
-        # "Total Objects: 0" only when the listing actually RAN. Sentinel present
-        # and stderr empty is therefore a real reading, and this is the one place
-        # in the S3 probe where `gone` is earned rather than guessed. The same
-        # both-signals discipline as the ssh probe, inverted: there a zero exit
-        # needs a sentinel to be believed, here a non-zero exit needs one to be
-        # forgiven.
-        if not err and "Total Objects: 0" in (p.stdout or ""):
-            return ("gone",
-                    f"the prefix listed successfully and holds no objects "
-                    f"[credential: {where}]", None, {"blocker": None})
-        # Beyond that, an auth failure and an empty prefix are opposite
-        # conclusions and both exit non-zero. Only credential and access wording
-        # is allowed to mean "could not look".
-        low = err.lower()
-        if any(k in low for k in ("credential", "accessdenied", "access denied",
-                                  "expired", "unable to locate", "forbidden",
-                                  "invalidaccesskey")):
-            # Two different asks, so two different blockers. A registered key that
-            # is refused needs a POLICY change from whoever owns the bucket; no
-            # registered key needs a key. Collapsing them sends somebody to
-            # request access they already have — and the worklist groups on the
-            # blocker, so this is the line that decides what they go and ask for.
-            return ("unreachable", f"{last_meaningful(err)} [credential: {where}]",
-                    None, {"blocker": "s3:denied_with_registered_key" if registered
-                           else "s3:no_usable_credential"})
-        if "nosuchbucket" in low.replace(" ", ""):
-            return "gone", last_meaningful(err), None, {}
-        return ("unreachable", f"aws exit {p.returncode}: {last_meaningful(err)}",
-                None, {"blocker": f"s3:exit_{p.returncode}"})
+        return None, ("unreachable", f"{type(exc).__name__}: {exc}", None, {})
+    return p, None
 
-    lines = [x.strip() for x in p.stdout.splitlines() if x.strip()]
+
+def _s3_nonzero_verdict(p, where, registered):
+    """`p.returncode != 0` -> a full `probe_s3` tuple. An empty prefix and a
+    denied credential both exit non-zero, and telling them apart is the whole
+    job of this branch — see the comments inline, they are the contract."""
+    err = (p.stderr or "").strip()
+    # An empty prefix exits NON-ZERO. `aws s3 ls` returns 1 when it matched
+    # nothing, which is indistinguishable from failure by exit code alone —
+    # and that is why `--summarize` is worth its cost: it prints
+    # "Total Objects: 0" only when the listing actually RAN. Sentinel present
+    # and stderr empty is therefore a real reading, and this is the one place
+    # in the S3 probe where `gone` is earned rather than guessed. The same
+    # both-signals discipline as the ssh probe, inverted: there a zero exit
+    # needs a sentinel to be believed, here a non-zero exit needs one to be
+    # forgiven.
+    if not err and "Total Objects: 0" in (p.stdout or ""):
+        return ("gone",
+                f"the prefix listed successfully and holds no objects "
+                f"[credential: {where}]", None, {"blocker": None})
+    # Beyond that, an auth failure and an empty prefix are opposite
+    # conclusions and both exit non-zero. Only credential and access wording
+    # is allowed to mean "could not look".
+    low = err.lower()
+    if any(k in low for k in ("credential", "accessdenied", "access denied",
+                              "expired", "unable to locate", "forbidden",
+                              "invalidaccesskey")):
+        # Two different asks, so two different blockers. A registered key that
+        # is refused needs a POLICY change from whoever owns the bucket; no
+        # registered key needs a key. Collapsing them sends somebody to
+        # request access they already have — and the worklist groups on the
+        # blocker, so this is the line that decides what they go and ask for.
+        return ("unreachable", f"{last_meaningful(err)} [credential: {where}]",
+                None, {"blocker": "s3:denied_with_registered_key" if registered
+                       else "s3:no_usable_credential"})
+    if "nosuchbucket" in low.replace(" ", ""):
+        return "gone", last_meaningful(err), None, {}
+    return ("unreachable", f"aws exit {p.returncode}: {last_meaningful(err)}",
+            None, {"blocker": f"s3:exit_{p.returncode}"})
+
+
+def _parse_s3_summary(stdout):
+    """-> (object_lines, size). Reads the `--summarize` totals out of a
+    successful `aws s3 ls --recursive --summarize` stdout."""
+    lines = [x.strip() for x in stdout.splitlines() if x.strip()]
     object_lines = [x for x in lines if not x.startswith("Total ")]
     size = {"bytes": None, "files": None}
     for ln in lines:
@@ -277,6 +287,20 @@ def probe_s3(path, resources, budget_s):
                 size["bytes"] = int(ln.split(":", 1)[1].strip())
             except ValueError:
                 pass
+    return object_lines, size
+
+
+def probe_s3(path, resources, budget_s):
+    if not path.startswith("s3://"):
+        return "unreachable", "not an s3:// path", None, {"blocker": "s3:bad_uri"}
+    env, where, registered = aws_env(resources)
+    p, early_return = _run_s3_ls(path, env, budget_s)
+    if early_return is not None:
+        return early_return
+    if p.returncode != 0:
+        return _s3_nonzero_verdict(p, where, registered)
+
+    object_lines, size = _parse_s3_summary(p.stdout)
     if not object_lines and not size["files"]:
         # Require POSITIVE evidence that the listing completed before calling a
         # prefix empty — the same reason census.py wants a sentinel and not just

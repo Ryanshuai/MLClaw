@@ -120,6 +120,37 @@ def session_path(project, run_id, sid) -> str:
 # reading the per-sample file
 # --------------------------------------------------------------------------- #
 
+def _load_jsonl_records(fh, path):
+    """One dict per non-blank line of a jsonl file; a malformed line is fatal
+    (`broke`), not silently skipped — a line-level parse error is a different
+    fact from an empty file and must not be laundered into one."""
+    records = []
+    for n, line in enumerate(fh, 1):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            rec = json.loads(line)
+        except json.JSONDecodeError as exc:
+            broke(f"{path}:{n} is not valid JSON: {exc}")
+        if isinstance(rec, dict):
+            records.append(rec)
+    return records
+
+
+def _load_json_records(fh, path, records_at):
+    """A JSON array of dicts, optionally nested under the `records_at` key."""
+    blob = json.load(fh)
+    if records_at:
+        if not isinstance(blob, dict) or records_at not in blob:
+            broke(f"records_at {records_at!r} is not a key in {path}")
+        blob = blob[records_at]
+    if not isinstance(blob, list):
+        broke(f"{path} does not hold an array of records"
+              f"{' at ' + records_at if records_at else ''}")
+    return [r for r in blob if isinstance(r, dict)]
+
+
 def load_records(path, fmt, records_at):
     """The per-sample file as a list of dicts.
 
@@ -140,28 +171,9 @@ def load_records(path, fmt, records_at):
     try:
         with open(path, encoding="utf-8") as fh:
             if fmt == "jsonl":
-                records = []
-                for n, line in enumerate(fh, 1):
-                    line = line.strip()
-                    if not line:
-                        continue
-                    try:
-                        rec = json.loads(line)
-                    except json.JSONDecodeError as exc:
-                        broke(f"{path}:{n} is not valid JSON: {exc}")
-                    if isinstance(rec, dict):
-                        records.append(rec)
-                return records
+                return _load_jsonl_records(fh, path)
             if fmt == "json":
-                blob = json.load(fh)
-                if records_at:
-                    if not isinstance(blob, dict) or records_at not in blob:
-                        broke(f"records_at {records_at!r} is not a key in {path}")
-                    blob = blob[records_at]
-                if not isinstance(blob, list):
-                    broke(f"{path} does not hold an array of records"
-                          f"{' at ' + records_at if records_at else ''}")
-                return [r for r in blob if isinstance(r, dict)]
+                return _load_json_records(fh, path, records_at)
             if fmt == "csv":
                 return list(csv.DictReader(io.StringIO(fh.read())))
         broke(f"unknown per_sample.format: {fmt!r} (jsonl | json | csv)")
