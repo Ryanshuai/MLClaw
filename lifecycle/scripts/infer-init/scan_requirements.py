@@ -6,7 +6,6 @@ import sys
 
 
 def parse_requirements_txt(path):
-    """Parse requirements.txt format."""
     pkgs = {}
     with open(path) as f:
         for line in f:
