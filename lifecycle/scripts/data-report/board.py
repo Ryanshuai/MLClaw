@@ -65,6 +65,15 @@ VERDICTS = [
 HERE = os.path.dirname(os.path.abspath(__file__))
 PHASE_PY = os.path.join(HERE, "..", "data", "phase.py")
 
+# `gather()` below shells out to PHASE_PY for the actual "phase"/"history" work
+# (a second Python implementation of that join is a second set of answers, see
+# phase.py's own docstring) -- but this script's own --stale-days default still
+# needs a value to show before phase.py ever runs, and it must be the same
+# value phase.py would pick on its own. Imported, so the two cannot drift the
+# way two independently-typed `14.0` literals eventually would.
+sys.path.insert(0, os.path.join(HERE, "..", "data"))
+from phase import DEFAULT_STALE_DAYS  # noqa: E402
+
 
 def e(x):
     return html.escape("" if x is None else str(x))
@@ -547,7 +556,7 @@ def main():
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     p.add_argument("--project", required=True)
     p.add_argument("--out", default=None, help="default: <project>/data_board.html")
-    p.add_argument("--stale-days", type=float, default=14.0)
+    p.add_argument("--stale-days", type=float, default=DEFAULT_STALE_DAYS)
     p.add_argument("--last", type=int, default=20,
                    help="columns to draw, most recent first (default 20). A grid "
                         "wider than a screen stops being scannable, which is the "
