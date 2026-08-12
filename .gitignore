@@ -20,3 +20,8 @@ __pycache__/
 # skill-creator 的脚手架和工作目录
 .claude/skills/skill-creator/
 skill-creator-workspace/
+
+# SkillOpt-Sleep 的工作目录（staging 产物 + handoff 中间态，含每晚归档的 .doneNN 变体）
+.skillopt-sleep/
+.skillopt-sleep-handoff/
+.skillopt-sleep-handoff.night*.done/
