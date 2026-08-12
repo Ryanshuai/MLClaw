@@ -875,15 +875,37 @@ def cmd_resolve(a) -> None:
 
 # -------------------------------------------------------------------- status
 
-def cmd_status(a) -> None:
-    """Records only — no network. Safe for "On Conversation Start"."""
+def _status_projects(a) -> list[str]:
+    """Every project to report on: the workspace's declared ones, or just `a.project`."""
     if a.workspace:
         root = os.path.expanduser(a.workspace)
-        projects = [os.path.join(root, n) for n in sorted(os.listdir(root))
-                    if os.path.isfile(os.path.join(root, n, "project.json"))]
-    else:
-        projects = [os.path.expanduser(a.project)]
+        return [os.path.join(root, n) for n in sorted(os.listdir(root))
+                if os.path.isfile(os.path.join(root, n, "project.json"))]
+    return [os.path.expanduser(a.project)]
 
+
+def _status_row(p: str, ddir: str, name: str) -> dict:
+    """One dataset's row: its latest census, read off disk. No network."""
+    cpath = latest_census_path(ddir)
+    row = {"project": os.path.basename(p), "dataset": name,
+           "census": None, "scanned_at": None, "age_days": None,
+           "complete": None, "totals": None,
+           "snapshots": len(os.listdir(os.path.join(ddir, "snapshots")))
+           if os.path.isdir(os.path.join(ddir, "snapshots")) else 0}
+    if not cpath:
+        return row
+    c = read_json(cpath)
+    row.update(census=c["census_id"], scanned_at=c["scanned_at"],
+               complete=c.get("complete"), totals=c.get("totals"))
+    try:
+        then = datetime.fromisoformat(c["scanned_at"])
+        row["age_days"] = (datetime.now(timezone.utc) - then).days
+    except (ValueError, KeyError):
+        row["age_days"] = None      # unparseable, not zero
+    return row
+
+
+def _status_rows(projects: list[str]) -> list[dict]:
     rows = []
     for p in projects:
         dsroot = os.path.join(p, "datasets")
@@ -891,42 +913,35 @@ def cmd_status(a) -> None:
             continue
         for name in sorted(os.listdir(dsroot)):
             ddir = os.path.join(dsroot, name)
-            if not os.path.isfile(os.path.join(ddir, "dataset.json")):
-                continue
-            cpath = latest_census_path(ddir)
-            row = {"project": os.path.basename(p), "dataset": name,
-                   "census": None, "scanned_at": None, "age_days": None,
-                   "complete": None, "totals": None,
-                   "snapshots": len(os.listdir(os.path.join(ddir, "snapshots")))
-                   if os.path.isdir(os.path.join(ddir, "snapshots")) else 0}
-            if cpath:
-                c = read_json(cpath)
-                row.update(census=c["census_id"], scanned_at=c["scanned_at"],
-                           complete=c.get("complete"), totals=c.get("totals"))
-                try:
-                    then = datetime.fromisoformat(c["scanned_at"])
-                    row["age_days"] = (datetime.now(timezone.utc) - then).days
-                except (ValueError, KeyError):
-                    row["age_days"] = None      # unparseable, not zero
-            rows.append(row)
+            if os.path.isfile(os.path.join(ddir, "dataset.json")):
+                rows.append(_status_row(p, ddir, name))
+    return rows
 
+
+def _print_status_row(r: dict) -> None:
+    if not r["census"]:
+        print(f"  {r['dataset']:<20} never scanned")
+        return
+    t, age = r["totals"], r["age_days"]
+    flags = [] if r["complete"] else ["PARTIAL"]
+    for k in ("gap", "drift", "unreplicated", "unarchived", "incomplete"):
+        if t.get(k):
+            flags.append(f"{k}={t[k]}")
+    print(f"  {r['dataset']:<20} {t['units']:>5} units  "
+          f"scanned {'?' if age is None else f'{age}d'} ago  "
+          f"{'  '.join(flags) or 'clean'}")
+
+
+def cmd_status(a) -> None:
+    """Records only — no network. Safe for "On Conversation Start"."""
+    rows = _status_rows(_status_projects(a))
     if a.json:
         print(json.dumps(rows, indent=2))
         return
     if not rows:
         die("no datasets declared", 1)
     for r in rows:
-        if not r["census"]:
-            print(f"  {r['dataset']:<20} never scanned")
-            continue
-        t, age = r["totals"], r["age_days"]
-        flags = [] if r["complete"] else ["PARTIAL"]
-        for k in ("gap", "drift", "unreplicated", "unarchived", "incomplete"):
-            if t.get(k):
-                flags.append(f"{k}={t[k]}")
-        print(f"  {r['dataset']:<20} {t['units']:>5} units  "
-              f"scanned {'?' if age is None else f'{age}d'} ago  "
-              f"{'  '.join(flags) or 'clean'}")
+        _print_status_row(r)
 
 
 # ----------------------------------------------------------------------- cli
