@@ -105,7 +105,7 @@ def records_from_triples(triples, group_by="step", src="tensorboard"):
     by_ns = group_by == "step+namespace"
     ns_memo = {}
     groups, overwritten = {}, 0
-    for tag, step, wall_time, value in triples:
+    for tag, step, wall_time, metric_value in triples:
         if by_ns:
             ns = ns_memo.get(tag)
             if ns is None:
@@ -119,7 +119,7 @@ def records_from_triples(triples, group_by="step", src="tensorboard"):
                                  "_src": src, "_group": group_by}
         elif tag in rec:
             overwritten += 1
-        rec[tag] = value
+        rec[tag] = metric_value
         # Earliest observation in the group dates it; a later restart writing the
         # same step should not make the record look newer than the run.
         prev = rec["wall_time"]
@@ -239,7 +239,7 @@ def stamp(records, src, group):
     return records
 
 
-def collect(output, run_dir):
+def collect(output_json, run_dir):
     """-> (records, meta, findings).
 
     Each branch answers only the format-specific question — which file, which
@@ -248,7 +248,7 @@ def collect(output, run_dir):
     equals the `group_by` in the sidecar" true by construction rather than by three
     matched pairs of literals, which is how it was written first.
     """
-    metrics = (output or {}).get("metrics") or {}
+    metrics = (output_json or {}).get("metrics") or {}
     fmt = metrics.get("log_format") or ""
     if not fmt:
         raise Refusal("log_format_empty",
@@ -347,11 +347,11 @@ def write_stream(run_dir, records, meta):
     in a resolution that later events invalidate.
     """
     path = os.path.join(run_dir, CANONICAL_STREAM)
-    tmp = path + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
+    stream_tmp = path + ".tmp"
+    with open(stream_tmp, "w", encoding="utf-8") as f:
         for rec in records:
             f.write(json.dumps(rec) + "\n")
-    os.replace(tmp, path)
+    os.replace(stream_tmp, path)
 
     meta = dict(meta, stream=CANONICAL_STREAM, records=len(records))
     meta_tmp = os.path.join(run_dir, STREAM_META + ".tmp")
@@ -380,12 +380,12 @@ def tb_points(records):
         if step is None:
             continue  # a point with no x has nowhere to go on a curve
         wall = rec.get("wall_time")
-        for field, value in rec.items():
+        for field, metric_value in rec.items():
             if field in _NOT_A_CURVE or field[0] == "_":
                 continue
-            if isinstance(value, bool) or not isinstance(value, (int, float)):
+            if isinstance(metric_value, bool) or not isinstance(metric_value, (int, float)):
                 continue
-            points.append((field, float(value), step, wall))
+            points.append((field, float(metric_value), step, wall))
     return points
 
 
@@ -469,8 +469,8 @@ def write_tb(run_dir, records, source_format):
 
     points = tb_points(fresh)
     try:
-        for tag, value, step, wall in points:
-            writer.add_scalar(tag, value, global_step=step, walltime=wall)
+        for tag, metric_value, step, wall in points:
+            writer.add_scalar(tag, metric_value, global_step=step, walltime=wall)
         writer.flush()
     finally:
         writer.close()
@@ -496,8 +496,8 @@ def main(argv=None):
               "meta": {}, "tail": None}
     try:
         with open(args.output_json) as f:
-            output = json.load(f)
-        records, meta, findings = collect(output, args.run_dir)
+            output_json = json.load(f)
+        records, meta, findings = collect(output_json, args.run_dir)
     except Refusal as e:
         # Exit 1: the answer is no. Nothing is written — a stream derived from a
         # source we refused would be the harm the refusal exists to prevent.

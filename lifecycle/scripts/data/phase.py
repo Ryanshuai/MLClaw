@@ -77,13 +77,13 @@ def snapshots(ddir):
     sdir = os.path.join(ddir, "snapshots")
     if not os.path.isdir(sdir):
         return []
-    out = []
+    snaps = []
     for sid in sorted(os.listdir(sdir)):
         snap = read_json(os.path.join(sdir, sid, "snapshot.json"), required=False)
         if snap:
-            out.append(snap)
-    out.sort(key=lambda s: s.get("frozen_at") or "")
-    return out
+            snaps.append(snap)
+    snaps.sort(key=lambda s: s.get("frozen_at") or "")
+    return snaps
 
 
 def handoffs_for(project, dataset):
@@ -92,12 +92,12 @@ def handoffs_for(project, dataset):
     root = os.path.join(os.path.expanduser(project), "handoffs")
     if not os.path.isdir(root):
         return []
-    out = []
+    handoffs = []
     for hid in sorted(os.listdir(root)):
         rec = read_json(os.path.join(root, hid, "handoff.json"), required=False)
         if rec and rec.get("dataset") == dataset:
-            out.append(rec)
-    return out
+            handoffs.append(rec)
+    return handoffs
 
 
 def retirements(ddir):
@@ -109,19 +109,19 @@ def retirements(ddir):
     rdir = os.path.join(ddir, "retire")
     if not os.path.isdir(rdir):
         return []
-    out = []
+    records = []
     for f in sorted(os.listdir(rdir)):
         if f.endswith("_plan.json") or not f.endswith(".json"):
             continue
         rec = read_json(os.path.join(rdir, f), required=False)
         if rec:
-            out.append({"retire_id": rec.get("retire_id"), "at": rec.get("at"),
+            records.append({"retire_id": rec.get("retire_id"), "at": rec.get("at"),
                         "finished_at": rec.get("finished_at"),
                         "status": rec.get("status"),
                         "units": len(rec.get("deleted") or []),
                         "waived": rec.get("waived") or [],
                         "because": rec.get("because")})
-    return out
+    return records
 
 
 def consumers(project, dataset):
@@ -132,7 +132,7 @@ def consumers(project, dataset):
     if not os.path.isdir(root):
         return []
     prefix = f"datasets/{dataset}@"
-    out = []
+    citers = []
     for stage in sorted(os.listdir(root)):
         rdir = os.path.join(root, stage, "runs")
         if not os.path.isdir(rdir):
@@ -143,9 +143,9 @@ def consumers(project, dataset):
                 continue
             for parent in (rec.get("lineage") or {}).get("parents") or []:
                 if isinstance(parent, str) and parent.startswith(prefix):
-                    out.append({"run": f"{stage}/{run}", "cites": parent,
+                    citers.append({"run": f"{stage}/{run}", "cites": parent,
                                 "status": rec.get("status")})
-    return out
+    return citers
 
 
 # --------------------------------------------------------------------------- #
@@ -188,10 +188,10 @@ def _handoff_as_of(h, as_of):
     return (st, None) if closed <= as_of else ("open", None)
 
 
-def _existing_as_of(items, key, as_of, kind, id_key):
+def _existing_as_of(entries, key, as_of, kind, id_key):
     """-> (records that existed at `as_of`, records that could not be placed)."""
     kept, unplaceable = [], []
-    for it in items:
+    for it in entries:
         when = parse_ts(it.get(key))
         if when is None:
             unplaceable.append({"kind": kind, "id": it.get(id_key),
@@ -513,7 +513,7 @@ def cmd_history(a):
         broke(f"project not found: {project}")
     names = [a.dataset] if a.dataset else list_datasets(project)
 
-    out, axis = [], set()
+    rows, axis = [], set()
     for d in names:
         ddir = dataset_dir(project, d)
         ids = census_ids(ddir)
@@ -541,7 +541,7 @@ def cmd_history(a):
                              for b in st["blockers"]],
                 "replay": st["replay"],
             })
-        out.append({"dataset": d, "timeline": timeline,
+        rows.append({"dataset": d, "timeline": timeline,
                     "first_seen": timeline[0]["scanned_at"] if timeline else None})
 
     emit({
@@ -551,7 +551,7 @@ def cmd_history(a):
         # a dataset with no census at a given column has not been interpolated,
         # it simply has nothing there.
         "axis": sorted(t for t in axis if t),
-        "datasets": out,
+        "datasets": rows,
         "stale_threshold_days": a.stale_days,
     })
 
@@ -563,10 +563,10 @@ def cmd_phase(a):
     names = [a.dataset] if a.dataset else list_datasets(project)
     if not names:
         return emit({"datasets": [], "note": "no datasets declared in this project"})
-    out = [assess(project, d, a.stale_days) for d in names]
+    statuses = [assess(project, d, a.stale_days) for d in names]
     emit({"line": " -> ".join(PHASES[:-2] + ("ready",)),
-          "datasets": out,
-          "blocked": sum(1 for d in out
+          "datasets": statuses,
+          "blocked": sum(1 for d in statuses
                          if any(b["severity"] == "blocks" for b in d["blockers"])),
           "stale_threshold_days": a.stale_days})
 

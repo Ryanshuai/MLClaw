@@ -132,12 +132,12 @@ def carry_forward(timeline, axis):
     dataset's scan: boxes carried forward five hours reads as fresh under any
     tolerance, and drawing it solid would claim a scan that never ran.
     """
-    out, i, cur = [], 0, None
+    carried, i, cur = [], 0, None
     for t in axis:
         while i < len(timeline) and (timeline[i]["scanned_at"] or "") <= t:
             cur, i = timeline[i], i + 1
         if cur is None:
-            out.append((None, None, False))
+            carried.append((None, None, False))
             continue
         try:
             gap = round((datetime.fromisoformat(t)
@@ -145,8 +145,8 @@ def carry_forward(timeline, axis):
                         / 86400, 1)
         except (TypeError, ValueError):
             gap = None
-        out.append((cur, gap, cur["scanned_at"] == t))
-    return out
+        carried.append((cur, gap, cur["scanned_at"] == t))
+    return carried
 
 
 CSS = """
@@ -349,7 +349,7 @@ def timeline_grid(hist, live):
     head = "".join(f'<th title="{e(t)}">{e(lab)}</th>'
                    for t, lab in zip(axis + ["the live assessment, not a scan"], labels))
 
-    detail, out = {}, []
+    detail, row_htmls = {}, []
     for d in rows:
         cells = []
         seq = carry_forward(d["timeline"], axis)
@@ -381,11 +381,11 @@ def timeline_grid(hist, live):
         meta = "no census" if last is None else (
             f'{(last.get("totals") or {}).get("units", "\u2014")} units \u00b7 '
             f'{len(d["timeline"])} scan' + ("s" if len(d["timeline"]) != 1 else ""))
-        out.append(f'<tr><td class="ds l" title="{e(d["dataset"])}">{e(d["dataset"])}</td>'
+        row_htmls.append(f'<tr><td class="ds l" title="{e(d["dataset"])}">{e(d["dataset"])}</td>'
                    + "".join(cells) + f'<td class="meta">{e(meta)}</td></tr>')
 
     return (f'<table class="grid"><thead><tr><th class="l">Dataset</th>{head}'
-            f'<th class="l">&nbsp;</th></tr></thead><tbody>{"".join(out)}</tbody>'
+            f'<th class="l">&nbsp;</th></tr></thead><tbody>{"".join(row_htmls)}</tbody>'
             f'</table>'), detail
 
 
@@ -451,8 +451,8 @@ JS = r"""
 """
 
 
-def render(data, hist, project, stale_days):
-    rows = data.get("datasets") or []
+def render(board_data, hist, project, stale_days):
+    rows = board_data.get("datasets") or []
     now = datetime.now(timezone.utc).isoformat(timespec="seconds")
 
     # A partial census makes every count below a lower bound. Saying so at the
@@ -475,7 +475,7 @@ def render(data, hist, project, stale_days):
         banner = f'<div class="banner">{" \u00b7 ".join(bits)}</div>'
 
     legend = "".join(f'<span><i class="sw {c}">{g}</i>{lab}</span>' for c, g, lab in LEGEND)
-    tl, drill = timeline_grid(hist, data)
+    tl, drill = timeline_grid(hist, board_data)
 
     # per-dataset detail
     trs = []
@@ -566,22 +566,22 @@ def main():
     project = os.path.expanduser(a.project)
     if not os.path.isdir(project):
         broke(f"project not found: {project}")
-    data = gather("phase", project, a.stale_days)
+    board_data = gather("phase", project, a.stale_days)
     # Deliberately NOT `--last`: phase.py's cap is per dataset, and carry-forward
     # needs the entries before the first drawn column to know what to carry in.
     hist = trim_axis(gather("history", project, a.stale_days), a.last)
-    out = os.path.expanduser(a.out) if a.out else os.path.join(project, "data_board.html")
-    with open(out, "w", encoding="utf-8") as fh:
-        fh.write(render(data, hist, project, a.stale_days))
-    rows = data.get("datasets") or []
+    out_path = os.path.expanduser(a.out) if a.out else os.path.join(project, "data_board.html")
+    with open(out_path, "w", encoding="utf-8") as fh:
+        fh.write(render(board_data, hist, project, a.stale_days))
+    rows = board_data.get("datasets") or []
     # A truncated axis is a silent cap, so it is reported rather than left to be
     # inferred from a grid that looks complete — CLAUDE.md "Never report data you could not look at".
     shown = len(hist.get("axis") or [])
     print(json.dumps({
-        "board": out, "datasets": len(rows),
+        "board": out_path, "datasets": len(rows),
         "columns": shown, "column_limit": a.last,
         "by_phase": {k: sum(1 for d in rows if d["phase"] == k) for k, _ in PHASES},
-        "blocked": data.get("blocked"),
+        "blocked": board_data.get("blocked"),
         "partial_census": [d["dataset"] for d in rows
                            if (d.get("census") or {}).get("counts_are_lower_bound")],
         "partial_replay": sorted({d["dataset"] for d in hist.get("datasets") or []

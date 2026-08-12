@@ -110,7 +110,7 @@ def verdict_of(findings):
     return "fail" if "fail" in levels else ("warn" if "warn" in levels else "ok")
 
 
-def resolve_stream(output, jsonl_path, run_dir=None):
+def resolve_stream(output_json, jsonl_path, run_dir=None):
     """Where the metric stream lives. -> (path, kind).
 
     `kind` is `explicit` | `stream` | `source`, and it is returned rather than
@@ -132,7 +132,7 @@ def resolve_stream(output, jsonl_path, run_dir=None):
         canonical = os.path.join(run_dir, CANONICAL_STREAM)
         if os.path.isfile(canonical):
             return canonical, "stream"
-    log_path = ((output or {}).get("metrics") or {}).get("log_path") or ""
+    log_path = ((output_json or {}).get("metrics") or {}).get("log_path") or ""
     if not run_dir or not log_path:
         raise StreamError(f"no stream to read: give an explicit path, or --run-dir "
                           f"holding {CANONICAL_STREAM}, or --run-dir plus "
@@ -140,9 +140,9 @@ def resolve_stream(output, jsonl_path, run_dir=None):
     return os.path.join(run_dir, log_path), "source"
 
 
-def stream_path(output, jsonl_path, run_dir=None):
+def stream_path(output_json, jsonl_path, run_dir=None):
     """`resolve_stream` without the kind, for callers that only need the path."""
-    return resolve_stream(output, jsonl_path, run_dir)[0]
+    return resolve_stream(output_json, jsonl_path, run_dir)[0]
 
 
 def refusal_report(exc, **extra):
@@ -188,12 +188,12 @@ def load_inputs(output_json_path, jsonl_path, run_dir=None):
     """
     try:
         with open(output_json_path) as f:
-            output = json.load(f)
+            output_json = json.load(f)
     except (OSError, json.JSONDecodeError) as e:
         raise StreamError(f"cannot read {output_json_path}: {e}")
-    path, kind = resolve_stream(output, jsonl_path, run_dir)
+    path, kind = resolve_stream(output_json, jsonl_path, run_dir)
     records, line_errors = read_jsonl(path)
-    return output, records, line_errors, kind
+    return output_json, records, line_errors, kind
 
 
 def emit(report, prog, payload=None, fail_verdicts=("fail",)):
@@ -226,14 +226,14 @@ def read_jsonl(path):
             if not line:
                 continue
             try:
-                obj = json.loads(line)
+                parsed = json.loads(line)
             except json.JSONDecodeError as e:
                 errors.append({"line": n, "error": str(e), "text": line[:120]})
                 continue
-            if isinstance(obj, dict):
-                records.append(obj)
+            if isinstance(parsed, dict):
+                records.append(parsed)
             else:
-                errors.append({"line": n, "error": f"not an object ({type(obj).__name__})",
+                errors.append({"line": n, "error": f"not an object ({type(parsed).__name__})",
                                "text": line[:120]})
     return records, errors
 
@@ -361,13 +361,13 @@ def observed_fields(records):
 
 def numeric_series(records, field):
     """-> [(index, value)] for records where `field` is numeric (bools excluded)."""
-    out = []
+    pairs = []
     for i, r in enumerate(records):
         v = r.get(field)
         if isinstance(v, bool) or not isinstance(v, (int, float)):
             continue
-        out.append((i, float(v)))
-    return out
+        pairs.append((i, float(v)))
+    return pairs
 
 
 def near_misses(name, candidates, n=5):

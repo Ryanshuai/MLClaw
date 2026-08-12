@@ -762,9 +762,9 @@ def cmd_check(a):
     report, rd = assess(project, a.run, skip_env=a.no_env,
                         framework_python=a.framework_python)
     if not a.no_write:
-        out = os.path.join(rd, "repro", f"check_{id_stamp()}.json")
-        atomic_write_json(out, report)
-        report["written_to"] = os.path.relpath(out, project)
+        out_path = os.path.join(rd, "repro", f"check_{id_stamp()}.json")
+        atomic_write_json(out_path, report)
+        report["written_to"] = os.path.relpath(out_path, project)
     if a.json:
         emit(report)
     else:
@@ -969,7 +969,7 @@ def cmd_open(a):
     worst = max((SEVERITY[v] for v in s["axes_at_open"].values()), default=0)
     clean = "remeasured" if remeasure else "reproduced"
     ceiling = clean if worst == 0 else f"{clean}_with_drift"
-    out = {"session_id": sid, "opened": True,
+    payload = {"session_id": sid, "opened": True,
            "target": s["target"], "measure_via": s["measure_via"],
            "probe_declared": bool(a.probe),
            "verdict_ceiling": ceiling,
@@ -995,9 +995,9 @@ def cmd_open(a):
            "written_to": os.path.relpath(
                os.path.join(session_dir(project, sid), "session.json"), project)}
     if collision:
-        out["id_collision"] = collision
+        payload["id_collision"] = collision
         sys.stderr.write(f"repro: warning: {collision}\n")
-    emit(out)
+    emit(payload)
     return 0
 
 
@@ -1058,8 +1058,8 @@ def cmd_trial(a):
         scope_waiver = None
 
     best = ((trun.get("metrics") or {}).get("best") or {})
-    value = a.value if a.value is not None else best.get("primary_metric_value")
-    if value is None:
+    metric_value = a.value if a.value is not None else best.get("primary_metric_value")
+    if metric_value is None:
         refuse("trial has no metric value",
                why="record-integrity rule: a metric that could not be read is not "
                    "recorded as anything. Pass --value only if you read it yourself")
@@ -1073,13 +1073,13 @@ def cmd_trial(a):
         if p not in AXES:
             broke(f"unknown axis {p!r}", allowed=list(AXES))
 
-    delta = value - tgt["value"]
+    delta = metric_value - tgt["value"]
     entry = {
         "n": len(s["trials"]) + 1,
         "run": a.run,
         "stage": tstage,
         "pinned": pinned,
-        "value": value,
+        "value": metric_value,
         "delta": round(delta, 10),
         "delta_pct": (round(100.0 * delta / tgt["value"], 6) if tgt["value"] else None),
         "probe_run": a.probe_run,
@@ -1336,23 +1336,23 @@ def cmd_band(a):
             s["caveats"].append(c)
     save_session(project, a.session, s)
 
-    out = {"session_id": a.session, "band": band, "metric_verdict": verdict,
+    payload = {"session_id": a.session, "band": band, "metric_verdict": verdict,
            "why": why, "declared_tolerance_note": tol_note,
            "caveats_added": extra_caveats}
     if verdict == "inconclusive" and source == "run_history":
-        out["next"] = (f"this band cannot refute. To settle it, run "
+        payload["next"] = (f"this band cannot refute. To settle it, run "
                        f"{MIN_TRIALS_FOR_BAND - len(base)} more unpinned trial(s) for a "
                        f"run-to-run band -- and that is the ONLY case where the extra "
                        f"trials are worth their price")
     elif verdict == "inconclusive":
-        out["next"] = (f"run {len(base)} more unpinned trial(s) and re-band -- the "
+        payload["next"] = (f"run {len(base)} more unpinned trial(s) and re-band -- the "
                        f"interval is not yet wide enough to answer either way")
     elif verdict == "diverged":
-        out["next"] = "`repro.py attribute` for which axis to pin first"
+        payload["next"] = "`repro.py attribute` for which axis to pin first"
     else:
-        out["next"] = ("`repro.py close` -- but the verdict downgrades if any axis "
+        payload["next"] = ("`repro.py close` -- but the verdict downgrades if any axis "
                        "drifted or the probe predictions disagree")
-    emit(out)
+    emit(payload)
     return 0
 
 
@@ -1387,7 +1387,7 @@ def cmd_attribute(a):
     implicated = [r["axis"] for r in resolved if r["moved_delta_into_range"]]
     remaining = [ax for ax in PIN_COST if ax in suspect and ax not in pinned_runs]
 
-    out = {"session_id": a.session,
+    payload = {"session_id": a.session,
            "metric_verdict": s.get("metric_verdict"),
            "suspect_axes": suspect,
            "pins_tried": resolved,
@@ -1395,30 +1395,30 @@ def cmd_attribute(a):
            "unpinned_suspects_by_cost": remaining}
 
     if implicated:
-        out["attributed_to"] = implicated[0]
-        out["why"] = (f"pinning {implicated[0]} brought the number back into the "
+        payload["attributed_to"] = implicated[0]
+        payload["why"] = (f"pinning {implicated[0]} brought the number back into the "
                       f"measured range; the other axes did not")
-        out["next"] = f"`repro.py close --verdict diverged --attributed-to {implicated[0]}`"
+        payload["next"] = f"`repro.py close --verdict diverged --attributed-to {implicated[0]}`"
     elif remaining:
-        out["attributed_to"] = None
-        out["next"] = (f"pin {remaining[0]} next (cheapest unpinned suspect), rerun, "
+        payload["attributed_to"] = None
+        payload["next"] = (f"pin {remaining[0]} next (cheapest unpinned suspect), rerun, "
                        f"and register it with --pinned {remaining[0]}")
-        out["why"] = f"{len(remaining)} suspect axis/axes never tested"
+        payload["why"] = f"{len(remaining)} suspect axis/axes never tested"
     else:
-        out["attributed_to"] = None
-        out["why"] = ("every drifted or unverifiable axis has been pinned and the "
+        payload["attributed_to"] = None
+        payload["why"] = ("every drifted or unverifiable axis has been pinned and the "
                       "number still sits outside the band. No axis MLClaw records "
                       "explains it -- which is itself the finding: either the "
                       "nondeterminism is wider than these repeats measured, or "
                       "something nobody recorded changed")
-        out["next"] = "`repro.py close --verdict diverged_unattributed`"
+        payload["next"] = "`repro.py close --verdict diverged_unattributed`"
 
     if not suspect and s.get("metric_verdict") == "diverged":
-        out["note"] = ("no axis drifted, yet the number is outside the band. Pinning "
+        payload["note"] = ("no axis drifted, yet the number is outside the band. Pinning "
                        "an intact axis is a no-op, so do not spend a run on it -- "
                        "this points at nondeterminism the repeats under-measured, or "
                        "at an axis nothing here records (data order, host, clock)")
-    emit(out)
+    emit(payload)
     return 0
 
 

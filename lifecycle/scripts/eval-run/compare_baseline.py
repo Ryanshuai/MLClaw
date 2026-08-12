@@ -151,29 +151,29 @@ def load_run_side(run_json_path, label):
     }
 
 
-def _external_side(obj, origin):
+def _external_side(baseline_obj, origin):
     """An inline / file baseline: {source, scope, metrics, [mode], [dataset]}."""
-    if not isinstance(obj, dict):
-        raise CompareError("baseline must be a JSON object, got %s" % type(obj).__name__)
-    if "metrics" not in obj:
+    if not isinstance(baseline_obj, dict):
+        raise CompareError("baseline must be a JSON object, got %s" % type(baseline_obj).__name__)
+    if "metrics" not in baseline_obj:
         raise CompareError("baseline object from %s has no `metrics` key" % origin)
-    metrics, skipped = scalar_metrics(obj.get("metrics"))
+    metrics, skipped = scalar_metrics(baseline_obj.get("metrics"))
     return {
         "kind": "external",
-        "id": obj.get("source") or origin,
+        "id": baseline_obj.get("source") or origin,
         "path": None if origin == "inline JSON" else origin,
         "status": None,
-        "mode": obj.get("mode"),
-        "scope": obj.get("scope"),
-        "dataset": obj.get("dataset"),
-        "dataset_from": "baseline object" if obj.get("dataset") else None,
+        "mode": baseline_obj.get("mode"),
+        "scope": baseline_obj.get("scope"),
+        "dataset": baseline_obj.get("dataset"),
+        "dataset_from": "baseline object" if baseline_obj.get("dataset") else None,
         "metrics": metrics,
         "skipped_metric_keys": skipped,
     }
 
 
-def _looks_like_run_record(obj):
-    return isinstance(obj, dict) and ("run_id" in obj or "steps" in obj)
+def _looks_like_run_record(candidate):
+    return isinstance(candidate, dict) and ("run_id" in candidate or "steps" in candidate)
 
 
 def resolve_baseline(spec, run_json_path):
@@ -189,10 +189,10 @@ def resolve_baseline(spec, run_json_path):
     if os.path.isdir(expanded):
         return load_run_side(os.path.join(expanded, "run.json"), "baseline")
     if os.path.isfile(expanded):
-        obj = load_json_required(expanded, "baseline")
-        if _looks_like_run_record(obj):
+        candidate = load_json_required(expanded, "baseline")
+        if _looks_like_run_record(candidate):
             return load_run_side(expanded, "baseline")
-        return _external_side(obj, os.path.abspath(expanded))
+        return _external_side(candidate, os.path.abspath(expanded))
 
     # A run id, optionally stage-qualified: "evaluation/run_20260316_153024".
     run_dir = os.path.dirname(os.path.abspath(os.path.expanduser(run_json_path)))
@@ -330,7 +330,7 @@ def check_comparability(run, baseline, assert_reason=None):
 def metric_directions(output_json, warnings=None):
     """{metric: {"direction": "max"|"min"|None, "source": str|None}} from output.json."""
     warnings = warnings if warnings is not None else []
-    out = {}
+    directions = {}
     metrics = (output_json or {}).get("metrics") or {}
 
     for name, defn in (metrics.get("definitions") or {}).items():
@@ -343,20 +343,20 @@ def metric_directions(output_json, warnings=None):
                             "metrics.definitions.%s.direction — treated as unknown."
                             % (raw, name))
             continue
-        out[name] = {"direction": norm,
+        directions[name] = {"direction": norm,
                      "source": "output.json -> metrics.definitions.%s.direction" % name}
 
     primary = metrics.get("primary_metric")
     raw = metrics.get("direction")
-    if primary and raw and primary not in out:
+    if primary and raw and primary not in directions:
         norm = normalize_direction(raw)
         if norm:
-            out[primary] = {"direction": norm,
+            directions[primary] = {"direction": norm,
                             "source": "output.json -> metrics.direction (primary_metric)"}
         else:
             warnings.append("unrecognized direction %r at output.json -> metrics.direction "
                             "— treated as unknown." % raw)
-    return out
+    return directions
 
 
 def compute_deltas(run_metrics, base_metrics, directions, watch=None):
@@ -370,8 +370,8 @@ def compute_deltas(run_metrics, base_metrics, directions, watch=None):
         cur, base = run_metrics[name], base_metrics[name]
         delta = cur - base
         pct = (delta / abs(base) * 100.0) if base else None
-        info = directions.get(name) or {}
-        direction = info.get("direction")
+        direction_info = directions.get(name) or {}
+        direction = direction_info.get("direction")
         if direction is None:
             verdict = "unknown_direction"
         elif delta == 0:
@@ -387,7 +387,7 @@ def compute_deltas(run_metrics, base_metrics, directions, watch=None):
             "delta": delta,
             "pct": pct,
             "direction": direction,
-            "direction_source": info.get("source"),
+            "direction_source": direction_info.get("source"),
             "verdict": verdict,
             "watched": name in watch,
         })

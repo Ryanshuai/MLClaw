@@ -72,7 +72,7 @@ def iter_files(root, include=None, exclude=None):
     downstream inherits. The manifest is frozen at send time precisely so it can
     outlive the machine that wrote it; an OS-dependent key defeats that.
     """
-    out = []
+    paths = []
     for dirpath, dirnames, filenames in os.walk(root):
         dirnames[:] = [d for d in sorted(dirnames) if not d.startswith(".")]
         for name in sorted(filenames):
@@ -82,8 +82,8 @@ def iter_files(root, include=None, exclude=None):
                 continue
             if exclude and any(fnmatch.fnmatch(rel, p) for p in exclude):
                 continue
-            out.append(rel)
-    return out
+            paths.append(rel)
+    return paths
 
 
 def hash_file(path, algo):
@@ -96,9 +96,9 @@ def hash_file(path, algo):
     return h.hexdigest()
 
 
-def build_manifest(root, items, algo):
+def build_manifest(root, rel_paths, algo):
     records = []
-    for rel in items:
+    for rel in rel_paths:
         full = os.path.join(root, rel)
         records.append({"item": rel, "hash": hash_file(full, algo),
                         "bytes": os.path.getsize(full)})
@@ -133,11 +133,11 @@ def read_manifest(path):
                 line = line.strip()
                 if not line:
                     continue
-                obj = _manifest_line(path, n, line)
-                if "_manifest" in obj:
-                    header = obj["_manifest"]
+                parsed = _manifest_line(path, n, line)
+                if "_manifest" in parsed:
+                    header = parsed["_manifest"]
                 else:
-                    records.append(obj)
+                    records.append(parsed)
     except FileNotFoundError:
         broke(f"manifest not found: {path}")
     return header, records
@@ -228,16 +228,16 @@ def cmd_send(args):
             refuse(f"{args.rework} has no outstanding items to rework",
                    coverage=base.get("latest", {}).get("coverage"))
 
-    items = carried if carried is not None else iter_files(
+    rel_paths = carried if carried is not None else iter_files(
         source_root, args.include or None, args.exclude or None)
-    if not items:
+    if not rel_paths:
         refuse("nothing to send: no files matched under source",
                source=source_root, include=args.include, exclude=args.exclude)
 
     hid, hdir = _make_dir(project, args.id)
 
     try:
-        records = build_manifest(source_root, items, args.hash)
+        records = build_manifest(source_root, rel_paths, args.hash)
     except OSError as exc:
         shutil.rmtree(hdir, ignore_errors=True)
         broke(f"could not hash source files: {exc}")
@@ -455,21 +455,21 @@ def cmd_receive(args):
 
 
 def _source_drift(source_root, sent, algo):
-    out = []
+    drifted = []
     for entry in sent:
         full = os.path.join(source_root, entry["item"])
         if not os.path.exists(full):
-            out.append({"item": entry["item"], "drift": "source_gone"})
+            drifted.append({"item": entry["item"], "drift": "source_gone"})
             continue
         try:
             now = hash_file(full, algo)
         except OSError as exc:
-            out.append({"item": entry["item"], "drift": "unreadable", "detail": str(exc)})
+            drifted.append({"item": entry["item"], "drift": "unreadable", "detail": str(exc)})
             continue
         if now != entry["hash"]:
-            out.append({"item": entry["item"], "drift": "changed",
+            drifted.append({"item": entry["item"], "drift": "changed",
                         "at_send": entry["hash"], "now": now})
-    return out
+    return drifted
 
 
 # --------------------------------------------------------------------------- #

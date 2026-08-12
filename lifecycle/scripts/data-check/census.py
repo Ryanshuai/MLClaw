@@ -117,12 +117,12 @@ def rjoin(root: str, *rest: str) -> str:
     server root with os.path.join emits backslashes and produces a path that
     exists nowhere. Same reason run-mechanics.md maps remote paths explicitly.
     """
-    out = root.rstrip("/") or root
+    path = root.rstrip("/") or root
     for p in rest:
         p = str(p).strip("/")
         if p:
-            out += "/" + p
-    return out
+            path += "/" + p
+    return path
 
 
 # ------------------------------------------------------------ config loading
@@ -273,19 +273,19 @@ def probe(loc: dict, cfg: dict) -> dict:
     except (subprocess.TimeoutExpired, OSError) as e:
         return {"reachable": False, "error": f"{type(e).__name__}: {e}"}
 
-    out = p.stdout
+    stdout = p.stdout
     # BOTH checks, on purpose. A non-zero code catches ssh refusing; the
     # sentinel catches a shell that died mid-loop with a zero exit. Either
     # alone lets a truncated listing pass as a complete one.
-    if p.returncode != 0 or (OK not in out and NOROOT not in out):
+    if p.returncode != 0 or (OK not in stdout and NOROOT not in stdout):
         err = (p.stderr or "").strip().splitlines()
         return {"reachable": False,
                 "error": f"exit {p.returncode}: {err[-1] if err else 'no sentinel in output'}"}
-    if NOROOT in out:
+    if NOROOT in stdout:
         return {"reachable": True, "root_missing": True, "units": {}}
 
     units: dict[str, dict] = {}
-    for line in out.splitlines():
+    for line in stdout.splitlines():
         if line in (OK, NOROOT) or "\t" not in line:
             continue
         parts = line.split("\t")
@@ -430,7 +430,7 @@ def cmd_scan(a) -> None:
     unreachable = [k for k, s in scans.items() if not s.get("reachable")]
     root_missing = [k for k, s in scans.items()
                     if s.get("reachable") and s.get("root_missing")]
-    result = compute(cfg, scans)
+    computed = compute(cfg, scans)
 
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     census = {
@@ -467,7 +467,7 @@ def cmd_scan(a) -> None:
              "error": scans[loc["key"]].get("error")}
             for loc in cfg["locations"]
         ],
-        **result,
+        **computed,
     }
     path = os.path.join(ddir, "census", f"{census['census_id']}.json")
     # fsync: a deletion plan is ranked against this file, and a census that
@@ -642,8 +642,8 @@ def cmd_snapshot(a) -> None:
 
     manifest = os.path.join(sdir, "manifest.jsonl")
     os.makedirs(sdir, exist_ok=True)
-    tmp = manifest + ".tmp"
-    with open(tmp, "w") as f:
+    manifest_tmp = manifest + ".tmp"
+    with open(manifest_tmp, "w") as f:
         f.write(json.dumps({"_manifest": {
             "count": len(sel), "frozen_at": now_utc(),
             "census_id": c["census_id"], "pins": "membership, not bytes"}}) + "\n")
@@ -652,7 +652,7 @@ def cmd_snapshot(a) -> None:
                                 "layers": units[u]["layers"],
                                 "at": units[u]["at"],
                                 "completeness": units[u].get("completeness")}) + "\n")
-    os.replace(tmp, manifest)
+    os.replace(manifest_tmp, manifest)
 
     snap = {
         "snapshot_id": a.id,
@@ -841,7 +841,7 @@ def cmd_resolve(a) -> None:
         }
     }
 
-    out = [json.dumps(header)] + [json.dumps(r) for r in rows]
+    lines = [json.dumps(header)] + [json.dumps(r) for r in rows]
     if a.out:
         dest = os.path.abspath(os.path.expanduser(a.out))
         if dest.startswith(os.path.abspath(sdir) + os.sep):
@@ -849,10 +849,10 @@ def cmd_resolve(a) -> None:
                 f"machine, and the snapshot is machine-independent on purpose. "
                 f"Write it beside the run that consumes it.")
         os.makedirs(os.path.dirname(dest) or ".", exist_ok=True)
-        tmp = dest + ".tmp"
-        with open(tmp, "w") as f:
-            f.write("\n".join(out) + "\n")
-        os.replace(tmp, dest)
+        dest_tmp = dest + ".tmp"
+        with open(dest_tmp, "w") as f:
+            f.write("\n".join(lines) + "\n")
+        os.replace(dest_tmp, dest)
 
     if a.json:
         print(json.dumps(header["_resolved"], indent=2))
@@ -870,7 +870,7 @@ def cmd_resolve(a) -> None:
                   f"{h['unverifiable_units']} unverifiable-complete units")
         print(f"\n  cite in run.json -> lineage.parents as: {h['cite_as']}")
     else:
-        print("\n".join(out))
+        print("\n".join(lines))
 
 
 # -------------------------------------------------------------------- status
