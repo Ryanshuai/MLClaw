@@ -94,7 +94,15 @@ def snapshots(d) -> list[dict]:
 
 def snapshot_units(snap) -> set[str]:
     """Units a snapshot names. Read from the manifest, which is the frozen set;
-    `snapshot.json` carries only counts."""
+    `snapshot.json` carries only counts.
+
+    A manifest that cannot be fully read -- missing entirely, or with one line
+    that fails to parse -- returns None, same as the missing-file case below.
+    It used to `continue` past a bad line instead, which silently dropped that
+    line's unit from the "named" set -- exactly the "could not check" reading
+    as "names nothing" that CLAUDE.md's "Never silently" rule forbids, and the
+    caller already refuses (or requires --allow-unreadable-snapshots) for the
+    whole-file version of this same failure two lines below."""
     path = os.path.join(snap["_dir"], snap.get("manifest") or "manifest.jsonl")
     units = set()
     try:
@@ -106,7 +114,7 @@ def snapshot_units(snap) -> set[str]:
                 try:
                     rec = json.loads(line)
                 except json.JSONDecodeError:
-                    continue
+                    return None
                 if "unit" in rec:
                     units.add(rec["unit"])
     except FileNotFoundError:

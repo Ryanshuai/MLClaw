@@ -153,6 +153,24 @@ class NothingIsPlannedOffNumbersNobodyCouldTrust(RetireCase):
         self.assertEqual(rc, 0, err)
         self.assertEqual(out["unconsulted_snapshots"], ["v1"])
 
+    def test_one_unparseable_manifest_line_is_the_same_failure_as_no_manifest(self):
+        """A manifest that opens fine but has one corrupted line used to drop
+        just that line's unit from the "named" set (`continue` past the bad
+        line) -- letting the rest of a corrupted manifest read as trustworthy.
+        It must fail the same way an unopenable manifest does: the whole
+        snapshot is unusable, not "usable minus the bad line"."""
+        self.census({"260731/s000": ["auth", "rig", "backup"]})
+        self.snapshot("v2", ["260731/s000"])
+        d = f"proj/datasets/{self.ds}/snapshots/v2"
+        self.write(f"{d}/manifest.jsonl",
+                  '{"unit": "260731/s000"}\n' + "not json\n")
+        rc, out, _ = self.plan()
+        self.assertEqual(rc, 1)
+        self.assertIn("v2", out["refused"])
+        rc, out, err = self.plan("--allow-unreadable-snapshots")
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(out["unconsulted_snapshots"], ["v2"])
+
 
 class UnitsAreRankedByWhatSurvivesTheDeletion(RetireCase):
     """CLAUDE.md -> "Never silently": never delete a file you cannot rank. The
