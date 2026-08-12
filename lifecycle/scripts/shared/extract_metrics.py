@@ -95,34 +95,34 @@ def extract_from_file(file_path, key):
         return None, _err("file_not_found", file_path)
     try:
         with open(file_path) as f:
-            data = json.load(f)
+            parsed = json.load(f)
     except json.JSONDecodeError as e:
         return None, _err("file_not_json", file_path, str(e))
     except OSError as e:
         return None, _err("file_unreadable", file_path, str(e))
 
-    val = data
+    node = parsed
     walked = []
     for k in key.split("."):
         walked.append(k)
-        if not isinstance(val, dict) or k not in val:
-            available = ", ".join(sorted(val.keys())[:10]) if isinstance(val, dict) else f"<{type(val).__name__}>"
+        if not isinstance(node, dict) or k not in node:
+            available = ", ".join(sorted(node.keys())[:10]) if isinstance(node, dict) else f"<{type(node).__name__}>"
             return None, _err(
                 "key_absent", file_path,
                 f"{'.'.join(walked)} not present (at that level: {available})",
             )
-        val = val[k]
+        node = node[k]
 
     try:
-        return float(val), None
+        return float(node), None
     except (TypeError, ValueError):
-        return None, _err("value_not_numeric", file_path, f"{key} = {val!r}")
+        return None, _err("value_not_numeric", file_path, f"{key} = {node!r}")
 
 
-def extract(output, run_dir):
+def extract(output_spec, run_dir):
     """Pure function over a parsed output.json. Returns the three-bucket dict."""
-    definitions = output.get("metrics", {}).get("definitions", {}) or {}
-    watch_list = output.get("metrics", {}).get("watch", []) or []
+    definitions = output_spec.get("metrics", {}).get("definitions", {}) or {}
+    watch_list = output_spec.get("metrics", {}).get("watch", []) or []
 
     metrics, errors, undefined = {}, {}, []
 
@@ -141,14 +141,14 @@ def extract(output, run_dir):
                 errors[name] = _err("definition_incomplete", "output.json",
                                     f"source=stdout but no `pattern` for {name}")
                 continue
-            val, err = extract_from_stdout(os.path.join(run_dir, "logs", "stdout.log"), pattern)
+            metric_value, err = extract_from_stdout(os.path.join(run_dir, "logs", "stdout.log"), pattern)
         elif source == "file":
             path, key = defn.get("path"), defn.get("key")
             if not path or not key:
                 errors[name] = _err("definition_incomplete", "output.json",
                                     f"source=file but missing `path` or `key` for {name}")
                 continue
-            val, err = extract_from_file(os.path.join(run_dir, path), key)
+            metric_value, err = extract_from_file(os.path.join(run_dir, path), key)
         else:
             errors[name] = _err("source_unknown", "output.json",
                                 f"{name}.source = {source!r}; expected 'stdout' or 'file'")
@@ -157,7 +157,7 @@ def extract(output, run_dir):
         if err:
             errors[name] = err
         else:
-            metrics[name] = val
+            metrics[name] = metric_value
 
     return {"metrics": metrics, "errors": errors, "undefined": undefined}
 
@@ -170,21 +170,21 @@ def main():
     output_json, run_dir = sys.argv[1], sys.argv[2]
     try:
         with open(output_json) as f:
-            output = json.load(f)
+            output_spec = json.load(f)
     except (OSError, json.JSONDecodeError) as e:
         sys.stderr.write(f"extract_metrics: cannot read {output_json}: {e}\n")
         sys.exit(2)
 
-    result = extract(output, run_dir)
-    json.dump(result, sys.stdout, indent=2)
+    extracted = extract(output_spec, run_dir)
+    json.dump(extracted, sys.stdout, indent=2)
     sys.stdout.write("\n")
 
-    for name, err in result["errors"].items():
+    for name, err in extracted["errors"].items():
         sys.stderr.write(
             f"extract_metrics: {name}: {err['reason']} ({err['source']})"
             + (f" — {err['detail']}" if err.get("detail") else "") + "\n"
         )
-    for name in result["undefined"]:
+    for name in extracted["undefined"]:
         sys.stderr.write(
             f"extract_metrics: {name}: in metrics.watch but has no metrics.definitions "
             f"entry — config bug, this metric was never going to be extracted\n"
