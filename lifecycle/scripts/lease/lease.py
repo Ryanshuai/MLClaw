@@ -127,15 +127,39 @@ def call(provider, res_path, verb, *extra):
 def collect(names, res, verb, *extra):
     """Run one verb across providers and merge. `provider` is injected HERE — adapter
     identity is L2's knowledge, so a copy-pasted adapter that still self-names cannot
-    misroute a later `release`."""
-    rows, errors = [], {}
+    misroute a later `release`.
+
+    Returns `(rows, errors, scope)`. The scope is the merged answer to "did we actually
+    look everywhere", and **a provider that errored is an unreached corner** — not just
+    a line in `errors`. Without that, `reap` printed `orphans: []` beside a failed
+    adapter and the empty list was the part anyone read.
+
+    `sweep` and `history` must arrive in the envelope (`_common.sweep_result`); a bare
+    list from those verbs is treated as **incomplete**, because an adapter written before
+    the envelope existed cannot have checked what it never enumerated. Other verbs
+    (`capacity`) legitimately return a list and are merged as complete.
+    """
+    scoped = verb in ("sweep", "history")
+    rows, errors, checked, unreached = [], {}, [], []
     results = fan_out(names, lambda n: call(n, res, verb, *extra))
     for name, (ok, data) in zip(names, results):
-        if ok:
-            rows += [{"provider": name, **row} for row in (data or [])]
-        else:
+        if not ok:
             errors[name] = data
-    return rows, errors
+            unreached.append({"provider": name, "scope": "*",
+                              "why": data.get("error", "transient")})
+            continue
+        if isinstance(data, dict) and "units" in data:
+            units, sc = data["units"], data.get("scope") or {}
+        else:
+            units, sc = (data or []), ({} if not scoped else
+                                       {"complete": False, "unreached": [
+                                           {"scope": "*", "why": "adapter returned a bare "
+                                            "list; scope unknown"}]})
+        rows += [{"provider": name, **row} for row in units]
+        checked += [{"provider": name, "scope": s} for s in (sc.get("checked") or [])]
+        unreached += [{"provider": name, **u} for u in (sc.get("unreached") or [])]
+    return rows, errors, {"complete": not unreached,
+                          "checked": checked, "unreached": unreached}
 
 
 # --- verbs --------------------------------------------------------------------
@@ -145,12 +169,12 @@ def v_capacity(args):
     if not names:
         die("permission", "no providers registered — run /resources first",
             hint="resources.json -> compute, or -> servers for owned hardware")
-    rows, errors = collect(names, args.res, "capacity", *shape_flags(args))
+    rows, errors, scope = collect(names, args.res, "capacity", *shape_flags(args))
     # viable first, then cheapest — the order L3 should present to the user
     rows.sort(key=lambda r: (-(r.get("avail") or 0),
                              r.get("price_hr") if r.get("price_hr") is not None
                              else float("inf")))
-    emit({"options": rows, "errors": errors or None}, indent=2)
+    emit({"options": rows, "scope": scope, "errors": errors or None}, indent=2)
 
 
 def v_up(args):
@@ -202,6 +226,30 @@ def v_up(args):
           "held but unreachable — release it or it holds the resource until TTL"}, indent=2)
 
 
+def v_addr(args):
+    """Resolve a held lease to a reachable address, live, on every call.
+
+    Exposed as its own verb because the alternative is a caller writing the address it
+    got back from `up` into its own record — which the contract forbids for a reason
+    that costs more than a stale field: a stop/start hands the box a different address
+    and hands the old one to somebody else, and ssh with relaxed host-key checking
+    connects to that stranger without complaining.
+    """
+    ledger = read_ledger(args.res)
+    row = next((r for r in ledger["leases"] if r["lease_id"] == args.lease_id), None)
+    if row is None:
+        die("permission", f"no lease {args.lease_id} in the ledger")
+    if row["state"] not in OPEN_STATES:
+        die("permission", f"lease {args.lease_id} is {row['state']}; nothing to reach")
+    if not row["instance_ids"]:
+        die("transient", f"lease {args.lease_id} holds no instance yet")
+    ok, reach = call(row["provider"], args.res, "addr", row["instance_ids"][0])
+    if not ok:
+        die(reach.get("error", "transient"), f"addr failed: {reach.get('detail')}")
+    emit({"lease_id": args.lease_id, "reach": reach,
+          "instance_id": row["instance_ids"][0]}, indent=2)
+
+
 def v_status(args):
     res = args.res
     ledger = read_ledger(res)
@@ -210,7 +258,7 @@ def v_status(args):
     # One sweep answers most of what a per-lease `state` would, and it is issued anyway
     # for the untracked half. Only leases the sweep does not mention fall through to an
     # individual `state` call — which keeps this correct for a tag-filtered sweep.
-    swept, errors = collect(providers(res), res, "sweep", "--tag-prefix", args.tag_prefix)
+    swept, errors, scope = collect(providers(res), res, "sweep", "--tag-prefix", args.tag_prefix)
     by_tag = {}
     for row in swept:
         by_tag.setdefault(row.get("tag"), []).append(row)
@@ -242,8 +290,13 @@ def v_status(args):
     # L2 issued, never on an instance id whose format the adapter owns — a multi-unit
     # lease reports one id but many swept rows.
     open_tags = {r.get("tag") for r in open_rows(ledger)}
-    emit({"held": live,
-          "untracked": [r for r in swept if r.get("tag") not in open_tags],
+    untracked = [r for r in swept if r.get("tag") not in open_tags]
+    emit({"held": live, "untracked": untracked,
+          # `held` comes from the ledger and is whole; `untracked` comes from the sweep
+          # and is only as complete as the sweep was. Saying which is which is the
+          # difference between "nothing else is running" and "nothing else answered".
+          "scope": scope,
+          "untracked_is_lower_bound": not scope["complete"],
           "errors": errors or None,
           "total_usd_per_hr": round(sum(r.get("price_hr") or 0 for r in held), 2)},
          indent=2)
@@ -322,7 +375,7 @@ def v_reap(args):
     res = args.res
     ledger = read_ledger(res)
     open_tags = {r.get("tag") for r in open_rows(ledger)}
-    rows, errors = collect(providers(res), res, "sweep", "--tag-prefix", args.tag_prefix)
+    rows, errors, scope = collect(providers(res), res, "sweep", "--tag-prefix", args.tag_prefix)
 
     orphans = []
     for row in rows:
@@ -331,12 +384,64 @@ def v_reap(args):
         if reason:
             orphans.append({**row, "orphan_reason": reason})
 
+    # `orphans: []` is the whole product of this verb, and it is exactly the shape a
+    # sweep that reached nothing also produces. `complete` is what separates "there are
+    # no forgotten boxes" from "nobody looked" -- state it before quoting the count.
     emit({"orphans": orphans,
+          "complete": scope["complete"],
+          "orphans_is_lower_bound": not scope["complete"],
+          "scope": scope,
           "leases_without_instance": [r["lease_id"] for r in open_rows(ledger)
                                       if not r["instance_ids"]],
           "errors": errors or None,
           "total_usd_per_hr": round(sum(o.get("price_hr") or 0 for o in orphans), 2)},
          indent=2)
+
+
+def v_history(args):
+    """The past tense. `sweep` says what exists; only this says what *happened*, and the
+    gap between them is where "I released it" turns out to be false.
+
+    Merges the ledger's own view with each provider's lifecycle log, because they fail
+    in opposite directions: the ledger knows about a create whose response was lost and
+    the cloud does not; the cloud knows about a box launched from a console and the
+    ledger does not. A provider with no log says so rather than being read as silence.
+    """
+    res = args.res
+    extra = ["--tag-prefix", args.tag_prefix, "--window-s", str(args.window_s)]
+    if args.instance_id:
+        extra += ["--instance-id", args.instance_id]
+    names = providers(res)
+
+    # Its own fan-out rather than `collect`, because this verb needs a second field off
+    # each payload (`supported`) and calling `collect` then re-calling for that field
+    # would issue every audit query twice -- the slowest call in the layer.
+    events, errors, unsupported, checked, unreached = [], {}, [], [], []
+    for name, (ok, data) in zip(names, fan_out(names, lambda n: call(n, res, "history", *extra))):
+        if not ok:
+            errors[name] = data
+            unreached.append({"provider": name, "scope": "*",
+                              "why": data.get("error", "transient")})
+            continue
+        events += [{"provider": name, **e} for e in (data.get("events") or [])]
+        if data.get("supported") is False:
+            unsupported.append({"provider": name, "why": data.get("why")})
+        sc = data.get("scope") or {}
+        checked += [{"provider": name, "scope": s} for s in (sc.get("checked") or [])]
+        unreached += [{"provider": name, **u} for u in (sc.get("unreached") or [])]
+    scope = {"complete": not unreached, "checked": checked, "unreached": unreached}
+
+    ledger = read_ledger(res)
+    rows = [r for r in ledger["leases"]
+            if not args.instance_id or args.instance_id in (r.get("instance_ids") or [])]
+    emit({"events": sorted(events, key=lambda e: e.get("at") or ""),
+          "ledger": [{"lease_id": r["lease_id"], "provider": r["provider"], "tag": r["tag"],
+                      "state": r["state"], "instance_ids": r["instance_ids"],
+                      "requested_iso": iso(r["requested_at"]),
+                      "released_iso": iso(r["released_at"]) if r.get("released_at") else None}
+                     for r in rows],
+          "unsupported": unsupported or None,
+          "scope": scope, "errors": errors or None}, indent=2)
 
 
 def main():
@@ -355,6 +460,9 @@ def main():
     u.add_argument("--run")
     u.add_argument("--project")
 
+    a = sub.add_parser("addr"); a.set_defaults(fn=v_addr)
+    a.add_argument("lease_id")
+
     s = sub.add_parser("status"); s.set_defaults(fn=v_status)
     s.add_argument("--tag-prefix", default=TAG_PREFIX)
 
@@ -367,6 +475,12 @@ def main():
 
     p = sub.add_parser("reap"); p.set_defaults(fn=v_reap)
     p.add_argument("--tag-prefix", default=TAG_PREFIX)
+
+    h = sub.add_parser("history"); h.set_defaults(fn=v_history)
+    h.add_argument("--tag-prefix", default=TAG_PREFIX)
+    h.add_argument("--instance-id", help="one machine's lifecycle, instead of the prefix")
+    h.add_argument("--window-s", type=int, default=5 * 86400,
+                   help="how far back; a box released outside it looks like it never was")
 
     args = ap.parse_args()
     args.res = resources_from_workspace_root(args.resources)

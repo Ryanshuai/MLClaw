@@ -30,7 +30,8 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _common import (SSH_UNREACHABLE, TAG_PREFIX, add_shape_args, die, emit,  # noqa: E402
-                     fan_out, load_resources, parse_arch, resources_from_workspace_root)
+                     fan_out, load_resources, parse_arch, resources_from_workspace_root,
+                     sweep_result)
 
 PROBE_TIMEOUT = 12   # nvidia-smi + a few small reads; 60s only ever hid a wedged host
 CLAIM_TIMEOUT = 20
@@ -352,14 +353,20 @@ def v_renew(args):
 
 def v_sweep(args):
     """Rows carry `tag` so L2 reconciles on its own owner token rather than on an
-    instance id this adapter owns the format of. `provider` is L2's to inject."""
+    instance id this adapter owns the format of. `provider` is L2's to inject.
+
+    A host that does not answer is reported as **unreached**, not as zero claims. It
+    used to return `[]` for that case, which is the failure the scope envelope exists
+    to stop: a powered-off box holds no claims and an unreachable one holds unknown
+    claims, and both used to render as "no orphans here". Contract: "Scope completeness".
+    """
     servers = load_servers(args.res)
 
     def one(item):
         key, entry = item
         info = remote_info(entry)
         if info is None:
-            return []
+            return key, None
         rows = []
         for idx, claim in sorted(info["claims"].items()):
             tag = claim.get("tag") or ""
@@ -372,9 +379,31 @@ def v_sweep(args):
                 "holder": claim.get("holder"), "run": claim.get("run") or None,
                 "project": claim.get("project") or None,
             })
-        return rows
+        return key, rows
 
-    emit([r for rows in fan_out(list(servers.items()), one) for r in rows])
+    units, checked, unreached = [], [], []
+    for key, rows in fan_out(list(servers.items()), one):
+        if rows is None:
+            unreached.append({"scope": key, "why": "unreachable over ssh"})
+        else:
+            checked.append(key)
+            units += rows
+    emit(sweep_result(units, checked, unreached))
+
+
+def v_history(args):
+    """`supported: false`, and that is the whole honest answer for a static box.
+
+    The claim marker is the only lifecycle record here and `down` deletes it, so a
+    released GPU leaves nothing behind to read. Saying so is the point: the caller
+    then knows "was it released" is unanswerable on this provider, rather than
+    inferring release from a sweep that shows no claim — which is the same absence
+    the contract's `history` row exists to stop being read as evidence.
+    """
+    emit({"events": [], "supported": False,
+          "why": "a claim marker is removed on release; nothing records the past",
+          "scope": {"complete": True, "checked": sorted(load_servers(args.res)),
+                    "unreached": []}})
 
 
 def main():
@@ -402,6 +431,11 @@ def main():
 
     s = sub.add_parser("sweep"); s.set_defaults(fn=v_sweep)
     s.add_argument("--tag-prefix", default=TAG_PREFIX)
+
+    h = sub.add_parser("history"); h.set_defaults(fn=v_history)
+    h.add_argument("--tag-prefix", default=TAG_PREFIX)
+    h.add_argument("--instance-id")
+    h.add_argument("--window-s", type=int, default=5 * 86400)
 
     args = ap.parse_args()
     args.res = resources_from_workspace_root(args.resources)

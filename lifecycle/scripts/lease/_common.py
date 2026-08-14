@@ -47,6 +47,24 @@ def emit(obj, indent=None):
     print(json.dumps(obj, indent=indent, ensure_ascii=False))
 
 
+def sweep_result(units, checked=(), unreached=()):
+    """The `sweep` / `history` envelope. A helper rather than a convention because the
+    convention is what fails: an adapter that returns a bare list is indistinguishable
+    from one that swept everything and found nothing, and the difference is a bill.
+
+    `unreached` is non-empty exactly when some corner of the provider's scope did not
+    answer -- a host that timed out, a project whose list errored, a region the
+    credential could not reach. `complete` is derived from it, never passed in, so an
+    adapter cannot report `complete: true` while naming what it missed.
+
+    Contract: `.claude/skills/lease/references/contract.md` "Scope completeness".
+    """
+    unreached = list(unreached)
+    return {"units": list(units),
+            "scope": {"complete": not unreached,
+                      "checked": list(checked), "unreached": unreached}}
+
+
 def fan_out(items, fn):
     """Map `fn` over `items` concurrently. Threads are correct here because the work is
     pure subprocess I/O -- providers and hosts are already isolated in their own
