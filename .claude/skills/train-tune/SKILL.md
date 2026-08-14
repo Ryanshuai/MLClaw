@@ -76,6 +76,49 @@ optional `--name` arg or "tune"). Create dir + initial `state.json`:
 
 **Continuing session**: load existing state.json, increment iteration, resume loop.
 
+## Step 1b: Where the trials run
+
+Skip this entirely when `max_concurrent == 1` and the local machine can hold the job —
+one box needs no fleet, and `/train-run` already reaches it. Read
+`lifecycle/references/fleet.md` before doing anything here; it is the authority for
+everything below and states what each rule costs when broken.
+
+`lifecycle/scripts/shared/pool.py` holds the machines; it is provider-blind, so an owned
+4090 and a rented H100 arrive as the same kind of slot.
+
+```bash
+P=lifecycle/scripts/shared/pool.py
+python $P plan  --slots 4 --gpu-count 1 --gpu-memory-gb 40 --hours 8 [--allow-preemptible]
+python $P open  --session {SESSION_DIR} --slots 4 --gpu-count 1 --gpu-memory-gb 40 \
+                --hours 8 --confirmed-usd-per-hr <the figure the user agreed to>
+```
+
+**`plan` first, always, and show its output.** It fills owned hardware before anything
+that bills, and it states the fleet's cost as **one number for the whole search** —
+`N slots × $/hr × estimated hours` — which is the only moment anybody sees it. Four
+separate per-box confirmations is how a sweep gets approved at four times the figure
+anyone was holding in their head. `open` refuses outright when a billing pool has no
+confirmed number, so this is not a step that can be skipped by accident.
+
+Three things in `plan`'s output change what you tell the user, and none is a detail:
+
+| Field | What it means | Say it |
+|---|---|---|
+| `price_confidence: claim` | the price came from a hand-maintained table, not a billing API | quote the total as an estimate off a note, never as a fact |
+| `cost_is_complete: false` | some machine types have no price at all | the total is a **lower bound** |
+| `plan_trustworthy: false` | capacity was read incompletely — a region or account did not answer | the plan may be short for no real reason; re-run before concluding "no capacity" |
+
+**`--allow-preemptible` is usually right for a search and wrong for a final run.** Trials
+are short, independent and checkpointed, so losing one costs its elapsed minutes;
+interruptible capacity is much cheaper and — the part that surprises — frequently has
+stock at an hour when on-demand has none, so refusing it is often the difference between
+a search that runs and one that does not. It carries **one obligation**: checkpoints must
+come back on the monitor cadence, not at finalize. A preemption that takes the box's disk
+with it costs the whole trial, and the economics that justified the choice are gone.
+
+`short_by > 0` is not a failure. Run the search at lower concurrency and say so; a
+4-slot plan that filled 3 is a working search.
+
 ## Step 2: Read Project Guidance (Optional)
 
 Look for `stages/training/research_goals.md`. If present, parse:
@@ -145,20 +188,41 @@ loop:
        and only over axes with param_injection.overridable = true)
      - write hypothesis text starting with [<tag>]
   4. LAUNCH
-     - invoke /train-run as sub-skill with:
-       - fork_of = <base run_id>
-       - hypothesis = "<text>" (will be written to new run.json)
-       - runtime_params overrides
-     - new run inherits lineage.session = <self_session_id>
+     - if a fleet is open: pool.py heartbeat --session <dir>     ← FIRST, before launching
+     - for each trial this iter:
+         - if a fleet is open: pool.py acquire --session <dir> --run <run_id>
+                               → slot + reach; pass reach to /train-run as the target host
+         - invoke /train-run as sub-skill with:
+             - fork_of = <base run_id>
+             - hypothesis = "<text>" (will be written to new run.json)
+             - runtime_params overrides
+         - new run inherits lineage.session = <self_session_id>
      - if max_concurrent > 1: launch up to that many in parallel (sync_batch)
   5. WAIT
      - block until all launched trials in this iter complete
+     - if a fleet is open: pool.py status --session <dir> --probe
+       → a slot that no longer answers took its trial down with it
+     - for each finished trial:
+         - pool.py release --session <dir> --slot <slot> --outcome ok|preempted|crashed
+         - outcome `ok`        → read the trial's outcome as evidence, as below
+           outcome `preempted` → NOT EVIDENCE. Re-queue the same hypothesis; do not
+                                 record it as refuted (see Hard Rule 4)
      - read each trial's outcome (agent fills run.json.outcome based on metric vs hypothesis)
   6. UPDATE state.json
      - increment iteration
      - update best_run, best_metric if any trial beat them
   7. goto 1
 ```
+
+**The heartbeat is step 4's first line and not an optional flourish.** A fleet's TTLs are
+sized in hours and a search runs overnight; the loop is the only thing that knows the
+search is still alive, so a missed heartbeat kills every trial in flight. It is one call
+for the whole pool precisely so it cannot be half-forgotten
+(`lifecycle/references/fleet.md` "Whose dead-man switch, and what renews it").
+
+**A trial ending does not release its machine.** `pool.py release` returns the *slot*, not
+the lease — the next trial wants that box, already provisioned and already staged. The
+lease goes away at Step 6, once, for the whole fleet.
 
 ### Decision tags
 
@@ -213,12 +277,30 @@ Do not invent a tiebreaker. Do not silently pick `trials[0]`. The whole point is
 
 `no_signal` overrides both `budget_exhausted` and `converged`: if the values check trips, status is `no_signal` regardless of how the loop ended.
 
-## Step 6: Render Report
+## Step 6: Close the fleet, then render
 
-Auto-invoke `/train-tune-report --session <session_id>` as sub-skill. It renders
+**Release before rendering, and release on every exit path** — `converged`,
+`budget_exhausted`, `no_signal`, a crash, or the user stopping the search. A report is
+worth minutes; a held fleet bills until something destroys it.
+
+```bash
+python lifecycle/scripts/shared/pool.py close --session {SESSION_DIR}
+```
+
+`close` verifies each teardown and **exits non-zero with the leases left open** when one
+does not confirm as gone. That is deliberate: a lease row closed over a surviving box is
+how a machine becomes invisible. On that exit, say so plainly and run `lease.py status`
+— do not proceed to the report as though the search ended cleanly.
+
+If `pool.json` is missing (the session that opened the fleet died and its directory is
+gone), `close` cannot help and `lease.py reap` is the backstop — it works from the
+provider side with no local state at all.
+
+Then auto-invoke `/train-tune-report --session <session_id>` as sub-skill. It renders
 `<session_dir>/chain.md` from runs + outcomes.
 
-Print to stdout: report path + headline ("Best: trial_X val_acc=0.972; 18 trials, 22h").
+Print to stdout: report path + headline ("Best: trial_X val_acc=0.972; 18 trials, 22h"),
+and the fleet's accrued cost if there was one.
 
 ## Hard Rules
 
@@ -231,6 +313,20 @@ own preferences:
    explore one before opening another. Multi-axis simultaneous variation only when
    user explicitly requests interaction study, or as `[refine_best]` micro-step.
 3. **Hypothesis must include confidence**. End hypothesis with `(confidence: low|medium|high based on N comparable trials)`. This forces honest uncertainty estimates.
+4. **An infrastructure outcome is never evidence about a hypothesis.** A trial ended by
+   preemption, a TTL expiry, a reaped box or a host that vanished is re-queued and re-run
+   — never recorded as a refuted hypothesis, and never counted toward coverage.
+
+   This is the one rule here that breaks **silently**, which is why it is a rule rather
+   than a note. A trial cut off at epoch 3 produces a truncated curve and a bad final
+   metric; land that in the session as an ordinary result and the search concludes the
+   *configuration* was bad, steers away from a region of the space for a reason that has
+   nothing to do with the model, and nothing downstream can ever recover the mistake —
+   the poisoned belief is indistinguishable from a real one. `pool.py release --outcome
+   preempted` is what keeps them apart, and its `trial_counts_as_evidence: false` is the
+   field to read. `scope` on the run records what it actually completed, so the existing
+   comparability rules refuse it too (`lifecycle/references/run-mechanics.md` "Record
+   integrity").
 
 (Single-seed-best detection lives in `/train-tune-report`'s Open Questions section — it's a reporting concern that fires regardless of session status, not a stop-condition for the search loop. The agent can still proactively launch `[verify]` re-runs as a `refine_best` decision if budget allows, but it's no longer mandatory before stopping.)
 
@@ -242,6 +338,9 @@ own preferences:
 | Many trials in a row refuted | Search direction wrong | Switch decision tag (`fill_grid` → `add_axis`); agent should explicitly note "no progress on X axis, switching to Y" |
 | Trial hangs > expected_duration × 2 | Probably hung / data issue | Cancel, mark trial as failed with note; continue with reduced sample of comparable runs |
 | Wall-time approaching budget | Pre-emptive stop | Don't launch new trials whose ETA exceeds remaining budget; render partial report |
+| Trial dies with no crash signature; its host stops answering | Slot preempted or reaped | `pool.py status --probe` to confirm, `release --outcome preempted`, re-queue the same hypothesis. **Not a refutation** — Hard Rule 4 |
+| Every slot goes unreachable at once | The fleet's TTL expired — a heartbeat was missed | Nothing is recoverable in flight. `pool.py close`, re-open, and put `heartbeat` back as the first line of the loop |
+| `open` fills fewer slots than asked | Capacity, not a bug | Run at lower concurrency and say so. Check `plan.plan_trustworthy` first — an incompletely-read capacity table understates what is there |
 
 ## Quick mode
 
