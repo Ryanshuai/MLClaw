@@ -47,17 +47,22 @@ If a run skill ever needs to know whether it's on rented hardware, the contract 
 
 ---
 
-## The seven verbs
+## The eight verbs
+
+`history` is the odd one and the reason the count changed: the other seven describe
+machines that exist, and it is the only one that can speak about a machine that does
+not. See `lifecycle/references/fleet.md` "The two questions, and why one list cannot answer both".
 
 | Verb | Signature | Must hold |
 |---|---|---|
 | `renew` | `(instance_id, ttl_s) -> new_expiry` | Extends the dead-man switch, provider-side and on-box. Load-bearing, not a convenience: Money rule 3 requires every hold to expire, and a 30-hour training run under a 4-hour TTL is killed by its own lease. Called by the orchestration layer's monitor step, which is the only thing that knows the job is still alive. Must fail — not silently succeed — when the hold is already gone. |
-| `capacity` | `(requirements) -> [{region, machine_type, avail, price_hr, binding_limit, label}]` | **`machine_type` must round-trip into `up --machine-type`** — L3's whole flow is show-the-table, user picks a row, lease that row; a `machine_type` holding a display string breaks it. Put display text in `label`. Returns **which limit binds**, not just a count. `avail: 0` with `binding_limit: "vpc.ipv4.public=3"` is actionable; `avail: 0` alone is not. Never inferred from a failed `up`. |
-| `up` | `(n, machine_type, tags, ttl_s) -> [instance_id]` | **Lease written before the API call** (see Money rule 1). Tags applied at create, never in a second call. `ttl_s` sets the dead-man switch (Money rule 3). Partial success returns what exists — n=4 yielding 2 is a normal outcome, not an error. |
+| `capacity` | `(requirements) -> [{region, machine_type, avail, price_hr, binding_limit, label}]` | **`machine_type` must round-trip into `up --machine-type`** — L3's whole flow is show-the-table, user picks a row, lease that row; a `machine_type` holding a display string breaks it. Put display text in `label`. Returns **which limit binds**, not just a count. `avail: 0` with `binding_limit: "vpc.ipv4.public=3"` is actionable; `avail: 0` alone is not. Never inferred from a failed `up`. **One row per purchasing pool** — on-demand and interruptible have different stock and different prices, and collapsing them hides the row a search usually wants (see "Interruptible capacity"). |
+| `up` | `(n, machine_type, tags, ttl_s) -> [instance_id]` | **Lease written before the API call** (see Money rule 1). Tags applied at create, never in a second call. `ttl_s` sets the dead-man switch (Money rule 3). Partial success returns what exists — n=4 yielding 2 is a normal outcome, not an error. **Not complete until the instance is reachable** — see "Created is not usable" below. |
 | `addr` | `(instance_id) -> reach://…` | Resolved live on **every** call. Never cached, never written into a config file. A stop/start cycle changes it on most providers. |
 | `state` | `(instance_id) -> pending\|running\|stopping\|gone\|failed` | Normalized enum only. The adapter owns the mapping, including the ones that cost money — see below. |
 | `down` | `(instance_id) -> ok` | Idempotent. Already-gone is **success**, not an error. Must leave **no residual billing** (Money rule 2). |
-| `sweep` | `(tag_prefix) -> [{instance_id, tag, age_s, price_hr, expired}]` | Echo the **`tag`** back — layer 2 reconciles on the token it issued, never on an `instance_id` whose format you own. Do **not** self-declare `provider`; layer 2 injects it, so a copy-pasted adapter cannot misroute a later `release`. Finds orphans from the **provider side only** — must work with `leases.json` deleted, corrupt, or written by a different machine. |
+| `sweep` | `(tag_prefix) -> {units: [{instance_id, tag, age_s, price_hr, expired}], scope: {complete, checked, unreached}}` | Echo the **`tag`** back — layer 2 reconciles on the token it issued, never on an `instance_id` whose format you own. Do **not** self-declare `provider`; layer 2 injects it, so a copy-pasted adapter cannot misroute a later `release`. Finds orphans from the **provider side only** — must work with `leases.json` deleted, corrupt, or written by a different machine. **Reports its own scope**: `complete: false` whenever any corner went unread, with `unreached` naming which. A bare list is not accepted — see "Scope completeness" below. |
+| `history` | `(tag_prefix \| instance_id, window_s) -> {events: [{instance_id, tag, action, at, actor, outcome}], scope: {...}, supported}` | The **past tense**, and the only verb that can distinguish "released" from "never looked there". Keyed on `instance_id`, never on a name — names are mutable and reusable, and a name-keyed join reports a live box as released (fleet.md "Group by id, never by name"). Only **completed** events count: a create that ended in error left nothing behind, and counting it invents machines. A provider with no lifecycle log returns `supported: false` — an honest unanswerable, never an inference from `sweep`'s silence. |
 
 ## Normalized enums
 
@@ -83,6 +88,75 @@ public-IPv4 quota is a *separate* limit from vCPU/GPU quota and binds fleets at
 surprisingly small numbers. Choosing a reach form that consumes no IP removes that
 constraint instead of negotiating with it.
 
+## Scope completeness
+
+An adapter whose resources live under a tree — tenants, projects, regions, subscriptions —
+**walks the tree and reports what it reached**. Two rules, both non-negotiable, both
+learned by getting a confident wrong answer:
+
+1. **Never conclude absence from an unscoped list.** A credential's configured default
+   points at one corner. Asked bare, the API answers about that corner and returns empty,
+   which reads as "you have nothing" and means "wrong place". Enumerate, then ask each.
+2. **Follow pagination on every list.** One page is not proof of completeness, including
+   on the lists that obviously fit.
+
+What cannot be reached is named, not dropped. `sweep` carries `scope: {complete, checked,
+unreached}`, and layer 2 propagates it: `reap` reporting "no orphans" off a partial sweep
+is the failure this exists to prevent, and it is silent, and it costs money for as long as
+nobody re-runs it. This is CLAUDE.md "Never report data you could not look at"`
+applied to billing — same rule, same three-way distinction between *did not answer*,
+*is not there*, and *is genuinely empty*.
+
+An adapter that cannot enumerate its own scope hard-codes `complete: false`. That is a
+correct adapter with a stated limit, and it is strictly better than one that implies
+completeness it never had.
+
+## Created is not usable
+
+`up` returns when the machine is **reachable**, not when the API accepted the create.
+
+The failure it guards is specific: create succeeds, the instance appears in the list with
+a plausible state, and it then dies on its way up — no address, no error, no status
+message — because it passed the quota check and could not be *placed*. Everything reads
+as a working box until ssh times out several minutes later, by which point a fleet may
+have "acquired" a dozen of them and a search has launched trials into nothing.
+
+So the adapter polls to a terminal condition and maps it:
+
+- reachable → return the id
+- terminal-without-address → this is `no_capacity`, **and the remains are torn down
+  before returning**, because a box that never came up still holds a disk
+- still pending at the deadline → `transient`, id returned, lease left open — the one
+  case where a half-acquired box must stay visible rather than be quietly abandoned
+
+`state` mirrors it: a machine that was created and then died without becoming reachable
+is `failed`, never `running`. `failed` and `running` prescribe opposite next actions and
+the provider's own state string routinely cannot tell them apart.
+
+## Interruptible capacity
+
+Where a provider sells the same hardware from a separate interruptible pool, the adapter
+exposes it as **its own `capacity` row** with its own `machine_type`, price and stock —
+never as a flag on the on-demand row. Two reasons, and the second is the one that matters:
+
+- the price differs, so a collapsed row cannot state cost honestly;
+- **the stock is genuinely independent.** Interruptible frequently has cards free at the
+  hour when on-demand has none. A caller shown one row concludes "no capacity" and waits,
+  when the machine it wanted was available the whole time from the other pool.
+
+Two mechanical requirements the adapter owns:
+
+- **Interruption must stop, not destroy.** The disk has to survive so a checkpointed job
+  resumes. An adapter that cannot guarantee this must not offer the pool, because the
+  caller's economics (fleet.md "Preemptible is the default for a search") assume it.
+- **Interruption policy and recovery policy constrain each other**, and providers reject
+  the combinations that would auto-recover a box behind the caller's back. That rejection
+  is an API error at create time; classify it as `permission`, never retry past it.
+
+The caller decides whether interruptible is acceptable — it is a property of the *job*,
+not of the provider. `fleet.md` states when a search should prefer it and the record rule
+that keeps a preempted trial from being read as a refuted hypothesis.
+
 ## Shape resolution: requirements → machine type is a lookup, not a translation
 
 MLClaw declares **requirements**, derived from `config.json -> resources`:
@@ -105,6 +179,20 @@ would be lost — SXM vs PCIe interconnect, host RAM, local NVMe, compute capabi
 are the only ones that decide whether a job runs. Requirements → candidate machine types is a
 table lookup; the table is data, is reviewable, and is where each provider's weirdness
 is allowed to live.
+
+**Put in the table only what the API will not tell you.** Where a provider serves shape
+facts live — gpu count, vCPU, host RAM, GPU memory — read them and leave the table to
+carry what it does not: `arch`, a human-readable GPU name, and price. A hand-written copy
+of a value the API also serves is a value with two authors, and the stale one is the one
+that gets read.
+
+**A hand-maintained `price_hr` is a `claim`, not a measurement**, and rows carry which it
+is. Several providers have no per-hour price query at all, so the table is the only source
+— which is fine, and stating that it is somebody's note from a console page in April is
+what stops a fleet cost estimate from being quoted as a fact. Same status vocabulary as
+`/discover` and `/ask-human`, for the same reason. A row with no price at all reports
+`price_hr: null`, never `0`: zero is the correct value for owned hardware and must not
+also mean "nobody wrote it down".
 
 **`arch` is a hard requirement, not metadata.** A newer card can be strictly unusable:
 an `sm_100` (Blackwell) host runs code built for cu128 but dies with "no kernel image
