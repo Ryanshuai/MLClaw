@@ -5,6 +5,12 @@ secrets.json
 resources.json
 !lifecycle/resources.json
 
+# Money-bearing state. These live beside resources.json in the workspace, not in this
+# repo — but a stray copy here would carry instance ids and lease tokens, and the cost of
+# ignoring them defensively is nothing.
+leases.json
+pool.json
+
 # Python bytecode
 __pycache__/
 *.pyc

@@ -40,6 +40,7 @@ DOC_FILES = {
     "layout.md": os.path.join(REPO_ROOT, "lifecycle", "references", "layout.md"),
     "skill-graph.md": os.path.join(REPO_ROOT, "lifecycle", "references", "skill-graph.md"),
     "data-line.md": os.path.join(REPO_ROOT, "lifecycle", "references", "data-line.md"),
+    "fleet.md": os.path.join(REPO_ROOT, "lifecycle", "references", "fleet.md"),
 }
 LAYOUT_MD = DOC_FILES["layout.md"]
 CONTRACTS_DIR = os.path.dirname(os.path.abspath(__file__))
