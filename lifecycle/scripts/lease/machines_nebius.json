@@ -1,0 +1,98 @@
+{
+  "_comment": [
+    "Hand-written table for provider_nebius. Contract: `.claude/skills/lease/references/contract.md`",
+    "'Shape resolution' — and specifically its rule 'Put in the table only what the API will not",
+    "tell you'. Nebius serves gpu_count, vCPU, host RAM and GPU memory live from",
+    "`capacity resource-advice list`, so none of those are here; duplicating them would create a",
+    "second author for a value that already has one, and the stale copy is the one that gets read.",
+    "",
+    "What is left is what no Nebius API returns: compute capability, a human GPU name, and price.",
+    "",
+    "PROVENANCE IS PER FIELD AND IS NOT DECORATION. `arch` is a hard admission check — a wrong",
+    "value either refuses a machine that would have worked or admits one whose kernels will not",
+    "load — so an inferred value must not read like a measured one. `arch_status`: `verified` = a",
+    "job was actually built and run for it on this platform; `claim` = inferred from the card name",
+    "and not yet confirmed here.",
+    "",
+    "There is no per-hour price query in the Nebius API (billing v1alpha1 offers only `calculator`",
+    "and `one-time-export`), so every price here is somebody reading a console page on the date in",
+    "`price_asof`. That makes all of them `claim`, and `capacity` labels them so — a fleet cost",
+    "estimate quoted off this file is an estimate off a note, and must be said as one.",
+    "`price_gpu_hr: null` means nobody wrote it down; it never means free."
+  ],
+  "platforms": {
+    "gpu-h100-sxm": {
+      "gpu": "H100 SXM", "arch": "sm_90", "arch_status": "verified",
+      "price_gpu_hr": 3.85, "price_status": "claim", "price_asof": "2026-08-13",
+      "note": "the reference platform — started first try on every attempt in eu-north1"
+    },
+    "gpu-h200-sxm": {
+      "gpu": "H200 SXM", "arch": "sm_90", "arch_status": "claim",
+      "price_gpu_hr": null, "price_status": "claim", "price_asof": null,
+      "note": "same Hopper generation as H100, 141GB HBM3e"
+    },
+    "gpu-l40s-a": {
+      "gpu": "L40S", "arch": "sm_89", "arch_status": "verified",
+      "price_gpu_hr": 1.55, "price_status": "claim", "price_asof": "2026-08-13",
+      "note": "on-demand stock in eu-north1 has been persistently zero while quota reads fine; the preemptible pool is where this card is actually obtainable"
+    },
+    "gpu-l40s-d": {
+      "gpu": "L40S", "arch": "sm_89", "arch_status": "verified",
+      "price_gpu_hr": 2.28, "price_status": "claim", "price_asof": "2026-08-13",
+      "note": "multi-GPU presets; same card as gpu-l40s-a, different host shape"
+    },
+    "gpu-b200-sxm": {
+      "gpu": "B200 SXM", "arch": "sm_100", "arch_status": "claim",
+      "price_gpu_hr": null, "price_status": "claim", "price_asof": null,
+      "note": "Blackwell — a torch built for cu121 will not load here; see the contract's arch paragraph"
+    },
+    "gpu-b200-sxm-a": {
+      "gpu": "B200 SXM", "arch": "sm_100", "arch_status": "claim",
+      "price_gpu_hr": null, "price_status": "claim", "price_asof": null
+    },
+    "gpu-b300-sxm": {
+      "gpu": "B300 SXM", "arch": "sm_100", "arch_status": "claim",
+      "price_gpu_hr": null, "price_status": "claim", "price_asof": null
+    },
+    "gpu-gb300": {
+      "gpu": "GB300", "arch": "sm_100", "arch_status": "claim",
+      "price_gpu_hr": null, "price_status": "claim", "price_asof": null,
+      "note": "Grace-Blackwell; the host is aarch64, so an x86 wheel set does not apply"
+    },
+    "gpu-rtx6000": {
+      "gpu": "RTX PRO 6000", "arch": "sm_120", "arch_status": "claim",
+      "price_gpu_hr": null, "price_status": "claim", "price_asof": null,
+      "note": "96GB variant, so Blackwell rather than the 48GB Ada part"
+    }
+  },
+  "capabilities": {
+    "credential_ttl_s": 43200,
+    "credential_refreshes": false,
+    "native_ttl": false,
+    "image_bake": true,
+    "tags": true,
+    "billing_granularity_s": 1,
+    "_comment_native_ttl": [
+      "false, and the substitute is only half a switch on this provider — say so rather than let",
+      "a caller assume Money rule 3 is fully covered. The guest-side `shutdown -h +N` stops the",
+      "compute burn, which is the large number, but leaves the instance STOPPED with its boot disk",
+      "still billing. `/lease reap` is what finishes it, and it is why reap belongs at conversation",
+      "start rather than being an occasional chore.",
+      "",
+      "‼️ And the guest switch does not work at all under the DEFAULT recovery policy. The API docs",
+      "for --recovery-policy are explicit: an instance undergoing a guest shutdown 'will be subject",
+      "to recovery policy, meaning that it could be restarted and billed accordingly'. Default is",
+      "`recover`. So a box armed with `shutdown -h` and left at the default comes back up, empty,",
+      "and bills forever — a dead-man switch that reads as armed and is worse than none, because",
+      "nobody re-checks a safety they believe in. provider_nebius passes `--recovery-policy fail`",
+      "unconditionally for this reason, not only for the preemptible case that also requires it."
+    ]
+  },
+  "defaults": {
+    "image_family": "ubuntu24.04-cuda12",
+    "_comment_image": "driver + CUDA preinstalled. A driverless image has no nvidia-smi, which makes every capacity and health probe in this layer return nothing on a machine that is fine.",
+    "boot_disk_type": "network_ssd",
+    "boot_disk_gib": 512,
+    "ssh_user": "ubuntu"
+  }
+}

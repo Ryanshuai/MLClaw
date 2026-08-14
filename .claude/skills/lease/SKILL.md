@@ -35,12 +35,23 @@ S=lifecycle/scripts/lease
 python $S/lease.py capacity --gpu-count 1 --gpu-memory-gb 80 --arch-min sm_90
 python $S/lease.py up --provider <p> --machine-type <s> --ttl-s <n> --price-hr <f> \
                       --run <run_id> --project <name>     # -> lease_id + reach://
+python $S/lease.py addr    <lease_id>                     # resolved LIVE, never cached
 python $S/lease.py renew   <lease_id> --ttl-s <n>
 python $S/lease.py release <lease_id>
 ```
 
 `up` returns a `reach://` handle; from there proceed exactly as `lifecycle/references/run-mechanics.md` "Path Mapping (Cross-Machine Execution)" and
 `/train-run` Execution Modes already specify. Nothing downstream may branch on provider name.
+
+**Re-resolve with `addr` rather than storing what `up` returned.** A stop/start hands the
+box a different address and hands the old one to somebody else; with relaxed host-key
+checking, ssh then connects to a stranger's machine without complaining.
+
+**Holding several at once is not this layer's job.** `lifecycle/scripts/shared/pool.py`
+is the caller above — it fills owned hardware before anything that bills, states the cost
+of the whole fleet once before acquiring it, and knows that a preempted trial is not a
+refuted one. `lifecycle/references/fleet.md` is its authority; read that, not this file,
+before a search opens more than one machine.
 
 **What L3 owns, and L2 deliberately does not:**
 
@@ -66,7 +77,8 @@ Only three things the user asks directly. None is a flow.
 | Ask | Do |
 |---|---|
 | "what am I holding / paying for" | `lease.py status` — report per lease: provider, machine_type, age, `$/hr` (`0` for owned hardware), accrued, owning run (**or none — that's the interesting case**), TTL remaining. It also reconciles: a row with no instance and an instance with no row are both surfaced. |
-| "any forgotten boxes" | `lease.py reap` — cloud-side truth by tag prefix, correct with `leases.json` missing or stale. Belongs in CLAUDE.md "On Conversation Start" as a third step, gated on a provider being registered — **not yet wired there**. |
+| "any forgotten boxes" | `lease.py reap` — cloud-side truth by tag prefix, correct with `leases.json` missing or stale. **Read `complete` before quoting the count**: `orphans: []` off a sweep that reached nothing is byte-identical to "there are none", and `orphans_is_lower_bound` is the only thing separating them. Belongs in CLAUDE.md "On Conversation Start" as a third step, gated on a provider being registered — **not yet wired there**. |
+| "did I actually release that one" | `lease.py history [--instance-id ID]` — the **past tense**, and the only verb that can speak about a machine that no longer exists. A box missing from `status` is equally consistent with a scope nobody enumerated; only a lifecycle event proves release. A provider with no log reports `supported: false`, which is an honest unanswerable rather than a silence to read as "gone". |
 | "kill that one" | `lease.py release <lease_id>` — it verifies `gone` before closing the row and refuses to close on an unverified teardown. If the owning run is still `running`, say so first: releasing kills the job. If the run `failed` and was kept for inspection, name what would be lost. |
 
 **`status` and `reap` scan workspace-wide, not project-scoped.** Cost and exclusivity both cross
@@ -80,6 +92,16 @@ Per the contract's "Adding a provider" requirements: one `provider_<name>.py` pl
 table. `lease.py` discovers adapters by filename, and `_common.py` carries the shared JSON /
 error / shape conventions so an adapter is not a copy-paste of the last one. If anything *else*
 has to change, the contract leaked and the fix belongs in the contract.
+
+Installed today: **`ssh`** (owned hardware, self-registering off `resources.json -> servers`)
+and **`nebius`** (rented, requires a `resources.json -> compute.nebius` block). An adapter
+being present is not the same as an account existing, which is why the block is what
+counts as registration.
+
+**No adapter pins an infrastructure id** — no tenant, project, subnet or image id, in the
+code or the table. Every one is discovered from the credential at call time. That is both
+hygiene (this repo is not the never-committed file) and correctness: ids drift, and a
+pinned one is a wrong answer that looks like a configured one. `contract_fleet.py` checks it.
 
 Per CLAUDE.md "Script Integration", adapters are an optimization: if one fails, do the same work
 inline with the provider's CLI and continue. The exception is `down` — never paper over a failed

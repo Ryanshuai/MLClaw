@@ -39,6 +39,37 @@ For each server found, create an entry with host, username, ssh_key_path, alias 
 
 **Optional GPU probe**: with user permission, try `ssh <host> "nvidia-smi --query-gpu=name,count --format=csv,noheader"`.
 
+### Rented compute providers
+
+`servers` above is hardware the user owns; `compute` is accounts they can rent from. The
+split is not cosmetic — a lease against an owned box creates nothing and bills nothing,
+and a lease against a provider creates a machine that bills until something destroys it.
+
+There is a CLI to look for, and that is all this step probes. Registering a provider is
+otherwise **asked, not discovered**, for the same reason as `outsourcing`: having a
+credential on disk does not mean the user intends MLClaw to spend on it.
+
+| Provider | Tell | Liveness check |
+|---|---|---|
+| Nebius | `~/.nebius/bin/nebius` | `nebius iam whoami --format json` |
+
+**Probe liveness, never scope.** `whoami` is cheap and answers "is this credential
+alive". Do **not** enumerate tenants, projects or capacity during `/resources` — that is
+several dozen API calls, and every one of them is answered again by `lease.py capacity`
+at the moment the answer is actually needed. What belongs in `resources.json` is the
+preference (which region, which key, which image), never the discovered scope: ids drift,
+and a pinned id is a wrong answer that looks like a configured one.
+
+Ask, in this order, and only `cli_path` is required: `cli_path`, `ssh_public_key_path`
+(which key the boxes should trust), `allow_regions` (usually the region the data bucket
+is in — an out-of-region box pays cross-region egress on every pull), `image_family`,
+`boot_disk_gib`. The template's `_example_nebius` block lists them with the reasoning.
+
+**A federated / SSO credential's TTL is a fact worth recording at registration time**,
+because Money rule 5 refuses a job longer than it and the refusal is much cheaper than
+the alternative: a token that expires mid-run leaves boxes that cannot be reached,
+monitored or destroyed, and that are still billing.
+
 ### Python Environment Manager
 
 Check in preference order: **pixi -> mamba -> conda -> uv** — `pixi` first because it pins a per-directory lockfile, so an env it resolves can be rebuilt from the repo instead of depending on a named env still existing on somebody's machine. Record first found in `resources.json -> local.env_manager`. Also run `conda env list` (and `pixi info` where present) to record existing environments.

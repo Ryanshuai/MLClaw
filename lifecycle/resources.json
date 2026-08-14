@@ -21,6 +21,22 @@
       "python_path": ""
     }
   },
+  "compute": {
+    "_comment": "Rented compute providers. `lease.py` discovers adapters by filename and treats a provider as usable only when it has a block here — installing `provider_x.py` is not the same as declaring you have an account. Owned machines are NOT here: they live in `servers` above and are reached through the `ssh` adapter, which self-registers off that block. Nothing downstream branches on which of the two a machine came from; see `.claude/skills/lease/references/contract.md`.",
+    "_comment_no_ids": "‼️ No tenant, project, subnet or image id belongs in any of these blocks, and none is needed: every adapter discovers its own scope from the credential at call time. Ids drift, a pinned one points somewhere wrong in silence, and the first trap in the contract's 'Scope completeness' is exactly that failure. What lives here is preference and local paths.",
+    "_example_nebius": {
+      "cli_path": "~/.nebius/bin/nebius",
+      "ssh_user": "ubuntu",
+      "ssh_public_key_path": "~/.ssh/id_ed25519.pub",
+      "image_family": "ubuntu24.04-cuda12",
+      "boot_disk_gib": 512,
+      "boot_disk_type": "network_ssd",
+      "allow_regions": [],
+      "project_name": "",
+      "_comment_regions": "`allow_regions` narrows every scope walk. Leave empty to search everywhere; set it to keep a fleet in the region where the data bucket lives, since an out-of-region box pays cross-region egress on every pull and waits on it. `project_name` picks between several projects in the same region and is a name, not an id.",
+      "_comment_credential": "Nebius auth is federated (SSO) and the token is short-lived — the adapter declares `credential_ttl_s` and Money rule 5 refuses a job longer than it. The OAuth refresh cannot complete headlessly, so an unattended run whose token expires cannot reach, monitor, or destroy its own boxes."
+    }
+  },
   "local": {
     "base_paths": [],
     "mlclaw_root": "",
