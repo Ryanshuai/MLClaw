@@ -212,12 +212,32 @@ def storage_orphans(stored, open_tags, live_instance_ids):
     return out
 
 
-def usd_hr(rows):
-    """Sum, and say whether anything went unpriced. A row with `price_hr: null` is a
-    price nobody wrote down (contract, "Shape resolution"), never a free one — folding
-    it in as 0 is how a total reads as complete while missing its largest term."""
-    known = [r.get("price_hr") for r in rows if r.get("price_hr") is not None]
+def _priced(rows, amount):
+    """Sum over the rows that carry a price; count the ones that do not.
+
+    A row with `price_hr: null` is a price nobody wrote down (contract, "Shape
+    resolution"), never a free one — folding it in as 0 is how a total reads as
+    complete while missing its largest term.
+
+    ‼️ ONE IMPLEMENTATION, TWO QUANTITIES. `usd_hr` asks what this set bills per
+    hour; `usd_over` asks what it has cost. The partition is identical and it is a
+    CORRECTNESS rule, so it is written once — the same reason `list_runs.py`
+    exists instead of a jq snippet everyone retypes. Written twice, it gets fixed
+    once.
+    """
+    known = [amount(r) for r in rows if r.get("price_hr") is not None]
     return round(sum(known), 2), len(rows) - len(known)
+
+
+def usd_hr(rows):
+    """The rate: what this set bills per hour, right now."""
+    return _priced(rows, lambda r: r["price_hr"])
+
+
+def usd_over(rows, hours):
+    """The same rule integrated over time: what this set has cost so far.
+    `hours` maps a row to the hours it was held."""
+    return _priced(rows, lambda r: r["price_hr"] * hours(r))
 
 
 # --- verbs --------------------------------------------------------------------
@@ -494,7 +514,13 @@ def v_cost(args):
             priced.append(item)
         rows.append(item)
 
-    total = round(sum(i["usd"] for i in priced), 2)
+    # Through the shared partition, not a second hand-rolled one: the total and
+    # the unpriced count must never be able to disagree with `usd_hr`'s.
+    hours_of = {i["lease_id"]: i["hours"] for i in rows}
+    total, unpriced_n = usd_over(
+        [{"lease_id": i["lease_id"], "price_hr": i["price_hr"]} for i in rows],
+        lambda r: hours_of[r["lease_id"]])
+    assert unpriced_n == len(unpriced)
     open_rows = [i for i in rows if i["still_open"]]
     payload = {
         "leases": len(rows),

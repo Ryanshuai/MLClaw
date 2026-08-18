@@ -612,36 +612,68 @@ def v_renew(args):
 
 # --- sweep / history ----------------------------------------------------------
 
-def instance_disk_refs(inst):
-    """Every storage id this instance declares. Attachment is read from the INSTANCE,
-    not from the volume, because that is the direction the API states reliably — a disk
-    object does not name its holder on every Nebius API version, and a volume that reads
-    as unattached when it is not sends a reap after a live box's data.
+def volume_attachment(obj):
+    """Who is holding this volume, read from the VOLUME and keyed by INSTANCE ID.
 
-    Being wrong in the other direction is the safe one: a genuinely orphaned disk missed
-    here shows up on the next sweep, and costs a few cents in the meantime."""
-    spec = inst.get("spec") or {}
-    ids = set()
-    boot = spec.get("boot_disk") or {}
-    for holder in (boot, *(spec.get("secondary_disks") or [])):
-        for key in ("existing_disk", "managed_disk"):
-            ref = (holder or {}).get(key) or {}
-            if ref.get("id"):
-                ids.add(ref["id"])
-    for fs in spec.get("filesystems") or []:
-        ref = (fs or {}).get("existing_filesystem") or fs
-        if isinstance(ref, dict) and ref.get("id"):
-            ids.add(ref["id"])
-    return ids
+    ‼️ This reads the volume side, and the first version of this file read the instance
+    side on the reasoning that an API states attachment more reliably from the holder.
+    On this provider that is backwards, and the real listing said so: EVERY disk came
+    back `attached_to: null`, including the boot disk of a box that was RUNNING at the
+    time. A **managed** boot disk is declared in the instance spec by NAME plus an inline
+    spec — `boot_disk.managed_disk.name` — and the instance never carries the disk's id
+    at all. The disk, meanwhile, carries `status.read_write_attachment` and
+    `status.managed_by`, both of which ARE instance ids.
+
+    So the rule is not "read it from the instance", it is **read it from whichever side
+    names the other by id**, and record which side answered. Getting this wrong is not a
+    cosmetic error: every live machine's boot disk reads as an orphaned volume, which is
+    precisely the direction that sends a reap after a running box's data.
+
+    Returns `(instance_id, how)`; `how` is `None` when the volume says nothing.
+    """
+    st = obj.get("status") or {}
+    for key in ("read_write_attachment", "managed_by"):
+        if st.get(key):
+            return st[key], key
+    for key in ("read_only_attachments", "attachments"):
+        vals = st.get(key) or []
+        if isinstance(vals, list) and vals:
+            first = vals[0]
+            return (first.get("instance_id") or first.get("id")
+                    if isinstance(first, dict) else first), key
+    return None, None
 
 
-def _size_gib(spec):
-    if spec.get("size_gibibytes"):
-        return int(spec["size_gibibytes"])
-    if spec.get("size_bytes"):
-        return round(int(spec["size_bytes"]) / (1024 ** 3))
-    if spec.get("block_size_bytes") and spec.get("size_blocks"):
-        return round(int(spec["block_size_bytes"]) * int(spec["size_blocks"]) / (1024 ** 3))
+def instance_volume_names(instances):
+    """name -> instance id, for volumes the instance declares WITHOUT an id.
+
+    A weaker channel and used only where the volume itself said nothing. fleet.md "Group
+    by id, never by name" is about joins ACROSS TIME, where a reused name reports a live
+    box as released; this is a join inside one listing of one project, where the provider
+    offers no id to use. It is still marked `instance_name_match` on the row, because a
+    renamed volume silently drops out of it — and the failure direction there is a false
+    orphan, which is the expensive one.
+    """
+    out = {}
+    for inst in instances:
+        iid = (inst.get("metadata") or {}).get("id")
+        spec = inst.get("spec") or {}
+        holders = [spec.get("boot_disk") or {}, *(spec.get("secondary_disks") or []),
+                   *(spec.get("filesystems") or [])]
+        for holder in holders:
+            for key in ("managed_disk", "existing_disk", "existing_filesystem"):
+                ref = (holder or {}).get(key) or {}
+                if isinstance(ref, dict) and ref.get("name"):
+                    out.setdefault(ref["name"], iid)
+    return out
+
+
+def _size_gib(spec, status=None):
+    for src in (spec, status or {}):
+        if src.get("size_gibibytes"):
+            return int(src["size_gibibytes"])
+        if src.get("size_bytes"):
+            return round(int(src["size_bytes"]) / (1024 ** 3))
     return None
 
 
@@ -653,13 +685,7 @@ def storage_rows(cfg, pid, project, region, instances, tag_prefix, now):
     orphaned one (`--boot-disk-managed-disk-forbid-deletion`, a create whose instance
     never materialised, a console launch) survives with nothing pointing at it and
     nothing enumerating it. That is the volume this exists to find."""
-    # storage id -> the instance holding it, built once. Per-disk re-derivation was the
-    # obvious way to write this and is quadratic on a project with a few hundred volumes.
-    holder = {}
-    for inst in instances:
-        iid = (inst.get("metadata") or {}).get("id")
-        for sid in instance_disk_refs(inst):
-            holder.setdefault(sid, iid)
+    by_name = instance_volume_names(instances)
     prices = table().get("storage") or {}
 
     rows = []
@@ -669,13 +695,16 @@ def storage_rows(cfg, pid, project, region, instances, tag_prefix, now):
         if err:
             return None, f"{kind} list: {err[:160]}"
         for obj in items:
-            meta, spec = obj.get("metadata") or {}, obj.get("spec") or {}
+            meta = obj.get("metadata") or {}
+            spec, status = obj.get("spec") or {}, obj.get("status") or {}
             tag = (meta.get("labels") or {}).get("mlclaw_tag") or ""
             if tag_prefix and not tag.startswith(tag_prefix):
                 continue
-            gib = _size_gib(spec)
-            rate = (prices.get(spec.get("type") or spec.get("kind") or "") or {}).get(
-                "price_gib_hr")
+            gib = _size_gib(spec, status)
+            rate = (prices.get((spec.get("type") or "").lower()) or {}).get("price_gib_hr")
+            held_by, how = volume_attachment(obj)
+            if not held_by and meta.get("name") in by_name:
+                held_by, how = by_name[meta["name"]], "instance_name_match"
             rows.append({
                 "storage_id": meta.get("id"), "kind": kind, "tag": tag,
                 "name": meta.get("name"), "size_gib": gib,
@@ -683,7 +712,16 @@ def storage_rows(cfg, pid, project, region, instances, tag_prefix, now):
                 # has written one into the table, so this is unmeasured. L2 counts it as
                 # an unpriced row and says the total is a lower bound.
                 "price_hr": round(rate * gib, 4) if (rate and gib) else None,
-                "attached_to": holder.get(meta.get("id")),
+                "attached_to": held_by,
+                # WHICH side answered. An id-keyed attachment is a fact; a name match is
+                # a guess that a rename breaks. A reader deciding whether to delete this
+                # volume needs to know which one it is looking at.
+                "attached_by": how,
+                # `managed_by` set means the instance owns this disk and `instance delete`
+                # takes it. That is the difference between "release the box" and "release
+                # the box and erase what is on it", and it is not visible anywhere else.
+                "managed": bool(status.get("managed_by")),
+                "state": status.get("state"),
                 "age_s": max(0, now - _epoch(meta.get("created_at") or "")),
                 "project": project, "region": region,
             })

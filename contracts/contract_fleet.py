@@ -25,6 +25,7 @@ import json
 import os
 import shutil
 import tempfile
+import time
 import types
 import unittest
 from contextlib import redirect_stdout
@@ -490,6 +491,30 @@ class StorageIsTheSecondMeter(TempDirCase):
         self.assertEqual(storage[0]["provider"], "p",
                          "adapter identity is L2's knowledge for storage as for units")
 
+    # --- which side of the API was believed -----------------------------------
+
+    def test_attachment_is_read_from_the_side_that_carries_an_id(self):
+        """The rule this check exists for was written backwards first, and a live account
+        proved it: reading the instance side returned `attached_to: null` for all 20 disks,
+        including the boot disks of running boxes. A managed disk is named — not id'd — on
+        the instance, while the disk itself carries `read_write_attachment`."""
+        neb = load_script("lease/provider_nebius.py")
+        disk = {"status": {"read_write_attachment": "computeinstance-x",
+                           "managed_by": "computeinstance-x"}}
+        self.assertEqual(neb.volume_attachment(disk),
+                         ("computeinstance-x", "read_write_attachment"))
+        self.assertEqual(neb.volume_attachment({"status": {"state": "READY"}}), (None, None))
+
+    def test_a_name_only_declaration_still_links_but_says_it_is_a_name(self):
+        """Allowed, because the API offers nothing else — labelled, because a rename
+        breaks it and the break produces a FALSE ORPHAN, which is the direction that
+        proposes a deletion."""
+        neb = load_script("lease/provider_nebius.py")
+        names = neb.instance_volume_names([{
+            "metadata": {"id": "computeinstance-x"},
+            "spec": {"boot_disk": {"managed_disk": {"name": "box-boot"}}}}])
+        self.assertEqual(names, {"box-boot": "computeinstance-x"})
+
     # --- what counts as abandoned --------------------------------------------
 
     def test_a_volume_with_nothing_attached_is_an_orphan(self):
@@ -774,6 +799,114 @@ class PreemptionHasTwoAxesNotOne(unittest.TestCase):
         blob = (json.dumps(out) if not isinstance(out, str) else out) + err
         self.assertNotIn("--artifacts", blob,
                          "an ok release must fail on the missing pool, not on artifacts")
+
+
+class WhatARoundCostIsAFloorUnlessEverythingWasPriced(unittest.TestCase):
+    """CLAUDE.md -> "Never silently" — its "Never report data you could not look at"
+    rule, applied to money.
+
+    `status` answers what is burning now; `cost` answers what a round has cost,
+    which is the question that was actually asked — repeatedly — across a six-day
+    search. It is a record somebody reads later to decide whether to keep renting
+    or buy a box, and the way it goes wrong raises nothing: `--price-hr` is
+    optional on `up`, so a ledger routinely holds unpriced rows, and a total
+    summed over the priced ones alone reads exactly like the whole bill.
+
+    Same shape as a census with `complete: false`. A round that rented ten boxes
+    and priced six does not have a cost; it has a floor and four unknowns.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="mlclaw_cost_")
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.lease = load_script("lease/lease.py")
+        self.res = os.path.join(self.tmp, "resources.json")
+        with io.open(self.res, "w", encoding="utf-8") as fh:
+            json.dump({"compute": {"nebius": {}}}, fh)
+
+    def ledger(self, *rows):
+        now = int(time.time())
+        out = []
+        for i, r in enumerate(rows):
+            out.append({"lease_id": r.get("id", f"L{i}"), "provider": "nebius",
+                        "tag": r.get("tag", "t"), "machine_type": "H100",
+                        "project": r.get("project", "p"), "run": None,
+                        "price_hr": r.get("price_hr"), "ttl_s": 9999,
+                        "requested_at": now - r.get("held_h", 1) * 3600,
+                        "released_at": None if r.get("open") else now,
+                        "state": "held" if r.get("open") else "released",
+                        "instance_ids": ["i"], "error": None})
+        with io.open(os.path.join(self.tmp, "leases.json"), "w", encoding="utf-8") as fh:
+            json.dump({"leases": out}, fh)
+        return now
+
+    def cost(self, **kw):
+        args = types.SimpleNamespace(res=self.res, project=kw.get("project"),
+                                     tag=kw.get("tag"),
+                                     since_epoch=kw.get("since_epoch"))
+        return capture(self.lease.v_cost, args)
+
+    def test_an_unpriced_lease_is_excluded_and_the_total_says_so(self):
+        self.ledger({"price_hr": 3.0, "held_h": 2}, {"price_hr": None, "held_h": 10})
+        out = self.cost()
+        self.assertEqual(out["usd"], 6.0)
+        self.assertEqual(out["unpriced"], 1)
+        self.assertFalse(out["complete"],
+                         "a total over some of the rows is a floor, not the bill")
+
+    def test_the_lower_bound_is_stated_in_words_not_only_in_a_flag(self):
+        """A `complete: false` a reader can skip past is how a floor gets quoted as a
+        bill. The same reason `census.py` spells out what a partial scan means."""
+        self.ledger({"price_hr": 3.0}, {"price_hr": None})
+        out = self.cost()
+        blob = " ".join(str(v) for v in out.values())
+        self.assertIn("LOWER BOUND", blob)
+
+    def test_a_fully_priced_round_is_complete(self):
+        self.ledger({"price_hr": 3.0, "held_h": 2}, {"price_hr": 1.0, "held_h": 1})
+        out = self.cost()
+        self.assertTrue(out["complete"])
+        self.assertEqual(out["usd"], 7.0)
+        self.assertNotIn("\u203c\ufe0f", out)
+
+    def test_unpriced_hours_are_reported_so_the_gap_has_a_size(self):
+        """"Four rows unpriced" does not say whether the gap is a rounding error or
+        larger than the total. The machine-hours behind it do."""
+        self.ledger({"price_hr": 3.0, "held_h": 1}, {"price_hr": None, "held_h": 40})
+        out = self.cost()
+        self.assertEqual(out["gpu_hours_unpriced"], 40.0)
+
+    def test_an_open_lease_is_counted_to_now_and_flagged(self):
+        self.ledger({"price_hr": 2.0, "held_h": 3, "open": True})
+        out = self.cost()
+        self.assertEqual(out["usd"], 6.0)
+        self.assertEqual(len(out["still_open"]), 1)
+        self.assertIn("accruing", out["note"])
+
+    def test_the_window_admits_that_it_includes_provisioning(self):
+        """The ledger's only start stamp is when the lease was ASKED FOR; billing
+        starts when the box comes up. One machine type took ~80 minutes to
+        provision on the round this was built for — a systematic over-count in a
+        direction nobody can see unless the report says so."""
+        self.ledger({"price_hr": 1.0})
+        out = self.cost()
+        self.assertIn("provisioning", out["window"])
+
+    def test_the_total_cannot_diverge_from_the_shared_partition(self):
+        """`usd_hr` and `usd_over` are one rule at two quantities. Written twice it
+        gets fixed once, which is why they share `_priced`."""
+        rows = [{"price_hr": 2.0}, {"price_hr": None}]
+        rate, un_a = self.lease.usd_hr(rows)
+        total, un_b = self.lease.usd_over(rows, lambda r: 3.0)
+        self.assertEqual((rate, un_a), (2.0, 1))
+        self.assertEqual((total, un_b), (6.0, 1))
+
+    def test_filtering_by_project_does_not_silently_widen(self):
+        self.ledger({"price_hr": 1.0, "project": "p"},
+                    {"price_hr": 100.0, "project": "other"})
+        out = self.cost(project="p")
+        self.assertEqual(out["leases"], 1)
+        self.assertEqual(out["usd"], 1.0)
 
 
 if __name__ == "__main__":

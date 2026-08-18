@@ -132,10 +132,32 @@ Three ways one is left behind, none of them exotic:
 - a volume that was never created by MLClaw at all — a console launch, a colleague, an
   earlier tool.
 
-`attached_to` names the instance holding it, or `null` for nothing. **Read attachment
-from the instance side**, not from the volume: several APIs do not put a holder on the
-volume object, and a volume that reads as unattached when it is not sends a reap after a
-live machine's data. Being wrong the other way costs cents until the next sweep.
+`attached_to` names the instance holding it, or `null` for nothing, and `attached_by`
+says **which side answered**.
+
+**Read attachment from whichever side names the other by id.** Not "from the instance" —
+that was the first rule written here and it was wrong, and the way it was wrong is the
+one that matters: on Nebius a *managed* boot disk is declared in the instance spec by
+name plus an inline spec, with **no disk id anywhere on the instance**, while the disk
+carries `status.read_write_attachment` and `status.managed_by`, both instance ids. Read
+from the instance side, every disk in a live account came back unattached — including the
+boot disks of boxes that were running at that moment. A sweep that reports a running
+machine's disk as an orphaned volume is not a mild error; it is a reap aimed at a live
+box's data.
+
+Where only a name is available, matching on it is allowed and must be **labelled**
+(`attached_by: "instance_name_match"`), because a rename breaks it and produces a false
+orphan. fleet.md "Group by id, never by name" is not violated by this: that rule governs
+joins **across time**, where a reused name reports a live box as released. This is a join
+inside one listing of one project, against an API that offers no id to use.
+
+Being wrong toward "attached" costs cents until the next sweep. Being wrong toward
+"orphaned" proposes a deletion. They are not symmetric and the adapter must not treat
+them as if they were.
+
+**`managed`** says the instance owns the volume and deleting the instance takes it. That
+is the difference between "release the box" and "release the box and erase what is on
+it", and it appears nowhere else in the API.
 
 **An adapter that omits the `storage` key is treated as an unreached corner**, exactly
 like a project whose list errored — not as a provider with no storage. The two are one
