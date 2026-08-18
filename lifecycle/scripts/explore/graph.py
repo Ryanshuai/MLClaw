@@ -983,6 +983,78 @@ def cmd_check(a):
     emit(payload)
 
 
+# ------------------------------------------------------------------- NEW
+
+def _since(spec):
+    """`3d` / `12h` / an ISO timestamp -> ISO string. Default 24h."""
+    from datetime import datetime, timedelta, timezone
+    spec = (spec or "24h").strip()
+    if spec[-1:] in ("h", "d") and spec[:-1].isdigit():
+        n = int(spec[:-1]) * (24 if spec[-1] == "d" else 1)
+        return (datetime.now(timezone.utc) - timedelta(hours=n)).isoformat(timespec="seconds")
+    return spec
+
+
+def cmd_new(a):
+    """What became a CONCLUSION since a point in time -- and what only became a number.
+
+    This verb exists for one question, asked roughly fifteen times across the six
+    days of the round this skill came from: 「现在有什么新的结论了吗？」. It is the
+    moment that most tempts the 🟪/✅ collapse. An arm has finished, its numbers
+    are on the card, and the natural sentence is "e13h came back at 92.15" -- which
+    reports a RESULT as a CONCLUSION. Often the verdict is genuinely not reachable
+    yet, because it waits on another arm.
+
+    So the answer is deliberately in two lists, and the second one is labelled.
+    """
+    p = _paths(a.project, a.session)
+    graph = _load(p["graph"], "graph")
+    since = _since(a.since)
+    nodes = graph.get("nodes", [])
+
+    def landed(n, states):
+        for h in reversed(n.get("history") or []):
+            if h.get("to") in states and h.get("at", "") >= since:
+                return h
+        return None
+
+    conclusions, numbers = [], []
+    for n in nodes:
+        h = landed(n, ("closed", "killed"))
+        if h and n["state"] in SETTLED:
+            conclusions.append({
+                "id": n["id"], "title": n.get("title"), "at": h.get("at"),
+                "verdict": n.get("verdict"), "killed_by": n.get("killed_by"),
+                "revive_if": n.get("revive_if"), "tier": n.get("tier"),
+                "superseded_by": n.get("superseded_by"),
+            })
+        elif n["state"] == "filled":
+            f = landed(n, ("filled",))
+            numbers.append({"id": n["id"], "title": n.get("title"),
+                            "tier": n.get("tier"), "result": n.get("result"),
+                            "filled_at": (f or {}).get("at")
+                                         or ((n.get("history") or [{}])[-1].get("at"))})
+
+    disputes = graph.get("disputes", [])
+    out = {
+        "since": since,
+        "conclusions": sorted(conclusions, key=lambda c: c.get("at") or ""),
+        "results_without_a_verdict": sorted(numbers, key=lambda c: c.get("filled_at") or ""),
+        "disputes_opened": [d for d in disputes if (d.get("opened_at") or "") >= since],
+        "disputes_resolved": [d for d in disputes if (d.get("resolved_at") or "") >= since],
+        "still_running": [n["id"] for n in nodes if n["state"] == "running"],
+    }
+    if numbers:
+        out["‼️"] = (f"{len(numbers)} arm(s) have NUMBERS and no verdict. Those are not "
+                     f"conclusions -- a card's meaning often waits on another card, which "
+                     f"is why `filled` and `closed` are different states. Report them as "
+                     f"measurements, and say what each is still waiting on.")
+    if not conclusions and not numbers:
+        out["note"] = ("nothing settled and nothing landed in this window. That is a real "
+                       "answer -- do not go looking for something to report.")
+    emit(out)
+
+
 # ---------------------------------------------------------------- STATUS
 
 def cmd_status(a):
@@ -1078,6 +1150,12 @@ def main():
                          "second check behind it is unreachable code that reads as a "
                          "guard")
     rs.set_defaults(fn=cmd_resolve)
+
+    nw = sub.add_parser("new", help="what became a CONCLUSION since a time -- and what "
+                                    "only became a number")
+    common(nw)
+    nw.add_argument("--since", help="`3d` / `12h` / an ISO timestamp. Default 24h")
+    nw.set_defaults(fn=cmd_new)
 
     t = sub.add_parser("status", help="one-screen summary")
     common(t)

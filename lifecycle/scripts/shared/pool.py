@@ -421,6 +421,31 @@ def v_acquire(args):
           "preemptible": slot.get("preemptible"), "run": args.run})
 
 
+# What happened to what was ON the box -- a SECOND AXIS, not a fourth outcome.
+# `outcome` answers "is this trial evidence about its hypothesis"; this answers
+# "did the work survive". Collapsing them loses the distinction that costs money.
+#
+# From a real fleet (2026-08-14, ten preempted L40S boxes): four arms were
+# preempted WITH weights on disk, reachable only by attaching the volume to
+# another platform; three were preempted and probably had nothing, but that could
+# not be checked because starting the box back up hit the same tenure wall that
+# preempted it. All seven were `--outcome preempted`, and the record could not
+# tell them apart.
+#
+# ‼️ `unverifiable` IS NOT `absent`. "Probably no weights" and "no weights" are
+# different facts, and a tenure wall produces the first while reading like the
+# second -- the same rule as `census.py` keeping a location that did not answer
+# apart from a directory that is genuinely empty, and `/repro` refusing to call an
+# unprobed axis `intact`.
+ARTIFACTS = {
+    "recovered": "pulled off and verified. The only state that permits destroying the box",
+    "present_unreachable": "on the disk, not reachable by the normal route — needs another "
+                           "path (attach the volume elsewhere) before anything is destroyed",
+    "absent": "checked, and there is nothing there",
+    "unverifiable": "could not look. NEVER report this as `absent`",
+}
+
+
 def v_release(args):
     """Return a slot to the pool. **Does not release the lease** — the next trial wants
     the box, and tearing down between trials pays provisioning and staging every time.
@@ -430,21 +455,37 @@ def v_release(args):
     not a failed trial" — the search steering away from a good region because the
     provider reclaimed a card is a mistake nothing downstream can detect or undo.
     """
+    # An infrastructure outcome means the box may be going away with work on it.
+    # That is exactly where a default would turn `unverifiable` into `absent`, so
+    # the friction is targeted rather than universal: required here, optional on ok.
+    if args.outcome in ("preempted", "crashed") and not args.artifacts:
+        fail(f"--outcome {args.outcome} needs --artifacts "
+             f"({'|'.join(ARTIFACTS)}) — this is the case where the box may be "
+             f"going away with work on it, and where 'probably nothing was there' "
+             f"most often gets written down as 'nothing was there'")
     pool = read_pool(args.session)
     slot = next((s for s in pool["slots"] if s["slot"] == args.slot), None)
     if slot is None:
         fail(f"no slot {args.slot} in this pool")
     if slot["history"]:
         slot["history"][-1]["outcome"] = args.outcome
+        slot["history"][-1]["artifacts"] = args.artifacts
         slot["history"][-1]["ended_at"] = int(time.time())
     slot["run"] = None
     slot["state"] = "preempted" if args.outcome == "preempted" else "free"
     write_pool(args.session, pool)
-    emit({"slot": slot["slot"], "state": slot["state"], "outcome": args.outcome,
-          "trial_counts_as_evidence": args.outcome != "preempted",
-          "note": ("infrastructure outcome — re-place and re-run this trial; do NOT "
-                   "record it as a refuted hypothesis"
-                   if args.outcome == "preempted" else None)})
+    out = {"slot": slot["slot"], "state": slot["state"], "outcome": args.outcome,
+           "artifacts": args.artifacts,
+           "trial_counts_as_evidence": args.outcome != "preempted",
+           "safe_to_destroy_the_box": args.artifacts == "recovered",
+           "note": ("infrastructure outcome — re-place and re-run this trial; do NOT "
+                    "record it as a refuted hypothesis"
+                    if args.outcome == "preempted" else None)}
+    if args.artifacts and args.artifacts != "recovered":
+        out["‼️"] = (f"artifacts are `{args.artifacts}`: {ARTIFACTS[args.artifacts]}. "
+                     f"Releasing this lease destroys the disk. `unverifiable` is not "
+                     f"`absent` — say which one when you report this.")
+    emit(out)
 
 
 def v_heartbeat(args):
@@ -514,6 +555,9 @@ def main():
     r.add_argument("--session", required=True)
     r.add_argument("--slot", required=True)
     r.add_argument("--outcome", default="ok", choices=("ok", "preempted", "crashed"))
+    r.add_argument("--artifacts", choices=sorted(ARTIFACTS),
+                   help="what happened to what was ON the box. Required when the outcome "
+                        "is preempted or crashed. `unverifiable` is never `absent`")
 
     hb = sub.add_parser("heartbeat"); hb.set_defaults(fn=v_heartbeat)
     hb.add_argument("--session", required=True)

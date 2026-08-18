@@ -23,6 +23,32 @@ mention a provider by name, and the moment something does, it belongs in an adap
    provider_<name>.py             one cloud, or one owned box ← L1
 ```
 
+## Preemption has two axes, not one
+
+`--outcome` answers **is this trial evidence about its hypothesis**. It does not answer
+**did the work survive**, and on a real fleet those came apart. Of ten preempted L40S
+boxes in one round: four held weights reachable only by attaching the volume to another
+platform, and three probably held nothing — but that could not be checked, because
+starting the box back up hit the same tenure wall that preempted it. All seven were
+`--outcome preempted`, and the record could not tell them apart.
+
+So `pool.py release` carries a second field, required whenever the outcome is
+`preempted` or `crashed` — the cases where the box may be going away with work on it:
+
+| `--artifacts` | |
+|---|---|
+| `recovered` | pulled off and verified. **The only state that permits destroying the box** |
+| `present_unreachable` | on the disk, not reachable by the normal route — needs another path first |
+| `absent` | checked, and there is nothing there |
+| `unverifiable` | **could not look.** Never report this as `absent` |
+
+‼️ **`unverifiable` is not `absent`.** A tenure wall produces the first while it reads
+like the second — the same distinction `census.py` keeps between a location that did not
+answer and a directory that is genuinely empty, and the one `/repro` keeps between an
+unprobed axis and an intact one. Friction is deliberately targeted rather than universal:
+an `ok` release needs nothing, because universal friction is the kind that gets routed
+around.
+
 ## What a fleet is, and what it is not
 
 A fleet here is **one search holding several machines at once**. It is not a cluster

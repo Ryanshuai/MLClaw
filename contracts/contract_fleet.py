@@ -23,11 +23,13 @@ every machine.
 import io
 import json
 import os
+import shutil
+import tempfile
 import types
 import unittest
 from contextlib import redirect_stdout
 
-from helpers import REPO_ROOT, TempDirCase, load_script
+from helpers import load_script, REPO_ROOT, TempDirCase, run_script
 
 
 def capture(fn, *args, **kwargs):
@@ -377,9 +379,14 @@ class PreemptionIsNotEvidence(TempDirCase):
                        "state": "busy", "run": "run_007",
                        "history": [{"run": "run_007", "at": 0, "outcome": None}]}]})
 
-    def _release(self, outcome):
+    def _release(self, outcome, artifacts="recovered"):
+        # `artifacts` became required for infrastructure outcomes when preemption
+        # grew its second axis (see PreemptionHasTwoAxesNotOne). These checks are
+        # about the EVIDENCE axis, which is unchanged — so they supply a
+        # disposition and go on testing what they were testing.
         return capture(self.pool.v_release, types.SimpleNamespace(
-            session=self.session, slot="slot_0", outcome=outcome))
+            session=self.session, slot="slot_0", outcome=outcome,
+            artifacts=artifacts))
 
     def test_preempted_is_flagged_as_not_evidence(self):
         out = self._release("preempted")
@@ -463,6 +470,76 @@ class TableProvenance(unittest.TestCase):
                 for needle in pattern:
                     self.assertNotIn(needle, text,
                                      f"{rel} pins {needle}… — discover it at call time")
+
+
+class PreemptionHasTwoAxesNotOne(unittest.TestCase):
+    """fleet.md -> "A preempted trial is not a failed trial", and the half that
+    rule does not cover.
+
+    `outcome` answers "is this trial evidence about its hypothesis". It does not
+    answer "did the work survive", and on a real fleet those came apart: of ten
+    preempted L40S boxes, four held weights reachable only by attaching the volume
+    elsewhere, and three probably held nothing — but that could not be checked,
+    because starting the box back up hit the same tenure wall that preempted it.
+    All seven were `--outcome preempted` and the record could not tell them apart.
+
+    ‼️ `unverifiable` is not `absent`. A tenure wall produces the first while it
+    reads like the second — the same distinction `census.py` keeps between a
+    location that did not answer and a directory that is genuinely empty, and the
+    one `/repro` keeps between an unprobed axis and an intact one.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="mlclaw_pool_")
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.pool = load_script("shared/pool.py")
+
+    def run_pool(self, *args):
+        return run_script("shared/pool.py", *args)
+
+    def opened(self):
+        rc, out, err = self.run_pool("open", "--session", self.tmp, "--slots", "1",
+                                     "--provider", "ssh", "--machine-type", "local")
+        return rc, out, err
+
+    def test_the_vocabulary_keeps_unverifiable_apart_from_absent(self):
+        self.assertIn("unverifiable", self.pool.ARTIFACTS)
+        self.assertIn("absent", self.pool.ARTIFACTS)
+        self.assertIn("NEVER", self.pool.ARTIFACTS["unverifiable"],
+                      "the vocabulary entry has to carry the rule, because the two "
+                      "words are one keystroke apart and a world apart in a bill")
+
+    def test_only_recovered_permits_destroying_the_box(self):
+        """`present_unreachable` is the state that most reads like done: the weights
+        exist, they are simply not here yet. Releasing the lease deletes the disk."""
+        safe = [k for k, v in self.pool.ARTIFACTS.items() if "permits destroying" in v]
+        self.assertEqual(safe, ["recovered"])
+
+    def test_an_infrastructure_outcome_cannot_be_recorded_without_a_disposition(self):
+        """Refused BEFORE any state is read, which is both the right order for a
+        usage error and what makes the guard checkable without a live pool."""
+        rc, out, err = self.run_pool("release", "--session", self.tmp, "--slot", "0",
+                                     "--outcome", "preempted")
+        self.assertNotEqual(rc, 0)
+        blob = json.dumps(out) if not isinstance(out, str) else out
+        self.assertIn("--artifacts", blob + err)
+        self.assertNotIn("no slot", blob + err,
+                         "a usage error must not be reported as a state error")
+
+    def test_crashed_carries_the_same_requirement(self):
+        rc, out, err = self.run_pool("release", "--session", self.tmp, "--slot", "0",
+                                     "--outcome", "crashed")
+        self.assertNotEqual(rc, 0)
+        self.assertIn("--artifacts", (json.dumps(out) if not isinstance(out, str) else out) + err)
+
+    def test_a_normal_release_is_not_burdened(self):
+        """Friction belongs only where the box may be going away with work on it.
+        Universal friction is the kind that gets routed around."""
+        rc, out, err = self.run_pool("release", "--session", self.tmp, "--slot", "0",
+                                     "--outcome", "ok")
+        blob = (json.dumps(out) if not isinstance(out, str) else out) + err
+        self.assertNotIn("--artifacts", blob,
+                         "an ok release must fail on the missing pool, not on artifacts")
 
 
 if __name__ == "__main__":

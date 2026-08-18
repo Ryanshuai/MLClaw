@@ -863,5 +863,70 @@ class OneNumberCannotDescribeTwoSettings(GraphCase):
         self.assertNotIn("one_number_two_settings", inv)
 
 
+class ANumberIsNotAConclusion(GraphCase):
+    """references/experiment-graph.md -> §2, at the moment it is hardest to honour.
+
+    「现在有什么新的结论了吗？」 was asked roughly fifteen times across the six days
+    of the round this skill came from. It is the moment that most tempts the
+    filled/closed collapse: an arm has finished, its numbers are on the card, and
+    the natural sentence reports the number as a conclusion. Often the verdict
+    genuinely is not reachable yet, because it waits on another arm.
+
+    So `new` answers in two lists and labels the second one. A verb that merged
+    them would be a convenience that undoes the state machine.
+    """
+
+    def settled(self, tier="T2"):
+        nid = self.add_complete()
+        self.run_it(nid, run_id="run_" + nid)
+        self.fill(nid, tier=tier)
+        self.g("close", "--id", nid, "--verdict", "won")
+        return nid
+
+    def unsettled(self, tier="T2"):
+        nid = self.add_complete()
+        self.run_it(nid, run_id="run_" + nid)
+        self.fill(nid, tier=tier)
+        return nid
+
+    def test_a_result_without_a_verdict_is_not_listed_as_a_conclusion(self):
+        c, u = self.settled(), self.unsettled()
+        rc, out, _ = self.g("new")
+        self.assertEqual(rc, 0)
+        self.assertEqual([x["id"] for x in out["conclusions"]], [c])
+        self.assertEqual([x["id"] for x in out["results_without_a_verdict"]], [u])
+
+    def test_the_second_list_says_what_it_is(self):
+        self.unsettled()
+        rc, out, _ = self.g("new")
+        self.assertIn("\u203c\ufe0f", out)
+        self.assertIn("not", out["\u203c\ufe0f"].lower())
+        self.assertIn("waiting", out["\u203c\ufe0f"].lower())
+
+    def test_a_kill_is_a_conclusion_and_carries_its_revival(self):
+        nid = self.unsettled(tier="T1")
+        self.g("close", "--id", nid, "--killed-by", "share_too_small",
+               "--revive-if", "re-measure on the night corpus")
+        rc, out, _ = self.g("new")
+        row = out["conclusions"][0]
+        self.assertEqual(row["killed_by"], "share_too_small")
+        self.assertTrue(row["revive_if"], "a kill with no revival is not a conclusion "
+                                          "anybody can act on next round")
+
+    def test_a_window_with_nothing_in_it_says_so_instead_of_reaching(self):
+        self.settled()
+        rc, out, _ = self.g("new", "--since", "2099-01-01T00:00:00+00:00")
+        self.assertEqual(out["conclusions"], [])
+        self.assertIn("real answer", out["note"],
+                      "nothing happened is an answer; hunting for something to report "
+                      "is how a filled card gets promoted")
+
+    def test_disputes_show_up_as_events_too(self):
+        a, b = self.settled(), self.unsettled()
+        self.g("dispute", "--id", b, "--against", a, "--detail", "opposite sign")
+        rc, out, _ = self.g("new")
+        self.assertEqual(len(out["disputes_opened"]), 1)
+
+
 if __name__ == "__main__":
     unittest.main()
