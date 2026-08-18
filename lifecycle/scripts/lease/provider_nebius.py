@@ -723,9 +723,73 @@ def storage_rows(cfg, pid, project, region, instances, tag_prefix, now):
                 "managed": bool(status.get("managed_by")),
                 "state": status.get("state"),
                 "age_s": max(0, now - _epoch(meta.get("created_at") or "")),
+                "created_at": (meta.get("created_at") or "")[:19] or None,
                 "project": project, "region": region,
             })
     return rows, None
+
+
+def creators(cfg, window_s):
+    """resource id -> the completed CREATE event that made it, across every tenant.
+
+    THE ONLY PLACE OWNERSHIP LIVES on a shared account. The resource lists carry no owner
+    at all, and `iam tenant-user-account list` returns account ids with `email` and `name`
+    both null — so it can report that a tenant has six members while identifying none of
+    them. `authentication.subject.name` on an audit event is the practical id->person map,
+    and it is why this is a join against the log rather than a field on a listing.
+
+    Creation time is NOT ownership. Several people launch boxes into the same projects on
+    the same night, and reading "created last night" as "mine" is how two of a colleague's
+    scene-generation boxes were once reported as this user's training machines.
+
+    Returns `(by_id, checked, unreached)`. A resource whose CREATE falls outside the
+    window is simply absent — the caller must render that as **unknown**, never as
+    unowned and never as yours.
+    """
+    now = int(time.time())
+    start = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now - window_s))
+    end = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now))
+    by_id, checked, unreached = {}, [], []
+    for tenant in tenants(cfg):
+        items, err = paged(cfg, "audit", "v2", "audit-event", "list",
+                           "--parent-id", tenant, "--start", start, "--end", end,
+                           "--event-type", "control_plane",
+                           "--filter", "action = 'CREATE'", "--page-size", "500")
+        if err:
+            unreached.append({"scope": tenant, "why": f"audit CREATE: {err[:160]}"})
+            continue
+        checked.append(tenant)
+        for ev in items:
+            row = _audit_row(ev)
+            # Only completed events. A CREATE that ended in ERROR left nothing behind —
+            # capacity failures produce these constantly — and counting one invents a
+            # machine, then attributes it to somebody.
+            if not row or (row["outcome"] or "DONE") != "DONE":
+                continue
+            by_id.setdefault(row["instance_id"], row)
+    return by_id, checked, unreached, {"start": start, "end": end}
+
+
+def attribute(rows, by_id):
+    """Stamp each row with who made it. Three states, and the third is the one that has
+    to survive being read quickly:
+
+      operator: "<name>"  operator_status: audit_create             — known
+      operator: null      operator_status: no_create_event_in_window — LOOKED, DID NOT FIND
+      (no keys at all)                                              — nobody asked
+
+    The middle state is not "unowned" and is emphatically not "yours". A box older than
+    the window produces it, and so does a tenant whose log did not answer.
+    """
+    for row in rows:
+        key = row.get("instance_id") or row.get("storage_id")
+        ev = by_id.get(key)
+        row["operator"] = ev["actor"] if ev else None
+        row["operator_status"] = "audit_create" if ev else "no_create_event_in_window"
+        # A SEPARATE field from `created_at`, which comes off the resource's own metadata
+        # and is authoritative. These can differ — the audit event is when the CREATE was
+        # logged — and one silently overwriting the other is two authors for one value.
+        row["created_at_audit"] = ev["at"] if ev else None
 
 
 def v_sweep(args):
@@ -760,6 +824,13 @@ def v_sweep(args):
                 "state": ((inst.get("status") or {}).get("state") or "").upper(),
                 "name": meta.get("name"), "project": name, "region": region,
                 "run": labels.get("mlclaw_run") or None,
+                # Shape and birth, carried rather than left for the caller to re-fetch.
+                # A `state` with no `platform` cannot be priced or explained, and `age_s`
+                # alone cannot be shown to a person deciding whether to kill something.
+                "platform": res_spec.get("platform"), "preset": res_spec.get("preset"),
+                "created_at": created[:19] or None,
+                "public_ip": public_ip(inst),
+                "project_id": pid, "tenant": entry[3],
             })
         # Storage is swept from the SAME instance listing, in the same pass. Two passes
         # would let a box be created between them and read as an orphaned disk.
@@ -777,7 +848,21 @@ def v_sweep(args):
             checked.append(name)
             units += rows
             storage += store
-    emit(sweep_result(units, checked, unreached, storage=storage))
+    payload = sweep_result(units, checked, unreached, storage=storage)
+    if args.attribute:
+        by_id, a_checked, a_unreached, window = creators(cfg, args.attribute_window_s)
+        attribute(units + storage, by_id)
+        # A SEPARATE envelope, deliberately not folded into `scope`. `scope` answers "did
+        # I enumerate every resource"; this answers "do I know who made them". An audit
+        # log that timed out leaves the orphan list complete and the ownership unknown,
+        # and merging the two would turn every attribution hiccup into a reap that calls
+        # its own count a lower bound when it is not.
+        payload["attribution"] = {
+            "window": window, "complete": not a_unreached,
+            "checked": a_checked, "unreached": a_unreached,
+            "note": "operator is null for anything created before the window — that is "
+                    "UNKNOWN, not unowned and not yours"}
+    emit(payload)
 
 
 def _preset_gpus(preset):
@@ -856,13 +941,33 @@ def v_history(args):
 
 
 def _audit_row(ev):
-    """One event, flattened. `resource` is a dict on some events and a bare string on
-    others, so probe both and fall back to an id regex over the whole event — assuming
-    one shape silently drops half the log, which then reads as "nothing happened"."""
+    """One event, flattened.
+
+    ‼️ THE PAYLOAD IS ONE LEVEL DEEPER THAN IT LOOKS. Identity lives at
+    `resource.metadata.{id,name}` — NOT `resource.{id,name}` — and reading the shallow
+    path returned `name: None` on every event in a live log. The id survived only because
+    of the regex fallback below, so nothing broke loudly; what broke quietly was every
+    feature built on the name: `--name` filtering matched nothing, and `_verdict`'s `aka`
+    was always empty, which means the rename tracking this layer makes a point of was
+    dead while reading as implemented.
+
+    `resource` also arrives as a bare string on some events, so every shape is probed and
+    the regex is the last resort. Assuming one shape silently drops half the log, which
+    then reads as "nothing happened".
+    """
     resource = ev.get("resource")
-    rid = resource.get("id") if isinstance(resource, dict) else None
-    name = (resource.get("name") if isinstance(resource, dict)
-            else resource if isinstance(resource, str) else None)
+    meta = (resource.get("metadata") or {}) if isinstance(resource, dict) else {}
+    current = (((resource.get("state") or {}).get("current") or {})
+               if isinstance(resource, dict) else {})
+    cur_meta = current.get("metadata") or {}
+    request = ev.get("request") if isinstance(ev.get("request"), dict) else {}
+
+    rid = (meta.get("id") or cur_meta.get("id")
+           or (resource.get("id") if isinstance(resource, dict) else None))
+    name = (meta.get("name") or cur_meta.get("name")
+            or (resource.get("name") if isinstance(resource, dict) else None)
+            or (resource if isinstance(resource, str) else None)
+            or request.get("name") or (request.get("metadata") or {}).get("name"))
     if not rid:
         match = re.search(r"computeinstance-[a-z0-9]+", json.dumps(ev))
         rid = match.group(0) if match else None
@@ -870,14 +975,26 @@ def _audit_row(ev):
         return None
     status = ev.get("status")
     subject = (ev.get("authentication") or {}).get("subject") or {}
+    labels = (cur_meta.get("labels") or {}) or ((request.get("labels") or {}))
     return {"instance_id": rid, "name": name, "action": ev.get("action"),
+            # The event's own type string (`ai.nebius.compute.computeinstance.create`)
+            # plus the resource's short kind. A caller filtering to instances needs one
+            # of these; inferring it from the id prefix works until a service names ids
+            # differently.
+            "type": ev.get("type"), "kind": meta.get("type"),
             "at": (ev.get("time") or "")[:19],
             # Ownership on a shared account. Creation time proves nothing — several
             # people launch boxes into the same projects on the same night, and the
             # resource lists do not carry an owner at all.
             "actor": subject.get("name") or subject.get("id"),
+            # The account id alongside the name, because this log is the ONLY practical
+            # id -> person map: `iam tenant-user-account list` returns members with
+            # `email` and `name` both null, so it can report that a tenant has six
+            # members while identifying none of them. Ids are per-tenant, so one human
+            # legitimately has several — that is one person, not several accounts.
+            "actor_id": subject.get("tenant_user_id") or subject.get("id"),
             "outcome": (status.get("code") if isinstance(status, dict) else status) or "",
-            "tag": ((ev.get("request") or {}).get("labels") or {}).get("mlclaw_tag")}
+            "tag": labels.get("mlclaw_tag")}
 
 
 def _verdict(events):
@@ -932,6 +1049,14 @@ def main():
 
     s = sub.add_parser("sweep"); s.set_defaults(fn=v_sweep)
     s.add_argument("--tag-prefix", default=TAG_PREFIX)
+    s.add_argument("--attribute", action="store_true",
+                   help="join each row against the audit log for who created it. Off by "
+                        "default because it is the slowest call in the layer; needed "
+                        "whenever the sweep is not scoped to this tool's own tag, since "
+                        "an untagged box on a shared account may be a colleague's")
+    s.add_argument("--attribute-window-s", type=int, default=5 * 86400,
+                   help="how far back to look for the CREATE. A box older than this gets "
+                        "operator null, which means unknown")
 
     h = sub.add_parser("history"); h.set_defaults(fn=v_history)
     h.add_argument("--tag-prefix", default=TAG_PREFIX)

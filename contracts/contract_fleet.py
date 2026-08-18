@@ -569,6 +569,116 @@ class StorageIsTheSecondMeter(TempDirCase):
                         "unknown amount and must say so")
 
 
+class OwnershipIsNeverTheClock(unittest.TestCase):
+    """`.claude/skills/lease/references/contract.md` -> "Ownership on a shared account".
+
+    Only bites on a sweep scoped wider than this tool's own tag — but that is exactly the
+    sweep somebody runs to ask "what is burning money", and on a shared account the answer
+    contains other people's machines. Measured on a live account while writing this: six
+    running boxes, four the user's and two colleagues' including one at $30.80/hr. Read
+    without attribution, all six are candidates.
+    """
+
+    def setUp(self):
+        self.neb = load_script("lease/provider_nebius.py")
+
+    def test_a_known_creator_is_stamped_with_where_it_came_from(self):
+        rows = [{"instance_id": "i-1"}]
+        self.neb.attribute(rows, {"i-1": {"actor": "someone@example.com", "at": "T"}})
+        self.assertEqual(rows[0]["operator"], "someone@example.com")
+        self.assertEqual(rows[0]["operator_status"], "audit_create")
+
+    def test_outside_the_window_is_unknown_and_says_which_kind_of_unknown(self):
+        """`null` here means LOOKED AND DID NOT FIND. It must not read as unowned, and it
+        must never read as yours — that reading is how a colleague's box gets reaped."""
+        rows = [{"instance_id": "i-old"}]
+        self.neb.attribute(rows, {})
+        self.assertIsNone(rows[0]["operator"])
+        self.assertEqual(rows[0]["operator_status"], "no_create_event_in_window")
+
+    def test_nobody_asked_leaves_no_keys_at_all(self):
+        """The third state. A row with no `operator` key was never attributed, which is a
+        different sentence from one attributed and not found — same three-way split the
+        storage key uses, for the same reason."""
+        rows = [{"instance_id": "i-1"}]
+        self.assertNotIn("operator", rows[0])
+
+    def test_storage_is_attributed_on_its_own_id_not_its_instance(self):
+        """A volume outlives its box, so its creator is its own — joining through an
+        instance that no longer exists would attribute exactly the abandoned volumes this
+        layer exists to find to nobody."""
+        rows = [{"storage_id": "d-1"}]
+        self.neb.attribute(rows, {"d-1": {"actor": "owner@example.com", "at": "T"}})
+        self.assertEqual(rows[0]["operator"], "owner@example.com")
+
+
+class AnAuditEventIsParsedDeepEnough(unittest.TestCase):
+    """fleet.md -> "Group by id, never by name".
+
+    That rule is enforced by recording a rename as an alias rather than as a second
+    machine — and the alias list can only be built from the event's NAME. Read against a
+    live log, every event came back `name: None`, because identity sits at
+    `resource.metadata.{id,name}` and the parse read `resource.{id,name}`, one level too
+    shallow.
+
+    Nothing failed. The id survived on a regex fallback, so the verdicts looked right;
+    what was silently dead was every feature built on the name — `--name` matched
+    nothing, and `aka` was always empty, which means the rename tracking the contract
+    makes a point of was decorative. A check that would have caught it is one that
+    asserts the real payload shape, not a hand-made flat one.
+    """
+
+    def setUp(self):
+        self.neb = load_script("lease/provider_nebius.py")
+
+    # The shape the provider actually returns, trimmed to the fields that matter.
+    EVENT = {
+        "type": "ai.nebius.compute.computeinstance.create",
+        "action": "CREATE", "time": "2026-08-17T16:51:25.560650797Z",
+        "status": {"code": "DONE"},
+        "authentication": {"subject": {"tenant_user_id": "tenantuseraccount-e00a",
+                                       "name": "someone@example.com"}},
+        "resource": {
+            "metadata": {"id": "computeinstance-e00r", "name": "box9dof-e135yqh",
+                         "type": "computeinstance"},
+            "state": {"current": {"metadata": {
+                "id": "computeinstance-e00r", "name": "box9dof-e135yqh",
+                "labels": {"mlclaw_tag": "mlclaw-lease_x"}}}}},
+    }
+
+    def test_the_name_is_found_where_the_provider_actually_puts_it(self):
+        row = self.neb._audit_row(self.EVENT)
+        self.assertEqual(row["name"], "box9dof-e135yqh",
+                         "a null name silently disables rename tracking and --name")
+        self.assertEqual(row["instance_id"], "computeinstance-e00r")
+
+    def test_the_id_does_not_depend_on_the_regex_fallback(self):
+        """The fallback is a last resort for events with no resource block. Leaning on it
+        is what let the shallow read go unnoticed."""
+        row = self.neb._audit_row(
+            {**self.EVENT, "resource": {"metadata": {"id": "computedisk-e00x",
+                                                     "name": "box-boot"}}})
+        self.assertEqual(row["instance_id"], "computedisk-e00x",
+                         "a disk event must key on the disk, not on whichever instance "
+                         "id happens to appear elsewhere in the payload")
+
+    def test_the_tag_is_read_from_the_resource_state_not_only_the_request(self):
+        self.assertEqual(self.neb._audit_row(self.EVENT)["tag"], "mlclaw-lease_x")
+
+    def test_a_rename_becomes_an_alias_rather_than_a_second_machine(self):
+        """The end-to-end point of the parse. One id, two names over its life: the later
+        name is reported and the earlier kept as `aka`. Grouped by name instead, this is
+        two machines and the live one reads as released."""
+        rows = [self.neb._audit_row({**self.EVENT, "time": t, "action": a,
+                                     "resource": {"metadata": {
+                                         "id": "computeinstance-e00r", "name": n}}})
+                for t, a, n in (("2026-08-17T10:00:00Z", "CREATE", "aquamarine-parakeet-8"),
+                                ("2026-08-17T11:00:00Z", "UPDATE", "scene-gen"))]
+        verdict = self.neb._verdict(rows)
+        self.assertEqual(verdict["name"], "scene-gen")
+        self.assertEqual(verdict["aka"], ["aquamarine-parakeet-8"])
+
+
 class EveryAdapterDeclaresItsLimits(unittest.TestCase):
     """`.claude/skills/lease/references/contract.md` -> "The eight verbs", "What every
     adapter declares", "Shape resolution: requirements → machine type is a lookup, not a

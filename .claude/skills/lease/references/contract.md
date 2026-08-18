@@ -170,6 +170,39 @@ disk was bought, so releasing a claim accrues nothing.
 a free row. L2 counts unpriced rows and reports `total_is_lower_bound`; a residual figure
 that silently dropped its largest term is worse than no figure, because it gets quoted.
 
+## Ownership on a shared account
+
+A sweep scoped to the tag L2 issued needs none of this: the tag *is* the ownership
+claim. A sweep scoped wider — "what is burning money on this account" — does, because on
+a shared tenant the answer includes other people's machines, and reporting theirs as
+forgotten is how a colleague's running job gets proposed for deletion.
+
+**Ownership is never the clock.** Several people launch boxes into the same projects on
+the same night; "created last night" is not "mine". Nor is it in the resource listing —
+providers routinely carry no owner there at all, and the account-membership API can
+report that a tenant has six members while identifying none of them. Where ownership
+exists, it is in the **lifecycle log's actor field**, joined by resource id.
+
+So attribution is an opt-in join (`sweep --attribute`), and it reports **three** states:
+
+| | |
+|---|---|
+| `operator: "<name>"`, `operator_status: audit_create` | known |
+| `operator: null`, `operator_status: no_create_event_in_window` | **looked, did not find** — the resource predates the window, or the log did not answer |
+| keys absent | nobody asked |
+
+The middle state is not "unowned" and is emphatically not "yours".
+
+**Attribution gaps are reported in their own envelope, never folded into `scope`.**
+`scope` answers "did I enumerate every resource"; attribution answers "do I know who made
+them". A log that timed out leaves the orphan list complete and the ownership unknown,
+and merging the two makes every attribution hiccup declare the resource count a lower
+bound when it is not — which is the same two-facts-into-one error this document spends
+the rest of its length avoiding.
+
+An adapter with no lifecycle log cannot attribute at all, and says so the same way
+`history` does rather than guessing from a name or a timestamp.
+
 ## Created is not usable
 
 `up` returns when the machine is **reachable**, not when the API accepted the create.
