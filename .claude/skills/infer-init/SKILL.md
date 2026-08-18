@@ -66,7 +66,7 @@ Determine:
 - **Inputs** -> images, video, text, or directories of data
 - **Outputs** -> prediction files, annotated images, JSON results, visualizations
 - **Metrics** -> performance values the code reports (FPS, latency, throughput), with extraction patterns
-- **Required packages**: run `python lifecycle/scripts/infer-init/scan_requirements.py <code_dir>`. If it fails, check requirements.txt manually.
+- **Required packages**: run `python <mlclaw_root>/lifecycle/scripts/infer-init/scan_requirements.py <code_dir>`. If it fails, check requirements.txt manually.
 
 For metrics: after identifying them, ask the user which ones to track across runs. Their selection goes into `output.json -> metrics.watch`. Inference metrics are typically performance-oriented (FPS, latency, throughput) rather than accuracy metrics, which belong in the evaluation stage.
 
@@ -117,7 +117,7 @@ For each file: show proposed content, then wait for the user to confirm before m
 
 ## Step 5: Validate
 
-Run `python lifecycle/scripts/infer-init/validate_refs.py <stage_dir>`. If the script fails, check manually:
+Run `python <mlclaw_root>/lifecycle/scripts/infer-init/validate_refs.py <stage_dir>`. If the script fails, check manually:
 
 - Entry script file exists in code/
 - All items have a valid `type` field

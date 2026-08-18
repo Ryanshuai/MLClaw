@@ -56,7 +56,7 @@ Standard Workflow State Protocol: push to `stack`, append `started` to `history`
 ## Step 1: Audit the five axes
 
 ```bash
-python lifecycle/scripts/repro/repro.py check --project {PROJECT} --run <stage>/<run_id>
+python <mlclaw_root>/lifecycle/scripts/repro/repro.py check --project {PROJECT} --run <stage>/<run_id>
 ```
 
 Records only: local files and local `git`, no network and no ssh. Writes a dated observation to `stages/<stage>/runs/<run_id>/repro/check_<ts>.json` — dated because it is an observation of the world, like a census, and re-taking it next month gives a different answer. Never exits 1; reporting that a reproduction is dead is not a refusal.
@@ -77,7 +77,7 @@ Per axis: `intact` / `drifted` / `gone` / `unverifiable`. Read `references/axes.
 ## Step 2: Open the session — declare everything first
 
 ```bash
-python lifecycle/scripts/repro/repro.py open --project {PROJECT} \
+python <mlclaw_root>/lifecycle/scripts/repro/repro.py open --project {PROJECT} \
     --run training/run_20260315_120000 --name lr1e4 \
     --probe 'datasets/coco@probe_50' \
     --remeasure-only                       # or: --measure-via retrain --i-accept-the-cost
@@ -98,9 +98,9 @@ Everything that could be chosen to flatter the result is fixed here, before a si
 Launch `--band-trials` runs through `/eval-run` (or `/train-run`) that change **nothing**. Register each:
 
 ```bash
-python lifecycle/scripts/repro/repro.py trial --project {PROJECT} \
+python <mlclaw_root>/lifecycle/scripts/repro/repro.py trial --project {PROJECT} \
     --session <sid> --run evaluation/<run_id>
-python lifecycle/scripts/repro/repro.py band --project {PROJECT} --session <sid>
+python <mlclaw_root>/lifecycle/scripts/repro/repro.py band --project {PROJECT} --session <sid>
 ```
 
 **This is the step people skip, and skipping it is why reproduction arguments never end.** A -0.3% delta is either this pipeline's own noise or a real divergence, and one run cannot tell you which. `band` measures the interval the repeats actually produced and asks whether the recorded value lies inside it. No distribution is assumed and none is needed: "would this pipeline have produced that number again" is answered by whether it did.
@@ -108,7 +108,7 @@ python lifecycle/scripts/repro/repro.py band --project {PROJECT} --session <sid>
 **But three of them is not one price.** Three eval trials are two minutes; three retrains are three times the original run — and that bill covers an ambiguity that may never arise, which **only the first trial can reveal**. So `--band-trials` defaults to `eval` → 3, `retrain` → **1**, and a one-trial session is not a session without a band:
 
 ```bash
-python lifecycle/scripts/repro/repro.py band --project {PROJECT} --session <sid> \
+python <mlclaw_root>/lifecycle/scripts/repro/repro.py band --project {PROJECT} --session <sid> \
     --from-history '[...the target's per-epoch metric over its converged tail...]' \
     --history-what 'epochs 101-140; mosaic closed at 100'
 ```
@@ -138,7 +138,7 @@ A matching aggregate metric is weaker evidence than it looks. The small objects 
 Then let the person judge, and record what they judged:
 
 ```bash
-python lifecycle/scripts/repro/repro.py trial --project {PROJECT} --session <sid> \
+python <mlclaw_root>/lifecycle/scripts/repro/repro.py trial --project {PROJECT} --session <sid> \
     --run evaluation/<run_id> --probe-run inference/<run_id> --predictions-differ
 ```
 
@@ -156,7 +156,7 @@ This produces the 2×2 that pass/fail cannot express:
 ## Step 5: Attribute — one axis per iteration, cheapest first
 
 ```bash
-python lifecycle/scripts/repro/repro.py attribute --project {PROJECT} --session <sid>
+python <mlclaw_root>/lifecycle/scripts/repro/repro.py attribute --project {PROJECT} --session <sid>
 ```
 
 It names the cheapest untested suspect. Pin that one axis back to what the original run recorded, re-run, and register with `--pinned <axis>`. Repeat. Order is `env → params → artifacts → data → code`, and it is **cost order, not likelihood order**: a wrong guess about likelihood costs one cheap iteration, a wrong guess about cost can cost three days of GPU.
@@ -173,7 +173,7 @@ If **no** axis drifted and the number still diverges, do not spend a run pinning
 ## Step 6: Close
 
 ```bash
-python lifecycle/scripts/repro/repro.py close --project {PROJECT} --session <sid> \
+python <mlclaw_root>/lifecycle/scripts/repro/repro.py close --project {PROJECT} --session <sid> \
     --verdict reproduced_with_drift --note "predictions judged by <who>, side-by-side on 50 probe units"
 ```
 

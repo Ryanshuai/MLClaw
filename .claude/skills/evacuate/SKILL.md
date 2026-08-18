@@ -56,8 +56,10 @@ checkpoint 留下 —— 同一条中止条件,只不过执行删除的是「机
 
 ## 顺序不能换
 
+脚本 `<mlclaw_root>/lifecycle/scripts/evacuate/evacuate.py`，七个动词：
+
 ```
-plan → freeze → push → verify → bundle → clearance
+plan → freeze → push → verify → bundle → clearance      (+ status)
 ```
 
 **`freeze` 必须在 `push` 之前,这条是全部保证所在。** 传完再列清单,列的是「到了什么」——

@@ -196,6 +196,32 @@ claude
 # "I have inference code at https://github.com/xxx, set it up"
 ```
 
+### Run it from this directory — not from your project, and not from `~/.claude/skills/`
+
+Your ML code and your data stay wherever they are; MLClaw reaches them through
+`code_source` and `--project`, and never wanted them in the working directory. What the
+working directory decides is something else:
+
+- **`CLAUDE.md` only loads from here.** It carries the routing table and the
+  *Never silently* rules — and those exist precisely for the moments when no skill is
+  running and an obliging agent is about to delete the wrong checkpoint. Copy the skills
+  somewhere global and you get the skills without the thing that decides which one, and
+  what must not happen.
+- **Skills find each other through documents, not through discovery.** `CLAUDE.md`'s
+  skill table and `lifecycle/references/skill-graph.md`'s requires/suggests table are what
+  make `/train-run` hand off to `/eval-run`. Neither is a skill; both live here. Skill
+  discovery only ever supplies names.
+- **`lifecycle/references/*.md` is read on demand by relative path.** No repo, no
+  references.
+
+Scripts are invoked as `python <mlclaw_root>/lifecycle/scripts/…`, where `<mlclaw_root>`
+comes from `shared/workspaces.py tool` (self-bootstrapping, cached in
+`~/.mlclaw/state.json`) — so the scripts themselves are portable.
+`contract_docs.ScriptPathsAreResolvedNotAssumed` keeps them that way, because a
+cwd-relative path does not fail loudly: the fallback rule turns it into "do the same work
+manually", and a `retention.py` refusal that silently stops running looks exactly like one
+that passed.
+
 ## Status
 
 - [x] Project init + resource discovery — `/project-init`, `/resources`

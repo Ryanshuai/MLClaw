@@ -103,7 +103,7 @@ Determine:
 - **Outputs** → result files, visualizations
 - **Metrics** → numerical values the code reports, with extraction patterns
 - **Per-sample records** → the one-record-per-sample file, if the code writes one → `output.json → per_sample`. See Step 1c
-- **Required packages**: run `python lifecycle/scripts/infer-init/scan_requirements.py <code_dir>`. If it fails, check requirements.txt manually.
+- **Required packages**: run `python <mlclaw_root>/lifecycle/scripts/infer-init/scan_requirements.py <code_dir>`. If it fails, check requirements.txt manually.
 
 For metrics: after identifying them, ask the user which ones to track across runs. Their selection goes into `output.json → metrics.watch`. If the code produces per-class breakdowns, set `output.json → metrics.per_class` to `true` (confirm with user).
 
@@ -134,7 +134,7 @@ This is the gate training does not need. Train on a subset and the damage shows 
 Before writing a `dataset:` candidate as `ok`, gate it:
 
 ```bash
-python lifecycle/scripts/data/phase.py gate --project {PROJECT} --dataset <id> --to consume
+python <mlclaw_root>/lifecycle/scripts/data/phase.py gate --project {PROJECT} --dataset <id> --to consume
 ```
 
 Exit 1 is the answer, not a broken script (CLAUDE.md → "Script Integration", the fallback-rule exception). Record the blocker verbatim in `notes`, mark the candidate `mismatch`, and route to `/data-freeze`.
@@ -214,8 +214,8 @@ Whichever is chosen, **record the scale the baseline describes** — this is the
 Two scripts, one job each — they do not overlap, so run both:
 
 ```
-python lifecycle/scripts/infer-init/validate_refs.py <stage_dir>          # every ${} reference, all four files
-python lifecycle/scripts/eval-init/validate_ground_truth.py <stage_dir>   # GT items/sources, dataset cross-check, preprocessing contract
+python <mlclaw_root>/lifecycle/scripts/infer-init/validate_refs.py <stage_dir>          # every ${} reference, all four files
+python <mlclaw_root>/lifecycle/scripts/eval-init/validate_ground_truth.py <stage_dir>   # GT items/sources, dataset cross-check, preprocessing contract
 ```
 
 `validate_refs.py` is the **only** reference validator. It is the one that knows all four files and folds `ground_truth.items` into the `input` namespace, so `${input.gt_ann}` resolves. Don't add a second reference check beside it and don't hand-verify references when it reports clean — two validators answering one question is how this step used to block saves on correct configs.

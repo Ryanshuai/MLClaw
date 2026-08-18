@@ -20,6 +20,7 @@ prints, per document, which sections have a check behind them and which do not.
 That list is the honest scope of what a green run proves — regenerate it rather
 than maintaining a copy by hand.
 """
+import glob
 import os
 import re
 import subprocess
@@ -428,6 +429,57 @@ def report():
     print(f"\n{enforced_n} of {total} sections have a check behind them.")
     print("Unchecked sections are not verified by anything — a green run says nothing about them.")
     return 0
+
+
+class ScriptPathsAreResolvedNotAssumed(unittest.TestCase):
+    """CLAUDE.md -> "Script Integration": scripts are invoked via
+    `python <mlclaw_root>/lifecycle/scripts/…`, and `<mlclaw_root>` is resolved
+    by `shared/workspaces.py tool` rather than assumed.
+
+    A bare `python lifecycle/scripts/…` is correct only when the working
+    directory happens to be this repo. That is a live question — the skills are
+    also discoverable from `~/.claude/skills/`, where the working directory is
+    whatever the user is standing in.
+
+    ‼️ And the failure is silent, which is why it earns a check rather than a
+    style note. CLAUDE.md's fallback rule says a script that cannot be run means
+    "do the same work manually", so a wrong path does not surface as an error —
+    it surfaces as an agent hand-rolling a `retention.py` refusal, a `graph.py
+    check`, or an `evacuate.py clearance` that never ran. The flow still reads as
+    working. That is the same shape as every rule in "Never silently".
+
+    The repo was 32/20 split when this was written; the 20 were rewritten and
+    this is what stops them coming back.
+    """
+
+    ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    BARE = re.compile(r"python3? lifecycle/scripts/")
+
+    def _docs(self):
+        for sub in ("*/SKILL.md", "*/references/*.md"):
+            yield from glob.glob(os.path.join(self.ROOT, ".claude", "skills", sub))
+
+    def test_no_skill_invokes_a_script_by_a_cwd_relative_path(self):
+        bad = []
+        for path in sorted(self._docs()):
+            with open(path, encoding="utf-8") as f:
+                for n, line in enumerate(f, 1):
+                    if self.BARE.search(line):
+                        bad.append(f"{os.path.relpath(path, self.ROOT)}:{n}")
+        self.assertEqual(bad, [], "invoke scripts as "
+                                  "`python <mlclaw_root>/lifecycle/scripts/…` — a "
+                                  "cwd-relative path fails silently into the "
+                                  "manual fallback")
+
+    def test_the_resolver_it_points_at_exists(self):
+        """A convention naming a tool that is not there is worse than none."""
+        self.assertTrue(os.path.exists(os.path.join(
+            self.ROOT, "lifecycle", "scripts", "shared", "workspaces.py")))
+
+    def test_claude_md_states_the_resolved_form(self):
+        with open(os.path.join(self.ROOT, "CLAUDE.md"), encoding="utf-8") as f:
+            claude = f.read()
+        self.assertIn("<mlclaw_root>/lifecycle/scripts/", claude)
 
 
 if __name__ == "__main__":

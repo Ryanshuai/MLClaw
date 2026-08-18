@@ -15,6 +15,16 @@ mlclaw_root  = $(python <repo>/lifecycle/scripts/shared/workspaces.py tool)
 ```
 Self-bootstraps from `__file__` on first call, so skills don't need the user to pass the MLClaw path each time. Override with `workspaces.py register-tool <path>` if you have multiple clones.
 
+**Working directory** — the MLClaw repo, always. Not the ML project (that is `--project`), and the skills are not copied into `~/.claude/skills/`. The repo is what makes three things resolve, and only the third of them fails loudly:
+
+| | |
+|---|---|
+| `CLAUDE.md` | loaded from the working directory and its parents. Elsewhere, the *Never silently* rules and the routing table are simply absent — and they were put in the always-loaded file for the case where nothing else is loaded |
+| `lifecycle/references/*.md` | read on demand by relative path, including this file |
+| `lifecycle/scripts/…` | resolved through `<mlclaw_root>`, so these are portable — enforced by `contract_docs.ScriptPathsAreResolvedNotAssumed` |
+
+‼️ The first two fail SILENTLY, which is why this is written down rather than left to Quick Start. Skills copied to a global directory are still discovered by name and still run; what disappears is everything that decides *which* one and *what must not happen*. Nothing reports the difference.
+
 **Path portability**: `init_project.py` rewrites any `$HOME`-relative path in `project.json` to `~/`-prefixed form (`root`, `workspace`, every `stages.<>.code_source.path`). Always `os.path.expanduser` before using these paths.
 
 ## Code Source Resolution

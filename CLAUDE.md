@@ -187,7 +187,9 @@ Steps 1, 3 and 4 all scan the project; do them in one pass. `lease.py reap` belo
 
 ### Script Integration
 
-Skills use Python scripts from `lifecycle/scripts/<skill>/` for mechanical tasks. Each skill's scripts are in a matching subdirectory, invoked via `python lifecycle/scripts/<skill>/<name>.py <args>`.
+Skills use Python scripts from `lifecycle/scripts/<skill>/` for mechanical tasks. Each skill's scripts are in a matching subdirectory, invoked via `python <mlclaw_root>/lifecycle/scripts/<skill>/<name>.py <args>`.
+
+**`<mlclaw_root>` is resolved, never assumed** — `python <repo>/lifecycle/scripts/shared/workspaces.py tool` prints it, self-bootstrapping from `__file__` and caching in `~/.mlclaw/state.json` (`lifecycle/references/layout.md` -> "Workspace and tool-repo location"). ‼️ A bare `python lifecycle/scripts/…` is only correct when the working directory happens to be this repo, and when it is not, **nothing raises**: the fallback rule below turns a missing script into "do the same work manually", so a `retention.py` refusal, a `graph.py check` or an `evacuate.py clearance` silently stops running while the flow still reads as working. `contract_docs.ScriptPathsAreResolvedNotAssumed` holds the line.
 
 **Fallback rule**: If a script fails (non-zero exit, import error, file not found), the skill MUST NOT stop. Instead:
 1. Log the error silently

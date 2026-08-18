@@ -132,7 +132,7 @@ Determine:
 - **Inputs** → train images/text + train labels + val images/text + val labels
 - **Ground truth pairing** → directory parallel / coco json / hf datasets / yolo txt
 - **Outputs** → checkpoints (with naming pattern), log files
-- **Required packages**: run `python lifecycle/scripts/infer-init/scan_requirements.py <code_dir>`. If it fails, check requirements.txt manually.
+- **Required packages**: run `python <mlclaw_root>/lifecycle/scripts/infer-init/scan_requirements.py <code_dir>`. If it fails, check requirements.txt manually.
 
 ### 1b. Extract the preprocessing chain
 
@@ -173,7 +173,7 @@ Fill `input.json -> candidates` and `artifacts.json -> candidates` — the list 
 Before writing one down as `match: "ok"`, gate it:
 
 ```bash
-python lifecycle/scripts/data/phase.py gate --project {PROJECT} --dataset <id> --to consume
+python <mlclaw_root>/lifecycle/scripts/data/phase.py gate --project {PROJECT} --dataset <id> --to consume
 ```
 
 Exit 1 is the answer, not a broken script — pass it through. It catches two things invisible from the filesystem: `snapshot_stale` (frozen from a census predating accepted inflow — reads as current and is not) and `census_incomplete` (every count under it is a lower bound). Record such a snapshot as `mismatch` with the blocker verbatim in `notes` and route to `/data-freeze`. **Never `--acknowledge` here**: it would stamp a stale citation into a config permanently, and that is not this skill's call. `/train-run` gates again at launch; this pass exists so a broken citation never becomes an `ok`.

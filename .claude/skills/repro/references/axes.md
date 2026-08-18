@@ -43,7 +43,7 @@ So the stamp opens a question and a census answers it. Records-only, no network 
 **To pin it:** re-resolve the cited snapshot into openable paths and point the trial at that view.
 
 ```bash
-python lifecycle/scripts/data-check/census.py resolve --project {PROJECT} \
+python <mlclaw_root>/lifecycle/scripts/data-check/census.py resolve --project {PROJECT} \
     --dataset <id> --snapshot <snap> --at <location> --layer <l> \
     --out {RUN_DIR}/data_resolved.jsonl
 ```

@@ -233,7 +233,7 @@ how a stale local copy gets picked over the real thing.
 **`dataset:` is the only location that is a citation rather than a path**, and it is the one to prefer when it exists. Every other value names bytes somewhere; this one names a *frozen membership set* — 1240 specific units, pinned against a census, with the unverified ones counted. `path` stays empty on purpose: the paths are derived, not stored, by
 
 ```bash
-python lifecycle/scripts/data-check/census.py resolve \
+python <mlclaw_root>/lifecycle/scripts/data-check/census.py resolve \
   --project {PROJECT} --dataset boxes --snapshot v3 \
   --at nas --layer rgbd --layer gt \
   --out {RUN_DIR}/data_resolved.jsonl

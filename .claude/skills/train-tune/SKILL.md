@@ -285,7 +285,7 @@ Do not invent a tiebreaker. Do not silently pick `trials[0]`. The whole point is
 worth minutes; a held fleet bills until something destroys it.
 
 ```bash
-python lifecycle/scripts/shared/pool.py close --session {SESSION_DIR}
+python <mlclaw_root>/lifecycle/scripts/shared/pool.py close --session {SESSION_DIR}
 ```
 
 `close` verifies each teardown and **exits non-zero with the leases left open** when one
