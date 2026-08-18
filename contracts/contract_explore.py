@@ -653,5 +653,99 @@ class TwoRecordsMayDisagreeWithoutOneBeingErased(GraphCase):
         self.assertEqual(rc, 1, "a reopened dispute is a NEW dispute citing this one")
 
 
+class ABindingResolvesBothWays(GraphCase):
+    """run-mechanics.md -> "Record integrity"; ARA (arXiv:2604.24658) ->
+    research-manager "Forensic Binding Checklist" and its D2 dimension.
+
+    `run.json -> hypothesis` is free text that run-mechanics says tools must not
+    require, so a run states an expectation and nothing ever closes it. The
+    optional `verifies` sibling names the card and what would refute it — and
+    both halves are checked, because a one-way pointer reads exactly like a
+    binding until somebody follows it, and a criterion nobody can execute passes
+    every run.
+    """
+
+    def arm(self, verifies="auto", falsified="val_loss at ep20 not 0.01 below base"):
+        nid = self.add_complete()
+        run_id = "run_2026_" + nid
+        self.run_it(nid, run_id=run_id)
+        rec = {"run_id": run_id, "hypothesis": "warmup should hold lr=3e-4"}
+        if verifies is not None:
+            card = (f"stages/exploration/graph.json#{nid}"
+                    if verifies == "auto" else verifies)
+            rec["verifies"] = {"card": card, "criterion": "val_loss at ep20",
+                               "falsified_if": falsified}
+        self.write_json(os.path.join("stages", "training", "runs", run_id, "run.json"), rec)
+        return nid
+
+    def invariants(self):
+        rc, out, _ = self.g("check")
+        return [f["invariant"] for f in out["findings"]], out
+
+    def test_a_resolving_binding_is_clean(self):
+        self.arm()
+        inv, _ = self.invariants()
+        self.assertNotIn("binding_unresolved", inv)
+
+    def test_a_run_pointing_at_a_different_card_is_critical(self):
+        self.arm(verifies="stages/exploration/graph.json#N99")
+        inv, out = self.invariants()
+        self.assertIn("binding_unresolved", inv)
+        self.assertIn("critical", [f["severity"] for f in out["findings"]
+                                   if f["invariant"] == "binding_unresolved"])
+
+    def test_verifies_without_a_falsification_criterion_is_critical(self):
+        self.arm(falsified="")
+        inv, out = self.invariants()
+        self.assertIn("binding_unresolved", inv)
+        self.assertIn("wish", " ".join(f["detail"] for f in out["findings"]))
+
+    def test_a_tautology_is_not_a_criterion(self):
+        """ARA D2 non-triviality: 'if the method does not work' is trivial."""
+        self.arm(falsified="if the change does not help")
+        inv, out = self.invariants()
+        self.assertIn("binding_unresolved", inv)
+        self.assertIn("execute", " ".join(f["detail"] for f in out["findings"]))
+
+    def test_naming_the_metric_without_a_number_is_accepted(self):
+        self.arm(falsified="val_loss fails to fall relative to the base run")
+        inv, _ = self.invariants()
+        self.assertNotIn("binding_unresolved", inv,
+                         "a criterion an independent reader can execute need not "
+                         "carry a threshold in the sentence")
+
+    def test_pending_is_a_legitimate_binding(self):
+        self.arm(verifies="[pending]")
+        inv, out = self.invariants()
+        crit = [f for f in out["findings"]
+                if f["invariant"] == "binding_unresolved" and f["severity"] == "critical"]
+        self.assertEqual(crit, [], "an impossible binding written down beats a guessed one")
+
+    def test_a_run_with_no_verifies_is_a_minor_note_not_a_failure(self):
+        self.arm(verifies=None)
+        inv, out = self.invariants()
+        sev = [f["severity"] for f in out["findings"] if f["invariant"] == "binding_unresolved"]
+        self.assertEqual(sev, ["minor"],
+                         "absent is normal — a run that claimed nothing is honest, and "
+                         "different from one that claimed something nobody closed")
+
+    def test_a_run_staged_on_another_machine_says_nothing_about_the_binding(self):
+        nid = self.add_complete()
+        self.run_it(nid, run_id="run_elsewhere")
+        inv, _ = self.invariants()
+        self.assertNotIn("binding_unresolved", inv,
+                         "absent and broken are different facts; reporting the first as "
+                         "the second trains the reader to ignore the finding")
+
+    def test_an_unreadable_run_record_is_unverifiable_not_absent(self):
+        nid = self.add_complete()
+        self.run_it(nid, run_id="run_broken")
+        self.write(os.path.join("stages", "training", "runs", "run_broken", "run.json"),
+                   "{ this is not json")
+        inv, out = self.invariants()
+        self.assertIn("binding_unresolved", inv)
+        self.assertIn("unverifiable", " ".join(f["detail"] for f in out["findings"]))
+
+
 if __name__ == "__main__":
     unittest.main()

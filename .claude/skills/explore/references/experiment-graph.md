@@ -42,6 +42,7 @@ python <mlclaw_root>/lifecycle/scripts/explore/graph.py <verb> --project <PROJEC
 | `oracle 上限` | 能 0 成本量就必须填（规则 2.6） | 可能在跑一条上限为零的臂 |
 | `杀死条件` | 什么结果算它死了 | 提不出杀死条件的提案本身不合格（规矩 6） |
 | `run id` | 进入 `在跑` 时写，含代码快照哈希 | 事后无法确认几条臂跑的是同一份代码 |
+| **对面那一头** | 那次 run 的 `run.json -> verifies` 要指回这张卡，并写 `falsified_if` | ‼️ **单向指针读起来和绑定一模一样**，直到有人去跟。`check` 两头都核 |
 
 ---
 

@@ -209,6 +209,82 @@ def _grounding(label, obj):
     return out
 
 
+# ----------------------------------------------------------- run binding
+#
+# ARA (arXiv:2604.24658) -> research-manager "Forensic Binding Checklist":
+# experiment -> claim, and the binding must RESOLVE. MLClaw's run record carries
+# `hypothesis` as free text that run-mechanics explicitly says tools must not
+# require -- so a run states an expectation and nothing ever closes it. `verifies`
+# is the optional structured sibling: it does not replace the sentence, it says
+# which card the sentence is about and what would falsify it.
+#
+# Two checks, both from ARA's D2 (Falsifiability Quality):
+#   actionable   -- could an independent reader execute this? It must name a
+#                   number or the criterion's own metric. "if the method does not
+#                   work" is a tautology, and a tautology passes every run.
+#   resolves     -- the card names this run and this run names the card. A
+#                   one-way pointer looks identical to a binding right up to the
+#                   moment somebody follows it.
+#
+# `[pending]` is a legitimate value, per ARA's rule that an impossible binding is
+# written down rather than guessed -- the same reason `unverifiable` exists here
+# beside `gone`.
+PENDING = "[pending]"
+
+
+def _run_json(project, target_stage, run_id):
+    """-> (record, status). status is `ok` | `absent` | `unreadable`.
+
+    Three states, not two. A run directory that is not here means the arm was
+    staged on another machine or has not been created yet; that is NOT the same
+    as a broken binding, and reporting it as one would train the reader to ignore
+    the finding. Same discipline as `census.py` keeping `gone` apart from
+    `unreachable`.
+    """
+    path = os.path.join(project, "stages", target_stage, "runs", run_id, "run.json")
+    if not os.path.exists(path):
+        return None, "absent"
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f), "ok"
+    except (OSError, json.JSONDecodeError):
+        return None, "unreadable"
+
+
+def _binding(node, run, run_status):
+    """-> [(severity, detail)] for one card's run binding."""
+    out = []
+    if run_status == "unreadable":
+        return [("major", f"{node['id']}: its run's record could not be read -- the "
+                          f"binding is unverifiable, which is not the same as absent")]
+    if run_status == "absent":
+        return []   # not staged here. Says nothing about the binding.
+    v = run.get("verifies")
+    if not v:
+        return [("minor", f"{node['id']}: run {node['run_id']} does not name this card "
+                          f"in `verifies` -- the pointer resolves one way only, and a "
+                          f"one-way pointer reads exactly like a binding")]
+    card = (v.get("card") or "")
+    if card != PENDING and not card.endswith("#" + node["id"]):
+        out.append(("critical", f"{node['id']}: run {node['run_id']} says it verifies "
+                                f"{card!r} -- the two records disagree about what this "
+                                f"arm was for"))
+    fals = (v.get("falsified_if") or "").strip()
+    if not fals:
+        out.append(("critical", f"{node['id']}: run {node['run_id']} has `verifies` with "
+                                f"no `falsified_if`. A hypothesis nothing can refute is "
+                                f"a wish -- either write the criterion or drop the field"))
+    elif not any(c.isdigit() for c in fals):
+        crit = (v.get("criterion") or "") + " " + (node.get("criterion") or "")
+        words = [w for w in crit.replace("/", " ").split() if len(w) > 3]
+        if not any(w.lower() in fals.lower() for w in words):
+            out.append(("major",
+                        f"{node['id']}: `falsified_if` names neither a number nor the "
+                        f"criterion's metric -- an independent reader cannot execute it, "
+                        f"and a criterion nobody can execute passes every run"))
+    return out
+
+
 def _paths(project, session=None):
     base = os.path.join(project, "stages", "exploration")
     if session:
@@ -756,6 +832,16 @@ def cmd_check(a):
                 flag("critical", "built_on_contested", n["id"],
                      f"depends on {d.get('disputed')}, which is under open dispute "
                      f"{d.get('id')} -- this arm would stand on contested ground")
+
+    # 13. MLClaw/ARA add -- the card <-> run binding resolves BOTH ways.
+    cfg = read_json(p["config"], required=False) or {}
+    target = cfg.get("target_stage") or "training"
+    for n in nodes:
+        if not n.get("run_id"):
+            continue
+        run, st = _run_json(a.project, target, n["run_id"])
+        for sev, detail in _binding(n, run, st):
+            flag(sev, "binding_unresolved", n["id"], detail)
 
     # 4. no two running cards share (parent, delta)
     seen = {}

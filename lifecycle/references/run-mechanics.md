@@ -454,6 +454,23 @@ Two top-level run.json fields exist purely to enrich human-readable reports. **B
 - **`hypothesis`** (set at run creation): a one-sentence expectation, e.g., `"Higher lr with warmup should reach lower val_loss faster."` Skills may prompt for it but should never block on it.
 - **`outcome`** (set at run completion): a free-text retrospective, e.g., `"Refuted. val_loss 0.234 → 0.241 (+3%), convergence epoch 87 → 92."` Agents fill this when finalizing; users may also write it manually.
 
+- **`verifies`** (optional, additive, default null): the structured sibling that says which
+  claim the sentence is about and what would refute it — `{card, criterion, falsified_if}`.
+  `card` points into whichever record holds the claim (today an `/explore` graph,
+  `stages/exploration/graph.json#N05`) or is the literal `[pending]`.
+
+  ‼️ **`falsified_if` is the field.** A hypothesis nothing can refute is a wish, and a wish
+  passes every run. It must name a number or the criterion's own metric — *"if it does not
+  help"* is a tautology. Both halves are checked by `graph.py check`: the criterion is
+  executable, and the card names this run back, because **a one-way pointer reads exactly like
+  a binding** until somebody follows it.
+
+  The three fields above stay optional and stay strings, so no existing run record is
+  invalidated. That is the whole reason `verifies` is a sibling rather than a richer
+  `hypothesis`: this file records what a run WAS in 26 structured fields and what it MEANT in
+  three nullable ones, and making the three required would retire the archive to fix the
+  present.
+
 When both are present, `/train-compare` weaves them into the narrative ("hypothesis was X; outcome confirmed/refuted"). When absent, comparisons fall back to pure metric deltas — both should remain valid.
 
 ## Environment Resolution
