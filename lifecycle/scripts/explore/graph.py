@@ -52,8 +52,8 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__))), "shared"))
-from _records import (atomic_write_json, broke, emit, now_utc,  # noqa: E402
-                      read_json, refuse)
+from _records import (atomic_write_json, broke, digits as _digits,  # noqa: E402
+                      emit, now_utc, read_json, refuse)
 
 # Seven, and the load-bearing split is `filled` vs `closed`: 有结果 != 有结论.
 # A card whose numbers are in but whose verdict is not is `filled`. Collapsing
@@ -162,16 +162,6 @@ REQUIRED_BY_KIND = {
 # up as `workload` versus `scope`; it is the same distinction, and citing a
 # measured outcome to the config meant to produce it is the same error there.
 SOURCE_KINDS = ("input", "result")
-
-
-def _digits(x):
-    """Significant digits of a number, leading zeros stripped.
-
-    0.0462 -> "462"   so that a log reporting it as "4.62%" still matches, which
-    is the common case: records keep the fraction, logs print the percentage.
-    """
-    out = "".join(c for c in str(x) if c.isdigit()).lstrip("0")
-    return out or "0"
 
 
 def _grounding(label, obj):

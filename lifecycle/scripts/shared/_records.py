@@ -282,3 +282,36 @@ def git_save(root, paths, message):
     report["committed"] = True
     report["sha"] = sha or None
     return report
+
+
+# --------------------------------------------------------------------------
+# number grounding -- CLAUDE.md "Never record a metric you did not read"
+#
+# Here rather than in one skill's script because TWO records now cite numbers
+# back to a transcribed line (`graph.json -> sources[].quote`,
+# `conclusions.json -> evidence[].quote`) and this is the rule that decides
+# whether the citation is real. A correctness rule written twice gets fixed
+# once.
+# --------------------------------------------------------------------------
+
+def digits(x):
+    """Significant digits of a number, leading zeros stripped.
+
+    0.0462 -> "462"   so that a log reporting it as "4.62%" still matches, which
+    is the common case: records keep the fraction, logs print the percentage.
+    """
+    out = "".join(c for c in str(x) if c.isdigit()).lstrip("0")
+    return out or "0"
+
+
+def quotes_the_number(value, quote):
+    """Does `quote` contain `value`'s digits?
+
+    ‼️ A FLOOR, not a proof. A quote containing the digits does not show the
+    source was open -- but a quote NOT containing them shows it was not, and
+    that is the failure worth catching: a number written from memory and
+    back-cited to a plausible path. Non-numbers are not checkable here and pass.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return True
+    return digits(value) in "".join(c for c in str(quote) if c.isdigit())

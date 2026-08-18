@@ -123,6 +123,7 @@ README.md                           ← what MLClaw is, and which stages are bui
     discover/SKILL.md               ← /discover
     repro/SKILL.md                  ← /repro (+ references/axes.md, verdicts.md)
     explore/SKILL.md                ← /explore (+ references/: experiment-graph, porting, run-card, cluster-ops, explore-or-stop, debate-roles, human-review — ported from the arch-transplant skill)
+    conclude/SKILL.md               ← /conclude
   settings.json
 contracts/                          ← executable form of this file's contracts; stdlib only
   helpers.py                        ← temp dirs, real git repos, script loading by path
@@ -139,6 +140,7 @@ contracts/                          ← executable form of this file's contracts
   contract_data_curate.py           ← a derivation is checked against the run, or marked claimed
   contract_data_retire.py           ← only a census-listed path is deletable; the log outlives it
   contract_adaptation.py            ← a handed-back finding is not a resolved one; loading is not correctness
+  contract_conclude.py              ← a belief may not outlive its evidence; the tier is the weakest one
   contract_docs.py                  ← this file, README, and .claude/skills/ must agree
 .github/workflows/ci.yml            ← contracts + compileall + JSON parse + no-credentials gate
 docs/                               ← README assets only; nothing here is read by a skill
@@ -196,6 +198,8 @@ lifecycle/
       repro.py                      ← check/open/trial/band/attribute/close; five axes of rot
     explore/
       graph.py                      ← add/set/ready/fill/close/check/status; nine invariants, reported and never repaired. Executes nothing
+    conclude/
+      conclude.py                   ← new/add/evidence/set/refute/supersede/check/status/render; `status` and `tier` are computed, never written. Executes nothing
     adaptation/
       adapt.py                      ← open/raise/respond/round/distill/relax/close/status; the shared ledger
     data-report/
@@ -247,6 +251,8 @@ lifecycle/
     ask.json                        ← the answer's `kind` is the load-bearing field, not its text
   data-label/                       ← exchange record template (project-level, not a stage)
     handoff.json                    ← one exchange: frozen manifest ref, spec, rounds, coverage
+  knowledge/                        ← conclusion template (project-level; a belief outlives the round that made it)
+    conclusions.json                ← statement / evidence+quote / interpretation / falsifier / depends_on
   repro/                            ← reproduction-session template (project-level, not a stage)
     session.json                    ← target run, five-axis audit, band, trials, attribution
   eval-triage/                      ← bad-case triage template (hangs off one eval run)
@@ -286,6 +292,15 @@ discovery/                          ← what data was found to exist, and where 
                                       is the artifact you hand the next person instead of a wiki
                                       page — every path, its evidence, what was actually found,
                                       and when it was last checked
+knowledge/                          ← what is now BELIEVED, as opposed to what happened. Project-level
+  conclusions.json                    because a conclusion outlives the exploration that produced it and
+                                      may come from an eval, a tune session or an audit just as easily.
+                                      `status` and `tier` are COMPUTED from what the evidence still
+                                      resolves to — a belief whose support rotted is indistinguishable,
+                                      in JSON, from one whose support is intact, and that is the whole
+                                      reason the file exists
+  conclusions.md                    ← the rendered artifact: what somebody opens in six weeks instead
+                                      of the JSON. Every conclusion prints its status and its tier
 handoffs/                           ← exchanges with parties MLClaw doesn't control — cross-stage,
   handoff_{YYYYMMDD}_{HHmmss}/        so project-level rather than under any one stage
     handoff.json                    ← the record (status, spec, party, rounds, coverage)

@@ -220,6 +220,7 @@ claude
 - [x] Skill dependency system (inter-skill graph + internal dependency chain + cross-session resume)
 - [x] Remote execution + path mapping
 - [x] Exploration — `/explore` (architecture search: count → audit → price → port → ablate)
+- [x] Conclusions — `/conclude` (what a round came to BELIEVE, as a checkable artifact: statement, evidence with transcribed quotes, the argued-but-unmeasured part in its own column, and a mandatory falsifier. `status` and `tier` are computed from what the evidence still resolves to — the tier is the **weakest** evidence's, and a belief whose support rotted goes `unverifiable`, which is neither a weak `supported` nor a `refuted`)
 - [ ] Run comparison — `/train-compare` (side-by-side metrics/params/env diff)
 - [ ] Drift — `/data-drift`. Only the comparison is missing; the online half that takes the reading already shipped (see the checked entry above)
 - [ ] Model identity — `models/<id>@<release>`, the primitive the next two need. Not a skill: data gets a citable frozen id and a deletion that respects citations, models get a file path and a `retention.py` that ranks by metric and does not know who cited them
