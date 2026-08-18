@@ -251,6 +251,84 @@ def _run_json(project, target_stage, run_id):
         return None, "unreadable"
 
 
+def _delta(node, run, parent_run):
+    """Is the change that ran the change that was declared?
+
+    From a real round (e2e_3D_detection, 2026-08-14): a baseline at AP50 26.76 was
+    compared against a new arm at 7.88, and the 3.4x was attributed to the
+    technique. Four unintended differences were sitting between them --
+    `rot_aug_deg` 0 -> 15, `num_points` 40000 -> 145000, `no_thin_cloud` on -> off,
+    `warm_lr_epochs` 9 -> 4 -- plus 8 GPUs down to 1. The arm was not measuring
+    what it said it measured, and nothing raised.
+
+    ‼️ TWO RECORD FIELDS, NOT ONE. `lineage.variation_summary` covers
+    `runtime_params`; the GPU count lives in `workload.world_size`. A check that
+    read only the first would have passed that round while missing the 8x -- the
+    exact shape of a guard that reports the conclusion it exists to prevent.
+
+    Prose saying "this arm adds CDN" and a config diff saying it also picked up
+    last Tuesday's changed default are both present, and only one is checkable.
+    """
+    declared = node.get("delta")
+    if declared is None or run is None:
+        return []
+    actual = dict(((run.get("lineage") or {}).get("variation_summary") or {}))
+    want = declared if isinstance(declared, dict) else {str(declared): None}
+    extra = sorted(k for k in actual if k not in want)
+    missing = sorted(k for k in want if k not in actual)
+    out = []
+    if extra:
+        out.append(("critical", f"{node['id']}: declared delta {sorted(want)} but the run "
+                                f"also varies {extra} -- more than one key changed, so no "
+                                f"result can be attributed to any of them"))
+    if missing:
+        out.append(("major", f"{node['id']}: declared {missing} but the run's "
+                             f"variation_summary does not carry it -- either the flag "
+                             f"was dropped or the record was written from the plan"))
+    # The half variation_summary cannot see.
+    if parent_run:
+        a, b = run.get("workload") or {}, parent_run.get("workload") or {}
+        moved = sorted(k for k in ("world_size", "batch_size", "grad_accum", "epochs")
+                       if a.get(k) is not None and b.get(k) is not None and a[k] != b[k])
+        if moved:
+            out.append(("critical", f"{node['id']}: workload differs from its parent on "
+                                    f"{moved} -- outside `variation_summary`, so a check "
+                                    f"reading only that field would pass this arm"))
+    return out
+
+
+def _eval_setting(node):
+    """When the technique changes what the CORRECT measurement setting is.
+
+    From the same round: one-to-one matching needs no NMS, and it was being
+    compared against one-to-many UNDER NMS. Holding the setting fixed makes the
+    contrast clean and simultaneously measures the setting rather than the
+    technique -- 「一对一 一定要关掉 nms 测啊」, said after the comparison had already
+    been read once.
+
+    The resolution that round reached is the rule: hold the setting fixed for the
+    contrast AND re-evaluate at the technique's own setting. The second costs no
+    training -- it is a re-evaluation of a checkpoint that already exists -- and
+    it is the only number that describes what would actually ship. That arm read
+    84.16 held and 92.15 at its own setting; reporting either alone would have
+    been a different claim.
+    """
+    ev = node.get("eval_setting") or {}
+    own = ev.get("own")
+    if not own or node.get("state") not in ("filled", "closed"):
+        return []
+    res = node.get("result") or {}
+    have = set(res) if isinstance(res, dict) else set()
+    missing = [k for k in ("at_held", "at_own") if k not in have]
+    if missing:
+        return [("critical",
+                 f"{node['id']}: this arm changes the evaluation setting to {own!r}, so "
+                 f"one number cannot describe it. `result` needs {missing} -- `at_held` "
+                 f"is the fair contrast, `at_own` is what you would ship, and the second "
+                 f"is FREE (re-evaluate the checkpoint, no training)")]
+    return []
+
+
 def _binding(node, run, run_status):
     """-> [(severity, detail)] for one card's run binding."""
     out = []
@@ -842,6 +920,16 @@ def cmd_check(a):
         run, st = _run_json(a.project, target, n["run_id"])
         for sev, detail in _binding(n, run, st):
             flag(sev, "binding_unresolved", n["id"], detail)
+        parent = by_id.get(n.get("parent"))
+        prun = (_run_json(a.project, target, parent["run_id"])[0]
+                if parent and parent.get("run_id") else None)
+        for sev, detail in _delta(n, run, prun):
+            flag(sev, "delta_not_as_declared", n["id"], detail)
+
+    # 15. When the technique changes what the correct measurement setting is.
+    for n in nodes:
+        for sev, detail in _eval_setting(n):
+            flag(sev, "one_number_two_settings", n["id"], detail)
 
     # 4. no two running cards share (parent, delta)
     seen = {}

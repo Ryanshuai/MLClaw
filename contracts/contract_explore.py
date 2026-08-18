@@ -747,5 +747,121 @@ class ABindingResolvesBothWays(GraphCase):
         self.assertIn("unverifiable", " ".join(f["detail"] for f in out["findings"]))
 
 
+class TheChangeThatRanIsTheChangeDeclared(GraphCase):
+    """SKILL.md -> the run-card hard rule 1: delta is COMPUTED, not described.
+
+    Evidenced by a real round (e2e_3D_detection, 2026-08-14): a baseline at AP50
+    26.76 was read against a new arm at 7.88 and the gap credited to the
+    technique. Four unintended differences sat between them — rot_aug_deg 0->15,
+    num_points 40000->145000, no_thin_cloud on->off, warm_lr_epochs 9->4 — plus
+    8 GPUs down to 1. Prose said one thing; the config said five.
+    """
+
+    def armed(self, declared, varied, parent_wl=None, wl=None):
+        base = self.add_complete()
+        self.run_it(base, run_id="run_base")
+        rec = {"run_id": "run_base"}
+        if parent_wl: rec["workload"] = parent_wl
+        self.write_json(os.path.join("stages", "training", "runs", "run_base", "run.json"), rec)
+        self.fill(base, tier="T1"); self.g("close", "--id", base, "--verdict", "won")
+        nid = self.add_complete()
+        self.g("set", "--id", nid, "--set", f"parent={base}",
+               "--set", "delta=" + json.dumps(declared))
+        self.run_it(nid, run_id="run_arm")
+        arm = {"run_id": "run_arm", "lineage": {"variation_summary": varied}}
+        if wl: arm["workload"] = wl
+        self.write_json(os.path.join("stages", "training", "runs", "run_arm", "run.json"), arm)
+        return nid
+
+    def invariants(self):
+        rc, out, _ = self.g("check")
+        return [f["invariant"] for f in out["findings"]], out
+
+    def test_one_declared_key_and_one_actual_key_is_clean(self):
+        self.armed({"cdn": True}, {"cdn": True})
+        inv, _ = self.invariants()
+        self.assertNotIn("delta_not_as_declared", inv)
+
+    def test_an_undeclared_key_that_also_moved_is_critical(self):
+        self.armed({"cdn": True}, {"cdn": True, "rot_aug_deg": 15.0})
+        inv, out = self.invariants()
+        self.assertIn("delta_not_as_declared", inv)
+        self.assertIn("rot_aug_deg", " ".join(f["detail"] for f in out["findings"]))
+
+    def test_a_declared_key_the_run_never_varied_is_flagged(self):
+        self.armed({"cdn": True}, {})
+        inv, out = self.invariants()
+        self.assertIn("delta_not_as_declared", inv)
+        self.assertIn("dropped", " ".join(f["detail"] for f in out["findings"]))
+
+    def test_the_gpu_count_is_caught_even_though_variation_summary_cannot_see_it(self):
+        """The half a variation_summary-only check would pass while missing.
+
+        world_size lives in `workload`, not `runtime_params`. A guard that read
+        only the first would have cleared the round it exists to prevent — a
+        guard reporting the very conclusion it was built to stop.
+        """
+        self.armed({"cdn": True}, {"cdn": True},
+                   parent_wl={"world_size": 8}, wl={"world_size": 1})
+        inv, out = self.invariants()
+        self.assertIn("delta_not_as_declared", inv)
+        detail = " ".join(f["detail"] for f in out["findings"])
+        self.assertIn("world_size", detail)
+        self.assertIn("variation_summary", detail)
+
+    def test_a_card_declaring_no_delta_is_not_second_guessed(self):
+        base = self.add_complete()
+        self.run_it(base, run_id="run_x")
+        self.write_json(os.path.join("stages", "training", "runs", "run_x", "run.json"),
+                        {"run_id": "run_x", "lineage": {"variation_summary": {"a": 1}}})
+        inv, _ = self.invariants()
+        self.assertNotIn("delta_not_as_declared", inv,
+                         "a measurement card has no single-key delta to declare")
+
+
+class OneNumberCannotDescribeTwoSettings(GraphCase):
+    """SKILL.md -> Stage 6; evidenced by the same round.
+
+    One-to-one matching needs no NMS, and it was being compared against
+    one-to-many UNDER NMS. Holding the setting fixed makes the contrast clean and
+    at the same time measures the setting rather than the technique — said out
+    loud only after the comparison had been read once: 「一对一 一定要关掉 nms 测啊」.
+
+    The resolution is the rule: hold it fixed for the contrast AND re-evaluate at
+    the arm's own setting. The second costs no training and is the only number
+    that describes what would ship. That arm read 84.16 held, 92.15 at its own.
+    """
+
+    def arm_that_changes_the_setting(self, result):
+        nid = self.add_complete()
+        self.g("set", "--id", nid, "--set",
+               'eval_setting={"held_at":"test_nms=on","own":"test_nms=off"}')
+        self.run_it(nid, run_id="run_e13h")
+        self.g("fill", "--id", nid, "--result", json.dumps(result), "--tier", "T2")
+        return nid
+
+    def invariants(self):
+        rc, out, _ = self.g("check")
+        return [f["invariant"] for f in out["findings"]], out
+
+    def test_a_single_number_is_refused(self):
+        self.arm_that_changes_the_setting({"AP50": 84.16})
+        inv, out = self.invariants()
+        self.assertIn("one_number_two_settings", inv)
+        self.assertIn("FREE", " ".join(f["detail"] for f in out["findings"]))
+
+    def test_both_numbers_pass(self):
+        self.arm_that_changes_the_setting({"at_held": 84.16, "at_own": 92.15})
+        inv, _ = self.invariants()
+        self.assertNotIn("one_number_two_settings", inv)
+
+    def test_an_arm_that_does_not_move_the_setting_needs_only_one(self):
+        nid = self.add_complete()
+        self.run_it(nid, run_id="run_plain")
+        self.g("fill", "--id", nid, "--result", '{"AP50": 88.0}', "--tier", "T2")
+        inv, _ = self.invariants()
+        self.assertNotIn("one_number_two_settings", inv)
+
+
 if __name__ == "__main__":
     unittest.main()

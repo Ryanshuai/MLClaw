@@ -36,7 +36,13 @@ MLClaw 还差哪几样**，而不是再造一次。
 
 #### 四条硬规则
 
-**1. ‼️ delta 要算出来，不是描述出来。**
+**1. ‼️ delta 要算出来，不是描述出来。** —— **`graph.py check` 现在断言了。**
+卡上写 `delta`，check 拿它比 run 的 `lineage.variation_summary`，多一个 key 就拒。
+
+‼️ **它比两个字段，不是一个。** 2026-08-14 那次实测漂移里有一条是 **8 卡 → 1 卡**，
+而 `world_size` 住在 `workload` 里、不在 `runtime_params` 里 —— 只读 `variation_summary`
+的守卫会**放过它专门要拦的那一轮**，正是「橡皮章比没有章更坏」的形状。
+
 MLClaw 算了 —— `lineage.variation_summary` 是 fork 相对 base 的 `runtime_params` 实差。
 ‼️ **但它不断言这个差等于你声明的那个。** 源项目的 `check` 会做这条断言，实测拦下过
 「声明 `[iou_aware_cls]`，实际 `[dn_rot_noise_deg, iou_aware_cls]`」。在 MLClaw 里
