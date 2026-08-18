@@ -124,6 +124,7 @@ README.md                           ← what MLClaw is, and which stages are bui
     repro/SKILL.md                  ← /repro (+ references/axes.md, verdicts.md)
     explore/SKILL.md                ← /explore (+ references/: experiment-graph, porting, run-card, cluster-ops, explore-or-stop, debate-roles, human-review — ported from the arch-transplant skill)
     conclude/SKILL.md               ← /conclude
+    evacuate/SKILL.md               ← /evacuate
   settings.json
 contracts/                          ← executable form of this file's contracts; stdlib only
   helpers.py                        ← temp dirs, real git repos, script loading by path
@@ -141,6 +142,7 @@ contracts/                          ← executable form of this file's contracts
   contract_data_retire.py           ← only a census-listed path is deletable; the log outlives it
   contract_adaptation.py            ← a handed-back finding is not a resolved one; loading is not correctness
   contract_conclude.py              ← a belief may not outlive its evidence; the tier is the weakest one
+  contract_evacuate.py              ← a file that exists is not a file that arrived; leaving one behind is a delete
   contract_docs.py                  ← this file, README, and .claude/skills/ must agree
 .github/workflows/ci.yml            ← contracts + compileall + JSON parse + no-credentials gate
 docs/                               ← README assets only; nothing here is read by a skill
@@ -200,6 +202,8 @@ lifecycle/
       graph.py                      ← add/set/ready/fill/close/check/status; nine invariants, reported and never repaired. Executes nothing
     conclude/
       conclude.py                   ← new/add/evidence/set/refute/supersede/check/status/render; `status` and `tier` are computed, never written. Executes nothing
+    evacuate/
+      evacuate.py                   ← plan/freeze/push/verify/bundle/clearance/status; the manifest is frozen at the source, and `clearance` is what a release reads
     adaptation/
       adapt.py                      ← open/raise/respond/round/distill/relax/close/status; the shared ledger
     data-report/
@@ -253,6 +257,8 @@ lifecycle/
     handoff.json                    ← one exchange: frozen manifest ref, spec, rounds, coverage
   knowledge/                        ← conclusion template (project-level; a belief outlives the round that made it)
     conclusions.json                ← statement / evidence+quote / interpretation / falsifier / depends_on
+  evacuate/                         ← evacuation template (project-level; one per machine being emptied)
+    evacuation.json                 ← source / destination / ARA layers / frozen manifest / per-file arrival / clearance
   repro/                            ← reproduction-session template (project-level, not a stage)
     session.json                    ← target run, five-axis audit, band, trials, attribution
   eval-triage/                      ← bad-case triage template (hangs off one eval run)
@@ -292,6 +298,17 @@ discovery/                          ← what data was found to exist, and where 
                                       is the artifact you hand the next person instead of a wiki
                                       page — every path, its evidence, what was actually found,
                                       and when it was last checked
+evacuations/                        ← one directory per machine emptied before it was released.
+  evac_{YYYYMMDD}_{HHmmss}/           Project-level and NEVER on the box: a record kept on the disk
+    evacuation.json                   it describes disappears with it, same reason `retire/` is one
+    plan.jsonl                      ← every file and which ARA layer it is
+    manifest.jsonl                  ← frozen AT THE SOURCE before the transfer. The only authority
+                                      for what was supposed to arrive; computing completeness from
+                                      what showed up is a tautology that passes every partial pull
+    bundle/                         ← the readable artifact: ARTIFACT.md (ARA's PAPER.md) plus
+                                      logic/ and trace/ copied in physically, so the conclusions
+                                      and the ablation graph stay readable without pulling 40GB
+                                      of weights back down
 knowledge/                          ← what is now BELIEVED, as opposed to what happened. Project-level
   conclusions.json                    because a conclusion outlives the exploration that produced it and
                                       may come from an eval, a tune session or an audit just as easily.

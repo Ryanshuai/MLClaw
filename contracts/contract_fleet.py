@@ -377,6 +377,84 @@ class PoolPlacement(TempDirCase):
         self.assertLessEqual(plan["picks"][0]["units"], 2)
 
 
+class ClaimedRecoveryNeedsARecord(TempDirCase):
+    """CLAUDE.md -> "Never silently": 「Never let somebody's word become a
+    checked fact. An answer is a `claim` until something other than the person
+    confirms it」 — and `pool.py`'s own ARTIFACTS axis, where `recovered` is
+    defined as 「pulled off and verified. The only state that permits destroying
+    the box」.
+
+    That definition contained the word `verified` and nothing verified anything.
+    The operator typed `--artifacts recovered`, the box was destroyed, and a
+    half-transferred checkpoint went with it — which is the failure `/evacuate`
+    was built for, sitting on top of the one action MLClaw cannot undo.
+
+    ‼️ Only `recovered` is gated. The other three states are honest about not
+    knowing, and demanding paperwork to say 「I could not look」 would push
+    people toward the one disposition that needs none — which is the opposite of
+    the intent, and the shape of every safety control that gets routed around.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.pool = load_script("shared/pool.py")
+        self.session = self.path("sess")
+        self.write_json("sess/pool.json", {
+            "session": self.session, "opened_at": 0, "closed_at": None,
+            "shape": {}, "allow_preemptible": True, "ttl_s": 3600, "plan": {},
+            "slots": [{"slot": "slot_0", "lease_id": "lease_a", "provider": "n",
+                       "machine_type": "m", "price_hr": 1.0, "preemptible": True,
+                       "state": "busy", "run": "run_007",
+                       "history": [{"run": "run_007", "at": 0, "outcome": None}]}]})
+
+    def _release(self, artifacts, clearance=None, outcome="ok"):
+        return capture(self.pool.v_release, types.SimpleNamespace(
+            session=self.session, slot="slot_0", outcome=outcome,
+            artifacts=artifacts, clearance=clearance))
+
+    def _clearance(self, verdict):
+        return self.write_json("evac.json", {"clearance": {"verdict": verdict}})
+
+    def test_recovered_without_a_clearance_is_refused(self):
+        out = self._release("recovered")
+        self.assertIn("error", out)
+        self.assertNotIn("safe_to_destroy_the_box", out,
+                         "a refusal must not also emit a release payload")
+        self.assertIn("claim standing where a check belongs", out["error"])
+
+    def test_a_blocked_clearance_does_not_permit_recovered(self):
+        out = self._release("recovered", self._clearance("blocked"))
+        self.assertIn("error", out)
+        self.assertIn("still has work on it", out["error"])
+
+    def test_an_undecided_clearance_does_not_permit_recovered(self):
+        out = self._release("recovered", self._clearance(None))
+        self.assertIn("error", out)
+        self.assertIn("not decided", out["error"])
+
+    def test_an_unreadable_clearance_is_not_a_passing_one(self):
+        self.write("evac.json", "{not json")
+        out = self._release("recovered", self.path("evac.json"))
+        self.assertIn("error", out)
+        self.assertIn("unreadable", out["error"])
+
+    def test_a_clear_clearance_permits_it(self):
+        out = self._release("recovered", self._clearance("clear"))
+        self.assertTrue(out["safe_to_destroy_the_box"])
+
+    def test_size_only_clearance_also_permits_it(self):
+        """`clear_size_only` is a weaker fact that is still a fact, and it says
+        so in its own name — CLAUDE.md's rule that a lower bound is reported as
+        one rather than withheld."""
+        out = self._release("recovered", self._clearance("clear_size_only"))
+        self.assertTrue(out["safe_to_destroy_the_box"])
+
+    def test_the_other_dispositions_need_no_paperwork(self):
+        for a in ("present_unreachable", "absent", "unverifiable"):
+            out = self._release(a)
+            self.assertEqual(out["artifacts"], a, f"{a} should not be gated")
+
+
 class PreemptionIsNotEvidence(TempDirCase):
     """fleet.md -> "A preempted trial is not a failed trial".
 
@@ -398,14 +476,20 @@ class PreemptionIsNotEvidence(TempDirCase):
                        "state": "busy", "run": "run_007",
                        "history": [{"run": "run_007", "at": 0, "outcome": None}]}]})
 
-    def _release(self, outcome, artifacts="recovered"):
+    def _release(self, outcome, artifacts="present_unreachable"):
         # `artifacts` became required for infrastructure outcomes when preemption
         # grew its second axis (see PreemptionHasTwoAxesNotOne). These checks are
         # about the EVIDENCE axis, which is unchanged — so they supply a
         # disposition and go on testing what they were testing.
+        #
+        # The disposition is deliberately NOT `recovered`: that one now requires
+        # an `/evacuate` clearance (see ClaimedRecoveryNeedsARecord), and a check
+        # about preemption should not have to stand up an evacuation to say so.
+        # Picking one that needs no paperwork is also the honest reading — these
+        # fixtures never pulled anything off a box.
         return capture(self.pool.v_release, types.SimpleNamespace(
             session=self.session, slot="slot_0", outcome=outcome,
-            artifacts=artifacts))
+            artifacts=artifacts, clearance=None))
 
     def test_preempted_is_flagged_as_not_evidence(self):
         out = self._release("preempted")

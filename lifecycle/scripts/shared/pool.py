@@ -446,6 +446,21 @@ ARTIFACTS = {
 }
 
 
+def _clearance_verdict(path):
+    """-> the verdict in an `/evacuate` record, or a reason it cannot be read.
+
+    Never raises and never guesses: an unreadable clearance is not a passing
+    one, and the string it returns lands in the refusal so the operator sees
+    which of the two happened.
+    """
+    try:
+        with open(os.path.expanduser(path), encoding="utf-8") as fh:
+            rec = json.load(fh)
+    except (OSError, ValueError) as e:
+        return f"unreadable ({type(e).__name__})"
+    return ((rec.get("clearance") or {}).get("verdict")) or "not decided"
+
+
 def v_release(args):
     """Return a slot to the pool. **Does not release the lease** — the next trial wants
     the box, and tearing down between trials pays provisioning and staging every time.
@@ -463,6 +478,28 @@ def v_release(args):
              f"({'|'.join(ARTIFACTS)}) — this is the case where the box may be "
              f"going away with work on it, and where 'probably nothing was there' "
              f"most often gets written down as 'nothing was there'")
+    # ‼️ `recovered` is DEFINED as "pulled off and verified", and until now the
+    # verification was the operator's word — CLAUDE.md's 「Never let somebody's
+    # word become a checked fact」, sitting on top of the one action that cannot
+    # be undone. `/evacuate` is what computes it; this requires the record.
+    #
+    # Only `recovered` needs it. The other three states are honest about not
+    # knowing, and demanding paperwork to say "I could not look" would push
+    # people toward the state that needs none.
+    if args.artifacts == "recovered":
+        if not args.clearance:
+            fail("--artifacts recovered needs --clearance <evacuation.json> — "
+                 "`recovered` means pulled off AND VERIFIED, and without the "
+                 "record that is a claim standing where a check belongs. "
+                 "`/evacuate` computes one; `unverifiable` is the honest answer "
+                 "if nobody ran it")
+        verdict = _clearance_verdict(args.clearance)
+        if verdict not in ("clear", "clear_size_only"):
+            fail(f"clearance is `{verdict}` — this box still has work on it that "
+                 f"was not verified off. Releasing the lease destroys the disk. "
+                 f"Report `present_unreachable` or `unverifiable`, or finish the "
+                 f"evacuation")
+
     pool = read_pool(args.session)
     slot = next((s for s in pool["slots"] if s["slot"] == args.slot), None)
     if slot is None:
@@ -558,6 +595,10 @@ def main():
     r.add_argument("--artifacts", choices=sorted(ARTIFACTS),
                    help="what happened to what was ON the box. Required when the outcome "
                         "is preempted or crashed. `unverifiable` is never `absent`")
+    r.add_argument("--clearance",
+                   help="path to an `/evacuate` evacuation.json. REQUIRED with "
+                        "--artifacts recovered: that word means verified, and the "
+                        "record is what makes it one rather than a claim")
 
     hb = sub.add_parser("heartbeat"); hb.set_defaults(fn=v_heartbeat)
     hb.add_argument("--session", required=True)

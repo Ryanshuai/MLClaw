@@ -1,0 +1,33 @@
+{
+  "_comment": "把一台即将消失的机器上该留的东西搬走,并且**证明搬全了** —— 然后才准销毁。\n\nThe recorded failure, several times over: a run finishes, the checkpoint is pulled back half-way, nobody looks, and the box is released. What is left is a `.pth` with a plausible name that no longer loads, a metrics table missing its tail, and no way to tell which. `os.path.exists` said yes the whole time.\n\n‼️ THE RULE THAT MAKES THIS MORE THAN AN RSYNC WRAPPER: **leaving a file on a box you are about to destroy IS a delete.** CLAUDE.md's 「Never delete a checkpoint outside `retention.py plan` → `apply`. Never delete a file you cannot rank」 therefore applies here, and nothing today treats it that way — `lease.py release` verifies only that the machine is gone (the billing side), and `pool.py release --artifacts recovered` takes the operator's word for the other side. This record is what makes that word checkable.\n\nShape borrowed from `/data-label`: the counterparty differs (a machine rather than a person) and the primitive does not. Completeness is computed against a manifest FROZEN AT THE SOURCE, before the transfer — never against what happened to arrive, which is a tautology that passes every partial pull.\n\nWritten to the PROJECT, never to the machine. Same reason `retire/retire_{ts}.json` is: a record that lives on the disk it describes disappears with it.",
+
+  "evacuation_id": null,
+  "project": null,
+
+  "_comment_source": "Where it is being evacuated FROM. `host` is a `resources.json -> servers` alias or a lease's instance id; `root` is the path on it. `reached_at` is when something last actually answered — null means nobody has looked, which is `unverifiable`, never `absent`.",
+  "source": {"host": null, "root": null, "reached_at": null, "via": null},
+
+  "_comment_destination": "Where it went. S3 today (`resources.json -> aws.s3_bucket` + a prefix). ‼️ `checksum_algorithm` is load-bearing and easy to get wrong: S3's ETag equals the MD5 only for single-part uploads, so a large checkpoint's ETag matches NOTHING and a verifier comparing against it reports every big file as corrupt or, worse, is written to skip them. Upload with `--checksum-algorithm SHA256` and `head-object` returns `ChecksumSHA256`. When it does not, per-file state is `size_only` — present and the right length, hash never compared — and that is NOT `verified`.",
+  "destination": {"kind": "s3", "bucket": null, "prefix": null,
+                  "checksum_algorithm": null},
+
+  "_comment_classes": "What each path is, decided at `plan` and never re-decided later:\n\n  record        run.json / config_snapshot.json / sources.json / stream_meta.json — tiny, always kept. Losing these turns a finished run into an anecdote.\n  metrics       stream.jsonl and the metric tables. Also tiny, also always.\n  weights       checkpoints. Ranked through `retention.py`'s inventory, NEVER by filename. ‼️ A weight file with no metric in the stream may not be left behind: that is exactly abort condition 4 of `retention.py plan`, and here the deletion is performed by the machine going away rather than by `rm`.\n  logs          stdout/stderr. Cheap; default kept.\n  cited         a path some CONCLUSION or run record names. See `_comment_cited`.\n  unclassified  ‼️ everything the rules did not recognise. Reported, never silently dropped — a sweep that quietly keeps only what it understood is how the one file nobody thought about is the one that is lost.",
+  "classes": {},
+
+  "_comment_cited": "The join nothing else performs. A conclusion in `knowledge/conclusions.json` cites `stages/training/runs/run_X`; a run's `lineage.parents` cites a checkpoint. Destroying the box that holds either does not break the citation — it goes on resolving in the record and reading as reproducible, exactly as CLAUDE.md's 「Never delete data a frozen snapshot still names」 describes one line over. `plan` lists them; `clearance` refuses while any is unevacuated.",
+  "cited_by": [],
+
+  "_comment_manifest": "`manifest.jsonl`, frozen at the source before the transfer. One line per file: {item, bytes, sha256}. The ONLY authority for what was supposed to arrive.\n\n‼️ If the box died before the freeze, there is no manifest and the answer is `unverifiable` FOREVER. It is not `complete`, and no amount of inspecting what arrived can promote it: what arrived cannot testify about what did not.",
+  "manifest": {"path": null, "frozen_at": null, "count": null, "bytes": null,
+               "hash_algo": null},
+
+  "_comment_verification": "Per-file, from reading the DESTINATION back:\n\n  verified    hash compared and matched.\n  size_only   present, right length, no comparable checksum at the destination. Never call this verified — a truncation is caught, a corruption is not.\n  truncated   present and the WRONG length. The user's recurring failure, and the one `exists()` cannot see.\n  missing     not there.\n  unverifiable  the destination did not answer. Never report as `missing`.",
+  "verification": {"checked_at": null, "counts": {}, "files": []},
+
+  "_comment_clearance": "The verdict `lease.py release` / `pool.py release` reads. THREE outcomes, computed, never asserted:\n\n  clear            every file hash-verified at the destination.\n  clear_size_only  every file present at the right length, N of them never hash-compared. Permits release AND states the gap — a lower bound said as one, per CLAUDE.md's census rule.\n  blocked          anything missing, truncated, unverifiable, unranked, or cited-and-unevacuated.\n\n‼️ There is no fourth outcome for 「probably fine」. `pool.py release --artifacts recovered` without one of the first two is somebody's word standing in for a check — CLAUDE.md 「Never let somebody's word become a checked fact」.",
+  "clearance": {"verdict": null, "decided_at": null, "hash_verified": null,
+                "of": null, "blocked_by": []},
+
+  "status": "planned",
+  "created_at": null
+}

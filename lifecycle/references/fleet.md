@@ -49,6 +49,23 @@ unprobed axis and an intact one. Friction is deliberately targeted rather than u
 an `ok` release needs nothing, because universal friction is the kind that gets routed
 around.
 
+### `recovered` says *verified*, so it has to be
+
+That row read **"pulled off and verified"** while nothing verified anything — the operator
+typed the word and the box was destroyed. It is CLAUDE.md's 「Never let somebody's word
+become a checked fact」 sitting directly on top of the one action that cannot be undone,
+and it is how a half-transferred checkpoint goes with the disk.
+
+`--artifacts recovered` therefore requires **`--clearance <evacuation.json>`**, and refuses
+unless the verdict is `clear` or `clear_size_only`. `/evacuate` is what computes it: a
+manifest frozen at the source, then per-file arrival in states `os.path.exists` cannot tell
+apart — `truncated`, `corrupt`, `missing`, `unverifiable`.
+
+**Only `recovered` is gated**, and that asymmetry is the same targeting as above. Demanding
+paperwork to say 「I could not look」 would push people toward the one disposition that needs
+none, which is the opposite of the intent and the shape of every control that gets routed
+around. The three honest-about-not-knowing states stay free.
+
 ## What a fleet is, and what it is not
 
 A fleet here is **one search holding several machines at once**. It is not a cluster

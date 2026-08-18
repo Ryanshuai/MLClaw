@@ -79,6 +79,7 @@ Every skill knows its position in this graph. Two types of edges:
 | `/train-tune` | train-init done, ≥1 prior train-run completed | `/train-tune-report` (auto at close) |
 | `/explore` | project.json, code available, **a declared corpus** (`datasets/<id>/dataset.json` + a frozen snapshot). Calls `/eval-run` for the noise floor and `/discover` when sourcing a paper's code | `/train-run` or `/eval-run` (open an arm), then **`/train-tune` — after the architecture settles, never before**: tuning hyperparameters around a component you are about to remove spends the budget twice |
 | `/train-tune-report` | a tune session with ≥1 run | (done) |
+| `/evacuate` | a machine with work on it, and somewhere durable to put it (`resources.json -> aws.s3_bucket`). **Runs BEFORE `/lease release` or `pool.py release`, never after** — after is not a workflow, it is an archaeology | `/lease` (release, now safe), `/conclude` (the bundle's `logic/` layer is its output) |
 | `/conclude` | ≥1 record worth citing — a completed run, a closed graph card, an audit. Nothing else: a conclusion cites, it does not produce | (done). **`/explore` routes here at close**, and so should any round that ended in a belief rather than a number |
 | `/refactor-init` | project.json | `/refactor-run` |
 | `/refactor-run` | refactor-init done (plan.json) | `/refactor-run` (next round), `/refactor-report` when complete |
@@ -142,6 +143,7 @@ Two reasons the sweep is not `/train-init`'s, and be precise about the first: **
 | refactor-run completed | `{PROJECT}/stages/refactor/runs/*/run.json` with `status: "completed"` exists |
 | env_manager available | `{WORKSPACE}/resources.json → local.env_manager.tool` is non-empty |
 | a corpus is declared for `/explore` | `{PROJECT}/stages/exploration/graph.json -> corpus.dataset_id` non-empty **and** that dataset has a frozen snapshot. Without it every `premise_share` is unscoped, and an unscoped share is what queued five arms against a fault that did not exist |
+| a machine may be released | `evacuate.py clearance --project {PROJECT} --host {HOST}` exits 0. **Exit 1 means do not release it** — the disk goes with the lease, and the verdict names what is still on it. `pool.py release --artifacts recovered` enforces the same thing one layer down by requiring the record |
 | the conclusions are intact | `conclude.py check --project {PROJECT}` exits 0. **Exit 1 is a refusal, not a breakage** — the same fallback exception applies. The finding to look for first is a `status` recorded as `supported` against evidence that no longer resolves; re-deriving it by hand is overriding the check, not falling back to it |
 | the explore graph is intact | `graph.py check --project {PROJECT}` exits 0. **Exit 1 is a refusal, not a breakage** — do not open another arm, and do not fall back to doing it by hand: the fallback rule's exception applies (CLAUDE.md -> "Script Integration") |
 | dataset declared | `{PROJECT}/datasets/<id>/dataset.json` exists with non-empty `identity.unit_glob`, `layers`, `locations` |
