@@ -534,167 +534,63 @@ class TheRecordLivesOffTheBox(EvacCase):
         self.assertEqual(self.rec()["manifest"]["count"], 4)
 
 
-class TheBundleIsShapedLikeAnArtifactNotABackup(EvacCase):
-    """ARA (arXiv:2604.24658) — `logic/` `src/` `trace/` `evidence/`, and the
-    user's framing of what belongs in each: 「代码 + config 实际上等于可复现」,
-    「输出就是 artifact、指标，还有这些结论」.
+class TheArtifactIsCalledNotOwned(EvacCase):
+    """An evacuation is scoped to a MACHINE — which may hold pieces of three
+    rounds, or none, plus files belonging to no artifact at all — and is gated on
+    a lease. An artifact is scoped to a ROUND and has no deadline. So `/ara` is
+    not a stage inside this and this is not a stage inside `/ara`: the moment
+    before a box dies is the LAST moment its source can be read, which makes the
+    deadline a forcing function rather than a container.
 
-    An S3 prefix full of correct files is not an artifact. The layers are what
-    make an ablation readable a year later instead of a folder of runs — and the
-    fifth one is MLClaw's, because ARA is about papers, whose knowledge
-    regenerates from src + evidence, while a 4GB checkpoint does not.
+    Same shape as `/train-run` calling `/eval-run` for a fine-tune's base
+    measurement — the caller is not a stage of the callee; that moment is simply
+    the only one where the measurement is still possible.
+
+    The `unclassified` bucket is the proof the scopes differ: an evacuation must
+    carry files belonging to no artifact, and dropping them is the failure it
+    exists to prevent.
     """
 
-    def setUp(self):
-        super().setUp()
-        self.write(os.path.join("box", "config_snapshot.json"), '{"lr": 0.001}')
-        self.write(os.path.join("box", "model.py"), "def forward(x): return x\n")
-
-    def test_the_five_layers_are_separated(self):
-        rc, out = self.plan()
-        c = out["classes"]
-        self.assertEqual(c["src"], 2)          # config_snapshot.json + model.py
-        self.assertEqual(c["weights"], 1)
-        self.assertGreaterEqual(c["evidence"], 2)   # run.json, stream.jsonl, log
-
-    def test_a_checkpoint_under_a_code_directory_is_still_weights(self):
-        """Order matters: `.bin` beside the model code is not source."""
-        self.write(os.path.join("box", "src", "pytorch_model.bin"), "W" * 16)
-        rc, out = self.plan()
-        self.assertEqual(out["classes"]["weights"], 2)
-
-    def test_a_log_is_evidence_because_that_is_where_a_number_was_read(self):
-        """MLClaw's grounding rule makes the transcribed log line the evidence a
-        metric was read rather than recalled — same word, one layer down."""
-        rc, out = self.plan()
-        self.plan()
-        self.freeze()
-        plan = self.read(os.path.join("proj", "evacuations", "evac_T", "plan.jsonl"))
-        rows = [json.loads(l) for l in plan.splitlines() if l.strip()]
-        log = [r for r in rows if r["item"].replace("\\", "/") == "logs/train.log"][0]
-        self.assertEqual(log["class"], "evidence")
-
-    def test_the_index_names_every_layer_it_carries(self):
+    def test_bundling_produces_an_artifact_through_ara(self):
         self.plan()
         self.freeze()
         rc, out, err = self.e("bundle", "--id", "evac_T")
         self.assertEqual(rc, 0, f"bundle failed: {out or err}")
-        with open(out["artifact"], encoding="utf-8") as f:
-            md = f.read()
-        for layer in ("`src/`", "`evidence/`", "`weights/`"):
-            self.assertIn(layer, md)
+        self.assertTrue(os.path.exists(out["artifact"]))
+        self.assertIn("/ara", out["note"])
 
-    def test_logic_and_trace_are_copied_in_physically(self):
-        """They must stay readable without pulling the weights back down."""
-        self.write_json(os.path.join("proj", "knowledge", "conclusions.json"),
-                        {"conclusions": []})
-        self.write_json(os.path.join("proj", "stages", "exploration", "graph.json"),
-                        {"nodes": []})
+    def test_the_artifact_carries_the_transfer_verdict(self):
+        """The one thing the evacuation knows and the artifact cannot: whether
+        the bytes it names actually arrived."""
         self.plan()
         self.freeze()
-        rc, out, err = self.e("bundle", "--id", "evac_T")
-        self.assertIn("logic/conclusions.json", out["copied_into_bundle"])
-        self.assertIn("trace/graph.json", out["copied_into_bundle"])
-        self.assertTrue(os.path.exists(self.path(
-            "proj", "evacuations", "evac_T", "bundle", "logic", "conclusions.json")))
-
-    def test_the_index_carries_the_conclusions_with_status_and_tier(self):
-        """CLAUDE.md: 「The tier travels with the number forever, in every file
-        and every sentence.」 An artifact index is a file and its rows are
-        sentences."""
-        self.write_json(os.path.join("proj", "knowledge", "conclusions.json"),
-                        {"conclusions": [{"id": "K01", "statement": "one-to-one helps",
-                                          "status": "supported", "tier": "T1",
-                                          "scope": {"corpus": "datasets/b@1"}}]})
-        self.plan()
-        self.freeze()
-        rc, out, _ = self.e("bundle", "--id", "evac_T")
-        with open(out["artifact"], encoding="utf-8") as f:
-            md = f.read()
-        self.assertIn("K01", md)
-        self.assertIn("T1", md)
-        self.assertIn("supported", md)
-
-    def test_the_index_says_a_stored_status_is_a_snapshot(self):
-        """A status copied into an artifact stops being recomputed the moment it
-        is written. Saying so is the difference between a record and a claim."""
-        self.write_json(os.path.join("proj", "knowledge", "conclusions.json"),
-                        {"conclusions": [{"id": "K01", "statement": "s",
-                                          "status": "supported", "tier": "T2",
-                                          "scope": {"corpus": "c"}}]})
-        self.plan()
-        self.freeze()
-        rc, out, _ = self.e("bundle", "--id", "evac_T")
-        with open(out["artifact"], encoding="utf-8") as f:
-            md = f.read()
-        self.assertIn("conclude.py check", md)
-
-
-class ReproducibilityIsReadNotClaimed(EvacCase):
-    """`lifecycle/references/run-mechanics.md` -> "Record integrity", the code
-    snapshot contract: `reproducible: false` means a differing file was not
-    embedded, so `git checkout && git apply` rebuilds a DIFFERENT tree.
-
-    The user's framing is that code + config IS the reproducibility claim in an
-    architecture search, since the code is the variable. So the bundle states
-    the verdict — and states it from the run's own snapshot rather than
-    re-deriving it, because `code_snapshot.py` already refused the cases it
-    could refuse and a second opinion here could only disagree with it.
-
-    ‼️ It never blocks. Losing the bytes is strictly worse than saving them
-    under an honest label, which is why a census that could not reach a machine
-    is stamped `complete: false` rather than withheld.
-    """
-
-    def _run(self, **code):
-        self.write_json(os.path.join("box", "run.json"),
-                        {"run_id": "run_A", "code": code})
-
-    def test_a_reproducible_snapshot_reads_yes(self):
-        self._run(reproducible=True)
-        rc, out = self.plan()
-        self.assertEqual(out["reproducible"], "yes")
-
-    def test_a_non_reproducible_snapshot_reads_no_and_says_why(self):
-        self._run(reproducible=False)
-        rc, out = self.plan()
-        self.assertEqual(out["reproducible"], "no")
-        self.assertIn("different tree", out["reproducibility"])
-
-    def test_a_missing_verdict_is_unknown_not_no(self):
-        """Not the same fact, and collapsing them is the extraction-failure-
-        versus-absence bug one domain over."""
-        self._run()
-        rc, out = self.plan()
-        self.assertEqual(out["reproducible"], "unknown")
-
-    def test_it_does_not_block_the_evacuation(self):
-        self._run(reproducible=False)
-        rc, out = self.plan()
-        self.assertEqual(rc, 0)
-        self.freeze()
-        self.copy_all()
+        self.copy_all(truncate="output/epoch_12.pth")
         self.verify()
-        rc, cl = self.clearance()
-        self.assertEqual(rc, 0, f"reproducibility must not gate a release: {cl}")
-
-    def test_the_index_carries_the_label(self):
-        self._run(reproducible=False)
-        self.plan()
-        self.freeze()
+        self.clearance()
         rc, out, _ = self.e("bundle", "--id", "evac_T")
         with open(out["artifact"], encoding="utf-8") as f:
             md = f.read()
-        self.assertIn("Reproducible?", md)
-        self.assertIn("**no**", md)
+        self.assertIn("truncated", md)
+        self.assertIn("blocked", md)
 
-    def test_a_bundle_with_no_src_layer_says_it_is_a_backup(self):
-        """Weights and numbers with no way to regenerate them is a backup, and
-        an ablation read off one cannot say what differed between the arms."""
-        os.remove(self.path("box", "run.json"))
+    def test_a_file_belonging_to_no_artifact_is_still_evacuated(self):
+        """The scopes differ, and this is where. `/ara` would have no reason to
+        carry this file; the evacuation must, because the box is going away."""
+        self.write(os.path.join("box", "notes_from_the_intern.txt"), "read me")
         rc, out = self.plan()
-        self.assertEqual(out["classes"]["src"], 0)
-        self.assertIn("BACKUP", out["‼️src"])
+        self.assertEqual(out["classes"]["unclassified"], 1)
+        self.assertEqual(self.freeze()["count"], 5)
+
+    def test_the_classifier_has_one_definition(self):
+        """Imported from `/ara`, not reimplemented. Two classifiers would put a
+        checkpoint in `weights/` here and `src/` there, and only the artifact
+        would show it."""
+        with open(os.path.join(os.path.dirname(os.path.dirname(
+                os.path.abspath(__file__))), "lifecycle", "scripts", "evacuate",
+                "evacuate.py"), encoding="utf-8") as f:
+            src = f.read()
+        self.assertIn("from ara import", src)
+        self.assertNotIn("\ndef classify(", src)
 
 
 if __name__ == "__main__":

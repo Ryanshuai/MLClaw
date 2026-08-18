@@ -135,6 +135,7 @@ README.md                           ← what MLClaw is, and which stages are bui
     explore/SKILL.md                ← /explore (+ references/: experiment-graph, porting, run-card, cluster-ops, explore-or-stop, debate-roles, human-review — ported from the arch-transplant skill)
     conclude/SKILL.md               ← /conclude
     evacuate/SKILL.md               ← /evacuate
+    ara/SKILL.md                    ← /ara
   settings.json
 contracts/                          ← executable form of this file's contracts; stdlib only
   helpers.py                        ← temp dirs, real git repos, script loading by path
@@ -152,6 +153,7 @@ contracts/                          ← executable form of this file's contracts
   contract_data_retire.py           ← only a census-listed path is deletable; the log outlives it
   contract_adaptation.py            ← a handed-back finding is not a resolved one; loading is not correctness
   contract_conclude.py              ← a belief may not outlive its evidence; the tier is the weakest one
+  contract_ara.py                   ← the five layers, and a frozen belief that stopped agreeing with the record
   contract_evacuate.py              ← a file that exists is not a file that arrived; leaving one behind is a delete
   contract_docs.py                  ← this file, README, and .claude/skills/ must agree
 .github/workflows/ci.yml            ← contracts + compileall + JSON parse + no-credentials gate
@@ -214,6 +216,8 @@ lifecycle/
       conclude.py                   ← new/add/evidence/set/refute/supersede/check/status/render; `status` and `tier` are computed, never written. Executes nothing
     evacuate/
       evacuate.py                   ← plan/freeze/push/verify/bundle/clearance/status; the manifest is frozen at the source, and `clearance` is what a release reads
+    ara/
+      ara.py                        ← build/check; the five layers and ARTIFACT.md. `check` reports where the frozen copy stopped agreeing with the live record
     adaptation/
       adapt.py                      ← open/raise/respond/round/distill/relax/close/status; the shared ledger
     data-report/
@@ -319,6 +323,11 @@ evacuations/                        ← one directory per machine emptied before
                                       logic/ and trace/ copied in physically, so the conclusions
                                       and the ablation graph stay readable without pulling 40GB
                                       of weights back down
+ara/                                ← the round's work as a readable artifact, ARA-shaped
+  ARTIFACT.md                         (arXiv:2604.24658). `ara.json` records what it was
+  ara.json                            built out of, so `check` can report where the FROZEN
+  logic/ trace/                       copy stopped agreeing with the live record — the copy
+                                      people read does not update when its evidence rots
 knowledge/                          ← what is now BELIEVED, as opposed to what happened. Project-level
   conclusions.json                    because a conclusion outlives the exploration that produced it and
                                       may come from an eval, a tune session or an audit just as easily.

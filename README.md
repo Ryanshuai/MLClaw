@@ -246,6 +246,7 @@ that passed.
 - [x] Skill dependency system (inter-skill graph + internal dependency chain + cross-session resume)
 - [x] Remote execution + path mapping
 - [x] Exploration — `/explore` (architecture search: count → audit → price → port → ablate)
+- [x] Research artifact — `/ara` (a round's work in ARA's four layers plus `weights`, an `ARTIFACT.md` a person can read a year later, and a check that reports where the frozen beliefs stopped agreeing with the live record)
 - [x] Evacuation — `/evacuate` (empty a machine before it is released: a manifest frozen at the source, per-file arrival in states `exists()` cannot distinguish, a clearance the release must read, and an ARA-shaped artifact — input `src` = code + config, output = `evidence` / `logic` / `trace` / `weights`)
 - [x] Conclusions — `/conclude` (what a round came to BELIEVE, as a checkable artifact: statement, evidence with transcribed quotes, the argued-but-unmeasured part in its own column, and a mandatory falsifier. `status` and `tier` are computed from what the evidence still resolves to — the tier is the **weakest** evidence's, and a belief whose support rotted goes `unverifiable`, which is neither a weak `supported` nor a `refuted`)
 - [ ] Run comparison — `/train-compare` (side-by-side metrics/params/env diff)

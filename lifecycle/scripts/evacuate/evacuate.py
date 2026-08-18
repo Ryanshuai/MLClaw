@@ -31,8 +31,8 @@ Verbs:
              nothing ranked. Writes the record, moves nothing
   freeze     hash at the source and write manifest.jsonl -- the only authority
              for what was supposed to arrive
-  bundle     write the ARA index -- what the input was, what came out, and
-             whether code + config actually reproduce it
+  bundle     build the ARA for what is being evacuated (delegates to
+             `/ara`; the deadline forces the artifact, it does not own it)
   push       build/run the transfer, or record that somebody else did it
   verify     read the DESTINATION back and compare against the frozen manifest
   clearance  the verdict a release reads: clear | clear_size_only | blocked
@@ -54,54 +54,33 @@ sys.path.insert(0, os.path.join(os.path.dirname(_HERE), "shared"))
 # alternative was a second hashing implementation, and a correctness rule
 # written twice gets fixed once.
 sys.path.insert(0, os.path.join(os.path.dirname(_HERE), "data-label"))
+# The LAYERS are `/ara`'s, not this skill's -- see `cmd_bundle`. Imported so the
+# classifier that decides what a file IS has one definition; two of them would
+# put a checkpoint in `weights/` here and in `src/` there, and only the artifact
+# would show it.
+sys.path.insert(0, os.path.join(os.path.dirname(_HERE), "ara"))
 from _records import (atomic_write_json, broke, emit, id_stamp,  # noqa: E402
                       now_utc, read_json, refuse)
 from handoff import (build_manifest, hash_file, iter_files,  # noqa: E402
                      read_manifest, write_manifest)
+from ara import CLASSES, classify, reproducibility            # noqa: E402
+
+ARA_PY = os.path.join(os.path.dirname(_HERE), "ara", "ara.py")
 
 
-# What each path is. Decided once, at `plan`.
-#
-# ARA's four layers (arXiv:2604.24658), plus one MLClaw needs and ARA does not,
-# plus the leftover bucket that is the point rather than an oversight:
-#
-#   src        the INPUT. Code snapshot + config + sources + environment.
-#              ‼️ In architecture exploration the CODE IS THE VARIABLE, so this
-#              layer is not context -- code + config IS the reproducibility
-#              claim, and `plan` refuses to call a bundle reproducible when the
-#              run's own `code.reproducible` says it is not.
-#   evidence   the numbers and WHERE THEY CAME FROM. stream.jsonl, metrics,
-#              tb/, and the raw logs -- the log belongs here rather than in a
-#              bucket of its own because MLClaw's grounding rule makes the
-#              transcribed log line the evidence a number was read rather than
-#              recalled. Same word, same meaning, one layer down.
-#   logic      the CONCLUSIONS. `/conclude`'s record: what is believed, on what,
-#              and what would overturn it. ARA's `logic/claims.md`.
-#   trace      the exploration DAG -- `/explore`'s graph, findings, baseline,
-#              audit. ARA's `trace/exploration_tree.yaml`. This is what makes an
-#              ablation readable a year later instead of a folder of runs.
-#   weights    ‼️ ARA HAS NO LAYER FOR THIS, and the absence is about papers
-#              rather than an oversight: a paper's artifact is its knowledge,
-#              and knowledge regenerates from src + evidence. A 4GB checkpoint
-#              does not. It is the one thing here that cannot be rebuilt from
-#              the other four, which is why it is also the thing whose partial
-#              transfer costs the most.
-#   unclassified  everything the rules did not recognise. Reported and KEPT --
-#              a sweep that quietly keeps only what it understood is how the one
-#              file nobody thought about is the one that is lost, and it reports
-#              success while doing it.
-CLASSES = ("src", "evidence", "logic", "trace", "weights", "unclassified")
+def _ara(*args):
+    """-> (returncode, parsed payload). Runs `/ara` as its own process.
 
-SRC_NAMES = ("config_snapshot.json", "sources.json", "environment.json",
-             "requirements.txt", "pixi.toml", "pixi.lock", "env_snapshot.json")
-SRC_EXT = (".py", ".yaml", ".yml", ".toml", ".cfg", ".sh", ".patch", ".diff")
-EVIDENCE_NAMES = ("run.json", "stream.jsonl", "stream_meta.json",
-                  "retention_plan.json", "metrics.json")
-LOGIC_NAMES = ("conclusions.json", "conclusions.md")
-TRACE_NAMES = ("graph.json", "findings.json", "baseline.json", "audit.json",
-               "state.json", "chain.md")
-WEIGHT_EXT = (".pt", ".pth", ".ckpt", ".safetensors", ".bin", ".onnx", ".engine")
-EVIDENCE_DIRS = ("logs", "tb")
+    A subprocess rather than a call, because the two skills own separate
+    records and the exit code is `/ara`'s verdict, not this one's -- collapsing
+    them would let an artifact finding read as an evacuation refusal.
+    """
+    p = subprocess.run([sys.executable, ARA_PY, *[str(x) for x in args]],
+                       capture_output=True, text=True, encoding="utf-8")
+    try:
+        return p.returncode, json.loads(p.stdout or "null")
+    except ValueError:
+        return p.returncode, {"stdout": p.stdout, "stderr": p.stderr}
 
 
 # Per-file, from reading the destination back. Five, and the two that get
@@ -117,31 +96,6 @@ STATUSES = ("planned", "frozen", "pushed", "verified", "cleared", "blocked")
 
 
 # ------------------------------------------------------------------ classify
-
-def classify(rel):
-    """-> one of CLASSES, from the path alone.
-
-    Order matters. `weights` is tested before `src` because a `.bin` under a
-    code directory is still a checkpoint, and `logic`/`trace` before `evidence`
-    because `state.json` is an exploration record rather than a metric.
-    """
-    parts = rel.replace("\\", "/").split("/")
-    base = parts[-1]
-    ext = os.path.splitext(base)[1].lower()
-    if ext in WEIGHT_EXT:
-        return "weights"
-    if base in LOGIC_NAMES:
-        return "logic"
-    if base in TRACE_NAMES:
-        return "trace"
-    if base in SRC_NAMES or ext in SRC_EXT:
-        return "src"
-    if base in EVIDENCE_NAMES or ext in (".log", ".out", ".err", ".jsonl"):
-        return "evidence"
-    if any(p in EVIDENCE_DIRS for p in parts[:-1]):
-        return "evidence"
-    return "unclassified"
-
 
 def _retention_droppable(path):
     """-> set of basenames a `retention.py` plan ranked as deletable.
@@ -164,51 +118,6 @@ def _retention_droppable(path):
         out.add(os.path.basename(entry if isinstance(entry, str)
                                  else entry.get("path") or entry.get("file") or ""))
     return {b for b in out if b}
-
-
-def reproducibility(root):
-    """-> {"verdict", "reason", "runs"}. Three values, never two.
-
-    The user's framing, and it is the right one: in architecture exploration the
-    code IS the variable, so **code + config is the reproducibility claim** --
-    not context around one. This is what checks it, and it does not re-derive
-    anything: `code_snapshot.py` already computed `code.reproducible` at launch
-    and refused a non-git tree outright, so the verdict is READ, not recomputed.
-    `reproducible: false` there means a differing file was too large to embed,
-    which means `git checkout && git apply` rebuilds a DIFFERENT tree.
-
-    ‼️ This never refuses an evacuation. Losing the bytes is strictly worse than
-    saving them under an honest label, so a bundle that cannot be reproduced is
-    still evacuated -- and stamped, at the top of `ARTIFACT.md`, exactly the way
-    a census that could not reach a machine is stamped `complete: false` rather
-    than withheld.
-    """
-    runs, bad, unknown = [], [], []
-    for dirpath, _, files in os.walk(root):
-        if "run.json" not in files:
-            continue
-        rec = read_json(os.path.join(dirpath, "run.json"), required=False) or {}
-        rid = rec.get("run_id") or os.path.basename(dirpath)
-        code = rec.get("code") or {}
-        runs.append(rid)
-        if code.get("reproducible") is True:
-            continue
-        (bad if code.get("reproducible") is False else unknown).append(rid)
-    if not runs:
-        return {"verdict": "unknown", "runs": [],
-                "reason": "no run.json under the source root -- nothing states "
-                          "whether code + config rebuild this"}
-    if bad:
-        return {"verdict": "no", "runs": runs,
-                "reason": f"{len(bad)} run(s) recorded `code.reproducible: false` "
-                          f"-- a differing file was too large to embed, so "
-                          f"checkout + apply rebuilds a different tree: {bad[:5]}"}
-    if unknown:
-        return {"verdict": "unknown", "runs": runs,
-                "reason": f"{len(unknown)} run(s) never recorded a snapshot verdict "
-                          f"-- not the same fact as `false`: {unknown[:5]}"}
-    return {"verdict": "yes", "runs": runs,
-            "reason": f"all {len(runs)} run(s) carry a reproducible code snapshot"}
 
 
 # ------------------------------------------------------------------- citations
@@ -419,125 +328,47 @@ def cmd_freeze(a):
 
 # ------------------------------------------------------------------- bundle
 #
-# ARA's `PAPER.md`: the page somebody opens instead of the tree. It exists
-# because an S3 prefix full of correct files is not an artifact -- an artifact
-# says what the input was, what came out, and whether the two still connect.
-
-def _layer_rows(project, eid):
-    counts, byte_totals = {c: 0 for c in CLASSES}, {c: 0 for c in CLASSES}
-    mpath = os.path.join(evac_dir(project, eid), "manifest.jsonl")
-    plan_path = os.path.join(evac_dir(project, eid), "plan.jsonl")
-    sizes = {}
-    if os.path.exists(mpath):
-        for e in read_manifest(mpath)[1]:
-            sizes[e["item"]] = e.get("bytes") or 0
-    with open(plan_path, encoding="utf-8") as fh:
-        for line in fh:
-            if not line.strip():
-                continue
-            o = json.loads(line)
-            counts[o["class"]] += 1
-            byte_totals[o["class"]] += sizes.get(o["item"], 0)
-    return counts, byte_totals
-
-
-LAYER_BLURB = {
-    "src": "INPUT — code snapshot + training config. In an architecture search "
-           "the code is the variable, so this layer IS the reproducibility claim",
-    "evidence": "the numbers, and the lines they were read from",
-    "logic": "the conclusions: what is believed, on what, and what would overturn it",
-    "trace": "the exploration graph — which arms ran, which won, what killed the rest",
-    "weights": "‼️ the one layer ARA has no equivalent for, because a paper's "
-               "knowledge regenerates from src+evidence and a checkpoint does not",
-    "unclassified": "matched no rule and was kept anyway",
-}
-
+# Delegated. The ARTIFACT is not this skill's -- an evacuation is scoped to a
+# MACHINE (which may hold pieces of three rounds, or none, plus files belonging
+# to no artifact at all) and is gated on a lease; an artifact is scoped to a
+# ROUND and has no deadline. What is true is that the moment before a box dies
+# is the LAST moment its source can be read, so the deadline forces the artifact
+# to be finished. That makes this a caller, not a container.
 
 def cmd_bundle(a):
     project = os.path.expanduser(a.project)
     rec = _load(project, a.id)
-    bdir = os.path.join(evac_dir(project, a.id), "bundle")
-    os.makedirs(bdir, exist_ok=True)
+    root = (rec.get("source") or {}).get("root")
+    out = os.path.join(evac_dir(project, a.id), "bundle")
 
-    # The two small layers are copied PHYSICALLY, because they must be readable
-    # without pulling forty gigabytes of weights back down. Everything else is
-    # described by the manifest and stays where the transfer put it.
-    copied = []
-    for layer, src in (("logic", os.path.join(project, "knowledge")),
-                       ("trace", os.path.join(project, "stages", "exploration"))):
-        if not os.path.isdir(src):
-            continue
-        for name in sorted(os.listdir(src)):
-            if not name.endswith((".json", ".md")):
-                continue
-            dst = os.path.join(bdir, layer, name)
-            os.makedirs(os.path.dirname(dst), exist_ok=True)
-            with open(os.path.join(src, name), "rb") as fa, open(dst, "wb") as fb:
-                fb.write(fa.read())
-            copied.append(f"{layer}/{name}")
-
-    counts, byte_totals = _layer_rows(project, a.id)
-    repro = rec.get("reproducible") or {}
-    v = rec.get("verification") or {}
-    cl = rec.get("clearance") or {}
-    MARK = {"yes": "✅", "no": "❌", "unknown": "❓"}
-
-    L = [f"# {rec.get('project')} — evacuated artifact `{a.id}`", "",
-         "> Structure follows ARA (arXiv:2604.24658). **Input** is `src/` — the code",
-         "> snapshot and the training config. **Output** is `evidence/` (the numbers),",
-         "> `logic/` (the conclusions), `trace/` (the ablation graph) and `weights/`.",
-         "> `weights/` is MLClaw's fifth layer: ARA has none, because a paper's",
-         "> knowledge regenerates from src + evidence and a checkpoint does not.", "",
-         f"Source: `{(rec.get('source') or {}).get('host')}`:"
-         f"`{(rec.get('source') or {}).get('root')}`  ",
-         f"Destination: `{(rec.get('destination') or {}).get('bucket')}/"
-         f"{(rec.get('destination') or {}).get('prefix') or ''}`", "",
-         f"## Reproducible? {MARK.get(repro.get('verdict'), '❓')} "
-         f"**{repro.get('verdict', 'unknown')}**", "",
-         repro.get("reason", "not assessed"), ""]
-    if repro.get("verdict") != "yes":
-        L += ["> ‼️ 这不是拒绝，是标签。丢字节比标签不准更坏，所以东西照搬，",
-              "> 但这一行必须跟着它走 —— 和普查记 `complete: false` 是同一条规矩。", ""]
-
-    L += ["## Layers", "", "| layer | files | bytes | what it is |", "|---|---|---|---|"]
-    for c in CLASSES:
-        if counts[c]:
-            L.append(f"| `{c}/` | {counts[c]} | {byte_totals[c]:,} | {LAYER_BLURB[c]} |")
-    L.append("")
-
-    conc = read_json(os.path.join(project, "knowledge", "conclusions.json"),
-                     required=False) or {}
-    if conc.get("conclusions"):
-        L += ["## Conclusions — `logic/`", "",
-              "| id | status | tier | corpus | statement |", "|---|---|---|---|---|"]
-        for c in conc["conclusions"]:
-            sc = c.get("scope") or {}
-            L.append(f"| {c.get('id')} | {c.get('status') or '—'} | "
-                     f"{c.get('tier') or '—'} | `{sc.get('corpus')}` | "
-                     f"{c.get('statement')} |")
-        L += ["", "‼️ `status` 和 `tier` 是 `conclude.py check` 算出来的，"
-              "在这份快照被写下的那一刻为真。证据搬走之后它们不会自己更新 —— "
-              "重新引用之前跑一次 `check`。", ""]
-
-    counts_v = v.get("counts") or {}
-    L += ["## Transfer", "",
-          f"- manifest frozen at `{(rec.get('manifest') or {}).get('frozen_at')}` — "
-          f"{(rec.get('manifest') or {}).get('count')} files",
-          f"- verified: " + ", ".join(f"{k} {n}" for k, n in counts_v.items() if n),
-          f"- clearance: **{cl.get('verdict') or 'not decided'}**"]
+    v, cl, m = (rec.get("verification") or {}), (rec.get("clearance") or {}), \
+        (rec.get("manifest") or {})
+    counts = v.get("counts") or {}
+    note = ["## Transfer", "",
+            f"- source: `{(rec.get('source') or {}).get('host')}`:`{root}`",
+            f"- destination: `{(rec.get('destination') or {}).get('bucket')}/"
+            f"{(rec.get('destination') or {}).get('prefix') or ''}`",
+            f"- manifest frozen at `{m.get('frozen_at')}` — {m.get('count')} files",
+            "- arrival: " + (", ".join(f"{k} {n}" for k, n in counts.items() if n)
+                             or "not verified"),
+            f"- clearance: **{cl.get('verdict') or 'not decided'}**"]
     if cl.get("blocked_by"):
-        L += ["", "‼️ 未放行：", ""] + [f"- {b}" for b in cl["blocked_by"]]
-    L.append("")
+        note += ["", "‼️ 未放行："] + [f"- {b}" for b in cl["blocked_by"]]
 
-    path = os.path.join(bdir, "ARTIFACT.md")
-    with open(path, "w", encoding="utf-8") as fh:
-        fh.write("\n".join(L) + "\n")
-    rec["bundle"] = {"path": "bundle", "written_at": now_utc(), "copied": copied}
+    rc, payload = _ara("build", "--project", project, "--root", root, "--out", out,
+                       "--title", f"{rec.get('project')} — evacuated from "
+                                  f"{(rec.get('source') or {}).get('host')}",
+                       "--note", "\n".join(note))
+    if rc:
+        broke("ara.py build failed", detail=payload)
+    rec["bundle"] = {"path": "bundle", "written_at": now_utc(),
+                     "copied": payload.get("copied") or []}
     _save(project, rec)
-    emit({"ok": True, "evacuation_id": a.id, "artifact": path,
-          "copied_into_bundle": copied,
-          "note": "logic/ and trace/ are copied in physically so the artifact "
-                  "stays readable without pulling the weights back down"})
+    emit({"ok": True, "evacuation_id": a.id, "artifact": payload.get("artifact"),
+          "layers": payload.get("layers"),
+          "copied_into_bundle": payload.get("copied"),
+          "note": "the artifact is `/ara`'s; this evacuation is what forced it to "
+                  "be finished while the source was still readable"})
 
 
 # --------------------------------------------------------------------- push
