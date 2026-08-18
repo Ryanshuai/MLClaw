@@ -30,7 +30,10 @@ Usage
   lease.py status
   lease.py renew LEASE_ID [--ttl-s N]
   lease.py release LEASE_ID
+  lease.py addr LEASE_ID
   lease.py reap [--tag-prefix mlclaw-]
+  lease.py history [--since-days N]
+  lease.py cost [--project NAME] [--tag T] [--since-epoch S]
 
 leases.json sits beside resources.json; both are located per `_common.resources_path`.
 """

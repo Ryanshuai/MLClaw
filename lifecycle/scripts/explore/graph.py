@@ -19,6 +19,16 @@ Four operations, from that skill's `references/experiment-graph.md`:
             the next person runs against them
     close   a verdict, or one of four deaths each with its own revival shape
 
+Plus the three that read rather than write, and one that records a disagreement:
+
+    check   the invariants. Reports, never repairs -- see below
+    status  one-screen summary of the whole graph
+    new     what became a CONCLUSION since a time, and what only became a number.
+            The two lists stay apart because 「有什么新结论了」 is the moment that
+            most tempts reporting a result as one
+    dispute two cards disagree: mark both, revert neither, defer the adjudication
+    resolve adjudicate one dispute -- upheld / rejected / not_comparable
+
 Two things it will not do:
 
 **It executes nothing.** An arm is an ordinary run in `stages/<target_stage>/runs/`,

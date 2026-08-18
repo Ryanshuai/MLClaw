@@ -70,6 +70,12 @@ dead-man TTL plus `reap` at conversation start; a missed `renew` kills the job b
 nothing — it fails safe. Any new L3 step must land on the safe side of that line or bring its
 own backstop.
 
+**`cost` answers a different question from `status`.** `status` is what is burning *right now*; `cost` is what a round *has* cost — the one actually asked, repeatedly, across a six-day search, and the one that decides rent-versus-buy.
+
+‼️ **Rows with no `price_hr` are excluded and counted, and the total says it is a LOWER BOUND.** `--price-hr` is optional on `up`, so a ledger routinely holds unpriced rows, and a sum over the priced ones alone reads exactly like the whole bill — the same shape as a census with `complete: false`. A round that rented ten boxes and priced six does not have a cost; it has a floor and four unknowns.
+
+‼️ **Its window starts at `requested_at`, and billing does not.** The ledger's only start stamp is when the lease was asked for; the provider charges from when the box comes up. One machine type measured ~80 minutes to provision, so this over-counts in a direction nobody can see unless the report says so — it does.
+
 ## The human's window
 
 Only three things the user asks directly. None is a flow.
