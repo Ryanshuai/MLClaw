@@ -1,0 +1,17 @@
+{
+  "_comment": "The things that expire. Ported from arch-transplant's `references/project-state.md`, which opens by declaring its own expiry — 「换了权重/取帧/度量，这整份文件作废」 — and is a template there because the constants belong to a project, not to a method.\n\nEverything a card cites lives here so that ONE file going stale is detectable, rather than stale numbers being spread across forty cards. `graph.py check` re-reads it and reports every card citing a constant whose `measured_at` predates the current `graph.json -> corpus.declared_at`.",
+
+  "_comment_constants": "One entry per constant: {name, value, unit, measured_at, measured_on, source_run, tier}\n\n‼️ `measured_at` is not decoration — it is what the staleness scan reads. ‼️ `tier` travels with the number here too: a constant established at T1 may not silently become the basis of a T2 verdict.\n\n‼️ `measured_on` must name the corpus. The most expensive recorded error on this line was a share quoted from another corpus: predicted 47%, this corpus measured 4.62% — an order of magnitude, and five arms had been queued on it.",
+  "constants": [],
+
+  "_comment_tiers": "Current tier assignment per card id: {node_id, tier, V, P, U, code_availability, assigned_at, rationale}. Derived from the axes but recorded separately because a tier gets REVISED — a high-U proposal looking bad at T1 is promoted, not killed (a cheap check has low power: it can give you a reason to continue, never a reason to reject).",
+  "tiers": [],
+
+  "_comment_killed": "The kill list with revival conditions, mirrored from the graph for reading. ‼️ Kept because a round that ends without it means the next round re-proposes what this one eliminated — the single most common way a search fails to converge. Derived from `graph.json`; `graph.py check` refuses a divergence rather than regenerating it, because which side is right is not a script's call.",
+  "killed": [],
+
+  "_comment_invalidated_by": "‼️ The header rule, as a field. When any of these changes, this entire file is void and every number in it must be re-measured. The check names which constants a change would retire, before the change is made.",
+  "invalidated_by": ["weights", "frame_selection", "metric_script", "corpus_snapshot"],
+
+  "updated_at": null
+}

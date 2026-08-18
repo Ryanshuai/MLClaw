@@ -1,0 +1,24 @@
+{
+  "_comment": "The exploration stage's declaration — what is being explored, against which corpus, and where the arms run. Filled by `/explore`; read by `graph.py` and by every arm this stage opens.\n\nThe stage owns no runs of its own. An arm is an ordinary run in `stages/training/runs/` (or `stages/evaluation/runs/` for a measurement-only card), and this stage only decides WHICH one to open — the same layering as `/train-tune` over `/train-run`, and the same reason: a search that executes its own trials is a second run machinery that drifts from the first.",
+
+  "_comment_target_stage": "Which stage's runs an arm opens. `training` for a port that changes the network; `evaluation` for a measurement card that only re-measures. A card's `kind` decides which, and `graph.py` refuses a `run_id` that does not live under the stage its kind implies.",
+  "target_stage": "training",
+
+  "_comment_corpus": "‼️ Must equal `graph.json -> corpus`. Declared in two places on purpose — the graph carries it because every `premise_share` is scoped to it, and this file carries it because an arm is launched against it. `graph.py check` compares them and refuses a mismatch rather than picking one: which of the two is right is not a script's to decide.",
+  "corpus": {"dataset_id": null, "snapshot": null},
+
+  "_comment_metric": "The primary aggregate metric and the measurement script that produces it. Both participate in the comparability fingerprint below.\n\n‼️ The aggregate metric decides SHIPPING, never CONTINUING — see `references/explore-or-stop.md`. A detail metric (the prereg count, a score distribution) responds immediately and points at the mechanism; the aggregate is slow and confounded by convergence speed, thresholds, NMS and data conventions all at once. Swapping in a fast detail metric is the main way a T3 full run becomes a T1 short one.",
+  "metric": {"primary": null, "script": null, "threshold": null},
+
+  "_comment_fingerprint": "hash(dataset identity + measurement script + threshold). Two arms with different fingerprints MAY NOT BE COMPARED, and `graph.py` refuses rather than warns.\n\nThis is the executable form of two rules this project paid for: 「换了度量旧曲线就作废」 and 「跨源对比要同口径，否则量到的是口径」. Both used to be remembered, which is to say not enforced. MLClaw's own version of the same rule is `mode` + `scope` on `list_runs.py --comparable`; the fingerprint adds the measurement script, which MLClaw's comparability check does not currently cover.",
+  "fingerprint": null,
+
+  "_comment_design_doc": "Where the human-readable ablation chapter lives — the proposal table, the tier assignments, the verdicts. ‼️ It is UPDATED at every stage, never re-opened as a new section: a chapter written after the runs records only what already happened, while its most valuable use is stopping a proposal BEFORE it starts.\n\nMLClaw holds the machine half (`graph.json`) and this points at the prose half. They are not duplicates: the graph is what `check` reads, the doc is what a person reads.",
+  "design_doc": null,
+
+  "_comment_open_asks": "Field-level record of what is outstanding, per CLAUDE.md 「File the question; do not block on it」. Entries are `ask.py` ids; the config says which values are open rather than being silently half-written.",
+  "open_asks": [],
+
+  "created_at": null,
+  "updated_at": null
+}

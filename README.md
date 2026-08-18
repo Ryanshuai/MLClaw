@@ -219,6 +219,7 @@ claude
 - [x] Online sampling — `/data-online-sample` (a dated, uniform reading of the live input stream, so what production sees can be compared against the snapshot a model trained on. Records the denominator when something can count it and says every rate is a lower bound when nothing can)
 - [x] Skill dependency system (inter-skill graph + internal dependency chain + cross-session resume)
 - [x] Remote execution + path mapping
+- [x] Exploration — `/explore` (architecture search: count → audit → price → port → ablate)
 - [ ] Run comparison — `/train-compare` (side-by-side metrics/params/env diff)
 - [ ] Drift — `/data-drift`. Only the comparison is missing; the online half that takes the reading already shipped (see the checked entry above)
 - [ ] Model identity — `models/<id>@<release>`, the primitive the next two need. Not a skill: data gets a citable frozen id and a deletion that respects citations, models get a file path and a `retention.py` that ranks by metric and does not know who cited them

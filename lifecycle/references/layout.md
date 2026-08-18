@@ -122,6 +122,7 @@ README.md                           ← what MLClaw is, and which stages are bui
     data-retire/SKILL.md            ← /data-retire
     discover/SKILL.md               ← /discover
     repro/SKILL.md                  ← /repro (+ references/axes.md, verdicts.md)
+    explore/SKILL.md                ← /explore (+ references/: experiment-graph, porting, run-card, cluster-ops, explore-or-stop, debate-roles, human-review — ported from the arch-transplant skill)
   settings.json
 contracts/                          ← executable form of this file's contracts; stdlib only
   helpers.py                        ← temp dirs, real git repos, script loading by path
@@ -193,6 +194,8 @@ lifecycle/
       discover.py                   ← sources / record / probe / report; `gone` ≠ `unreachable`
     repro/
       repro.py                      ← check/open/trial/band/attribute/close; five axes of rot
+    explore/
+      graph.py                      ← add/set/ready/fill/close/check/status; nine invariants, reported and never repaired. Executes nothing
     adaptation/
       adapt.py                      ← open/raise/respond/round/distill/relax/close/status; the shared ledger
     data-report/
@@ -227,6 +230,13 @@ lifecycle/
     config.json                     ← includes dataset block
     input.json                      ← includes ground_truth block
     output.json                     ← includes per_class, baseline
+  exploration/                      ← architecture-search stage JSON templates
+    config.json                     ← corpus, metric script, comparability fingerprint
+    findings.json                   ← input A: phenomena as counts, re-measurable with one ruler
+    baseline.json                   ← the noise floor and the runs it came from
+    audit.json                      ← four-state audit of this repo + cost profile
+    graph.json                      ← the experiment graph; `graph.py` owns it
+    state.json                      ← constants / tiers / kill list — the half that expires
   training/                         ← training stage JSON templates
     config.json                     ← resources, param_injection, hazards, env snapshot
     artifacts.json                  ← data/weight candidates + preprocessing contract
@@ -338,7 +348,26 @@ stages/
     snapshots/                      ← module I/O snapshots from original code (for Tier 2 verification)
     runs/                           ← refactoring round executions
       run_{YYYYMMDD}_{HHmmss}/      ← one round
+  exploration/                      ← architecture search (special structure — NO runs/)
+    config.json                     ← entry, corpus, metric script, comparability fingerprint,
+                                      where the prose design doc lives
+    findings.json                   ← input A: the phenomena, as counts with denominators.
+                                      Re-measured with the SAME ruler each round and diffed
+    baseline.json                   ← the noise floor + the two /eval-run ids it came from
+    audit.json                      ← the four-state audit of this repo, + the cost profile
+    graph.json                      ← the experiment graph: cards, seven states, dependency
+                                      edges. The only order-of-work truth. `graph.py` owns it
+    state.json                      ← what expires: constants, tier assignments, the kill list
+                                      with revival conditions. Voided by a change of weights,
+                                      frame selection, metric or corpus snapshot
 ```
+
+‼️ **`exploration/` has no `runs/`, and the absence is the design.** An arm is an ordinary run
+under `stages/training/runs/` (or `evaluation/` for a measurement-only card), cited from a card
+by `run_id`. Same boundary `/data-curate` draws for a conversion and `adaptation` for a
+converter: a search that runs its own trials is a second run machinery, and it drifts from the
+first. `/train-tune` is the same shape one stage over, and it stores its sessions under
+`training/` for exactly this reason.
 
 ## Dataset identity and census records
 

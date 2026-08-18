@@ -1,0 +1,19 @@
+{
+  "_comment": "The noise floor — the number below which no delta is a result. Stage 0, and it is first because everything downstream quotes it.\n\nMeasured by running the SAME weights through the SAME measurement twice and taking the spread. Both are ordinary `/eval-run` runs; this file cites them rather than holding a number somebody typed. The recorded cost of getting this wrong: a floor reported as 0.06 that was really 0.25, a \"+0.30 is real\" conclusion built on it, and the whole thing withdrawn.",
+
+  "_comment_value": "The spread between the repeat measurements, in the metric's own unit. `null` means NOT MEASURED — which is a different fact from zero and must never be rendered as one. While it is null, no card may report a result as anything but `[T1 trend]`: 「没有显著提升」 is UNDECIDABLE without a floor, not a negative.",
+  "value": null,
+  "unit": null,
+  "metric": null,
+
+  "_comment_runs": "The two (or more) `/eval-run` run ids the floor was computed from. Two ids that differ in anything but the seed do not measure a noise floor — they measure that difference. `graph.py check` re-reads their `run.json` and refuses a floor whose runs disagree on `mode`, `scope`, or dataset identity.",
+  "runs": [],
+
+  "_comment_measured_on": "Which corpus. A floor is a property of (weights × measurement × corpus), not of the model — changing any of the three retires it. Must equal `graph.json -> corpus`.",
+  "measured_on": {"dataset_id": null, "snapshot": null},
+
+  "_comment_retires_on": "‼️ Stated up front, because the rule is otherwise remembered rather than executed: change the metric, the renderer, or the frame selection and the old curve is void. A day-over-day delta that spans one of these is not a model delta, and reading it as one produces a whole overfitting story about a rendering change.",
+  "retires_on": ["metric_script", "renderer", "frame_selection", "dataset_snapshot"],
+
+  "measured_at": null
+}

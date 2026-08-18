@@ -1,0 +1,14 @@
+{
+  "_comment": "Stage 1 — what this repo ALREADY does, in four states rather than two.\n\nThe two-state version (has it / doesn't) is what makes an agent go port something that is already in the tree. Recorded instances from the source project: iterative refinement was present but every inter-layer reference was `.clone().detach()`, so it was look-forward-ONCE and DINO's look-forward-twice was the thing actually missing; one-to-many positives were present but on the main branch instead of the aux branch, which was the fault itself. A two-state audit writes both as ❌ and sends you to port what you have.",
+
+  "_comment_states": "present            ✅ complete implementation   — cite function name + call site\npresent_defeated   ⚠️ implemented, and one line voids it — ‼️ NAME THAT LINE\nabsent             ❌ genuinely not there       — grepped at least two namings\nabsent_deliberate  🅾️ absent, and it was a trade — say what the budget bought instead\n\n🅾️ carries weight the others do not: a 3D paper skipping deformable attention may have spent that budget on its own contribution. Ask why the author would skip it BEFORE deciding to copy it back.",
+
+  "_comment_entries": "One per technique examined: {technique, state, evidence, defeated_at, traded_for, checked_namings[]}\n\n`evidence` is a file:line a reader can open — not a recollection. `defeated_at` is required when state is `present_defeated` and is the entire value of that state. `checked_namings` is required when state is `absent`, because \"I grepped for it\" and \"I grepped for the one name I happened to think of\" are different claims.",
+  "entries": [],
+
+  "_comment_cost_profile": "Stage 1.5 — the cost profile taken in the same pass, because a hyperparameter forced by cost can be the root of an accuracy bug. The recorded chain: an RPE cost of `nqueries × preenc_npoints` pinned `nqueries` from 1024 to 256, so 47% of production frames filled every query with a positive, the classifier never saw a negative, objectness saturated at 0.999, and NMS greedy ordering became a coin flip.\n\nThe signature to recognize: 100% reported utilization at 154 W of 700 W, TF32 ineffective (0.93x), throughput flat from batch 8 to 48 — all serialized on one kernel.",
+  "cost_profile": {"taken": false, "utilization": null, "power": null, "tf32_speedup": null, "batch_scaling": null, "notes": null},
+
+  "audited_at": null,
+  "code_commit": null
+}

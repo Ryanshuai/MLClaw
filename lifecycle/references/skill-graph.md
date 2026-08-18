@@ -33,6 +33,12 @@ project
 - **Report skill** executions are stored as output files within a run's `output/` directory.
 - On disk, `runs/` directory = executions of the run skill. The naming is kept for simplicity.
 
+`/explore` **is** a stage node (`stage: exploration`) but an unusual one: it owns records and
+no runs. Its arms live in `stages/training/runs/` or `stages/evaluation/runs/`, cited from a
+card by `run_id` — the same layering `/train-tune` has over `/train-run`, and the same reason:
+a search that runs its own trials is a second run machinery that drifts from the first. So
+`stages/exploration/` has no `runs/` directory, and that absence is correct rather than missing.
+
 **Nine skills are not stage nodes.** Where each writes and why is one lookup; full paths in `lifecycle/references/layout.md`. **All but one have no step chain** — in those cases the work happens outside any process MLClaw can step through, so the state is a `status` field, not a resumable position.
 
 `/data-audit` is the exception, and the exception is informative: it is not a stage node (a dataset is not a stage) yet it *is* a process MLClaw runs end to end, so it has steps and resumes like a run skill. Non-stage and non-resumable are two different properties that happened to coincide until this skill existed — a census has no steps because the world has no steps, not because it sits outside `stages/`.
@@ -71,6 +77,7 @@ Every skill knows its position in this graph. Two types of edges:
 | `/train-init` | project.json, code available. Calls `/discover` for the data half of Step 0 | `/train-run` |
 | `/train-run` | train-init done. **A fine-tune also requires an evaluation stage** — the base must be measured on this run's data before launch, and that is `/eval-run`'s to perform, not this skill's. No eval stage → route to `/eval-init`, never measure it by hand here | `/eval-run`, `/train-tune` |
 | `/train-tune` | train-init done, ≥1 prior train-run completed | `/train-tune-report` (auto at close) |
+| `/explore` | project.json, code available, **a declared corpus** (`datasets/<id>/dataset.json` + a frozen snapshot). Calls `/eval-run` for the noise floor and `/discover` when sourcing a paper's code | `/train-run` or `/eval-run` (open an arm), then **`/train-tune` — after the architecture settles, never before**: tuning hyperparameters around a component you are about to remove spends the budget twice |
 | `/train-tune-report` | a tune session with ≥1 run | (done) |
 | `/refactor-init` | project.json | `/refactor-run` |
 | `/refactor-run` | refactor-init done (plan.json) | `/refactor-run` (next round), `/refactor-report` when complete |
@@ -133,6 +140,8 @@ Two reasons the sweep is not `/train-init`'s, and be precise about the first: **
 | refactor-init done | `{PROJECT}/stages/refactor/plan.json` exists with non-empty `modules` |
 | refactor-run completed | `{PROJECT}/stages/refactor/runs/*/run.json` with `status: "completed"` exists |
 | env_manager available | `{WORKSPACE}/resources.json → local.env_manager.tool` is non-empty |
+| a corpus is declared for `/explore` | `{PROJECT}/stages/exploration/graph.json -> corpus.dataset_id` non-empty **and** that dataset has a frozen snapshot. Without it every `premise_share` is unscoped, and an unscoped share is what queued five arms against a fault that did not exist |
+| the explore graph is intact | `graph.py check --project {PROJECT}` exits 0. **Exit 1 is a refusal, not a breakage** — do not open another arm, and do not fall back to doing it by hand: the fallback rule's exception applies (CLAUDE.md -> "Script Integration") |
 | dataset declared | `{PROJECT}/datasets/<id>/dataset.json` exists with non-empty `identity.unit_glob`, `layers`, `locations` |
 | census usable for a decision | `datasets/<id>/census/*.json` exists **and** its `complete` is true. `complete: false` means a location didn't answer, so every count is a lower bound — fine to report, not fine to rank, freeze or delete on |
 | an online contract is declared | `datasets/<id>/dataset.json → online` is non-empty. Nothing else says where this dataset's live counterpart arrives, and a guessed production layout yields a reading of a directory nobody serves from |

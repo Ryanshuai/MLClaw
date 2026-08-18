@@ -1,0 +1,17 @@
+{
+  "_comment": "Input A — the phenomena, as COUNTS. A proposal may not enter the graph until the fault it targets is a number with a denominator: 「没有分母的现象不许进提案表」.\n\nSources are plural and pluggable — a human's screenshot, an error-decomposition script, a production complaint, a training curve — and all of them land here in one shape. JSON rather than a table for one reason: after the next weights land, the SAME ruler re-measures every entry in one command and the two are diffed. A hand-maintained table cannot be re-measured, and that is what it degrades into.",
+
+  "_comment_entries": "{id, source, claim, measure{script, corpus, n, gate, value, unit, worse}, status, killed_by, revive_if, note}\n\n‼️ `value` / `unit` / `worse` must be COMPARABLE SCALARS. Statistics stuffed into a free-form dict cannot be diffed, and the interface degrades back into a transcribed table. `worse: \"up\"` says which direction is bad, without which a diff has no sign.\n\n‼️ `measure.script` is the core of this interface, not decoration: next round re-measures with the SAME ruler rather than reporting an impression. `measure.corpus` is recorded for the same reason a run records its dataset identity — change the frame selection and you will read a rendering change as a model change.",
+  "entries": [],
+
+  "_comment_corpus_rule": "‼️ The share must be measured ON THE CORPUS THIS ROUND WILL ACTUALLY TRAIN AND EVALUATE ON. Bought on 2026-08-14 with thirteen machines in the source project: a mechanism was filed as affecting 「47% of production frames」 and five arms were queued on it; measured on the corpus the round actually used, the share was 4.62% and the peak of the driving quantity was below the threshold entirely. An order of magnitude, and the fault did not exist.\n\nA share is a property OF THE CORPUS, not of the phenomenon. `graph.py check` enforces the same rule one level down, on each card's `premise_share`.",
+
+  "_comment_zero_cost_first": "‼️ Mechanical quantities are read BEFORE any machine starts. Anything computable from a pass over the loader and the matcher needs no trained model — it is free, and in the recorded instance two such numbers would have saved five arms. Every pre-registered metric readable without weights is read first, and only then is money spent.",
+
+  "_comment_human_input": "A human's eye is a HYPOTHESIS GENERATOR, not evidence. A screenshot proposes 「a wrong box is occupying the right box's slot」; it becomes admissible when it reads 「48.8% of missed labels carry a wrong box at IoU 0.2–0.5」. Report p50/p90/p95 with n, never 「I looked at 9 frames」 — a handful of odd samples can carry a tail on their own.",
+
+  "_comment_killed": "‼️ `status: killed` is worth MORE than `live`. A phenomenon the data ruled out stays in this file so it is not re-proposed next week — the same reason `graph.json` keeps killed cards and `adaptation` keeps its `refuted` bucket.",
+
+  "measured_at": null,
+  "corpus": {"dataset_id": null, "snapshot": null}
+}

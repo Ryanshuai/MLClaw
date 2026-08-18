@@ -414,7 +414,12 @@ value. A schema that assumes one binding per environment will not survive the fi
   run that made it. Today `.onnx` and `.engine` appear only as *inputs* to `/infer-init` — MLClaw can
   consume one and has no record of where it came from. Its one hard refusal: **an exported model
   never inherits the source model's metrics.**
-- **Exploration stage** — architecture search.
+- ~~**Exploration stage** — architecture search.~~ **Built.** `/explore`, ported from the
+  `arch-transplant` skill rather than designed here — which is why this entry never grew a trap
+  list: the traps had already been paid for somewhere else. What the port added is the executor
+  its source design asked for and never had (`graph.py check`), plus two invariants MLClaw's own
+  rules imply and the source enforced by memory: a `premise_share` must be measured on THIS
+  corpus, and every result carries its tier.
 - **`/train-compare`** — side-by-side metrics / params / env diff across runs.
 - **Format conversion** — promoted out of this list; see **"Adaptation"** above, which is where the
   design now lives. The short version that used to sit here still holds: curate *records* a

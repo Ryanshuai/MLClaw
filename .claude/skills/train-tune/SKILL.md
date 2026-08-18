@@ -7,7 +7,7 @@ description: >
   launches trials, observes outcomes, and iterates until budget exhausted or coverage
   sufficient. Trigger for: "tune lr / hyperparams", "find best config", "search hyperparams",
   "调超参", "tune 一下", "搜个 lr". This is the HPO loop skill — not for architecture search
-  (that's /explore-*) or single-trial training (that's /train-run). Auto-invokes
+  (that's /explore) or single-trial training (that's /train-run). Auto-invokes
   /train-tune-report at session close.
 ---
 
@@ -23,7 +23,8 @@ not just "what's near current best". This avoids local optima trap.
 
 **Train-stage contract assumed**: same code SHA + same dataset + same split. Variation
 is in `runtime_params` only (lr / bs / warmup / etc.). For architecture search use
-`/explore-*` (not yet implemented).
+`/explore` — same layer, different unit: it searches over PROPOSALS (a hypothesis, a
+pre-registered criterion, a guardrail, a kill condition), and its arms change the code.
 
 ## Re-entry behavior
 
