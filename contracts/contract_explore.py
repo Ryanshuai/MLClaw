@@ -409,5 +409,49 @@ class CheckReportsAndNeverRepairs(GraphCase):
         self.assertNotIn("Traceback", err)
 
 
+class TheQueueRemembersWhoAskedForIt(GraphCase):
+    """SKILL.md -> Stage 3: 「这一章是用户维护的执行队列，不是 agent 的记录本」.
+
+    The provenance tag is borrowed from ARA (arXiv:2604.24658) and it is
+    load-bearing for exactly that sentence: if the queue is the user's, then a
+    card the user demanded and a card the agent invented cannot be the same row.
+    The conservative default is `ai-suggested`, and it never upgrades on its own —
+    the agent's confidence must not be able to earn a `user` tag, the same reason
+    `/ask-human` refuses `verified` when only a person said so.
+    """
+
+    def test_the_default_is_the_conservative_one(self):
+        nid = self.add_complete()
+        self.assertEqual(self.card(nid)["provenance"], "ai-suggested")
+
+    def test_a_user_card_is_recorded_as_one(self):
+        rc, out, _ = self.g("add", "--title", "cross attention between SKUs?",
+                            "--kind", "port", "--provenance", "user")
+        self.assertEqual(rc, 0)
+        self.assertEqual(out["provenance"], "user")
+
+    def test_an_invented_provenance_is_a_usage_error(self):
+        nid = self.add_complete()
+        rc, out, _ = self.g("set", "--id", nid, "--set", "provenance=obviously-true")
+        self.assertEqual(rc, 2, "a vocabulary this small must not accept free text")
+        self.assertEqual(self.card(nid)["provenance"], "ai-suggested")
+
+    def test_check_flags_a_card_whose_tag_went_missing(self):
+        nid = self.add_complete()
+        g = self.graph()
+        del g["nodes"][0]["provenance"]
+        self.write_json(os.path.join("stages", "exploration", "graph.json"), g)
+        rc, out, _ = self.g("check")
+        self.assertIn("untagged_provenance", [f["invariant"] for f in out["findings"]])
+
+    def test_an_all_agent_queue_is_surfaced_not_forbidden(self):
+        self.add_complete()
+        rc, out, _ = self.g("check")
+        finds = [f for f in out["findings"] if f["invariant"] == "no_human_proposal"]
+        self.assertEqual(len(finds), 1)
+        self.assertEqual(finds[0]["severity"], "minor",
+                         "an agent-proposed queue is worth noticing, not refusing")
+
+
 if __name__ == "__main__":
     unittest.main()

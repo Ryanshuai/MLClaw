@@ -80,6 +80,22 @@ TIERS = ("T0", "T1", "T2", "T3", "T4")
 
 VERDICTS = ("won", "lost", "downgraded")
 
+# Who put this on the queue. Borrowed from ARA (arXiv:2604.24658) --
+# `research-manager/references/event-taxonomy.md` -> "Provenance Assignment".
+#
+# It is load-bearing HERE specifically because SKILL.md Stage 3 says the queue is
+# 「用户维护的执行队列，不是 agent 的记录本」: the user drops in a one-line idea, the
+# agent completes the card and executes. A card the user demanded and a card the
+# agent invented therefore mean different things -- and without this field they
+# are the same row. The distribution is itself the signal: a graph that is all
+# `ai-suggested` is a graph nobody asked for, and `check` says so.
+#
+# ‼️ `ai-suggested` NEVER auto-upgrades. Only an explicit `set` moves it, because
+# the whole value of the tag is that it cannot be earned by the agent's own
+# confidence. Same rule as `/ask-human` refusing to call an answer `verified`
+# when nothing but the person confirmed it.
+PROVENANCE = ("user", "ai-suggested", "ai-executed", "user-revised")
+
 # Required before `ready`. Per kind, because a measurement card genuinely has no
 # parent -- demanding one would teach the reader to write a fake value, which is
 # worse than the missing field.
@@ -179,6 +195,7 @@ def cmd_add(a):
         "title": a.title,
         "kind": a.kind,
         "state": "draft",
+        "provenance": a.provenance,
         "premise": a.premise,
         "premise_share": None,
         "criterion": a.criterion,
@@ -194,12 +211,14 @@ def cmd_add(a):
         "verdict": None,
         "killed_by": None,
         "revive_if": None,
-        "history": [{"at": now_utc(), "to": "draft", "note": "added"}],
+        "history": [{"at": now_utc(), "to": "draft", "note": "added",
+                     "provenance": a.provenance}],
     }
     graph.setdefault("nodes", []).append(node)
     graph["updated_at"] = now_utc()
     atomic_write_json(p["graph"], graph)
-    emit({"id": nid, "state": "draft", "missing": _missing_fields(node),
+    emit({"id": nid, "state": "draft", "provenance": a.provenance,
+          "missing": _missing_fields(node),
           "note": "a draft cannot be opened as an arm. Complete it with `set`, "
                   "then `ready` will include it."})
 
@@ -216,6 +235,8 @@ def cmd_set(a):
         if "=" not in kv:
             broke(f"--set wants field=value, got {kv!r}")
         k, v = kv.split("=", 1)
+        if k == "provenance" and v not in PROVENANCE:
+            broke(f"provenance must be one of {PROVENANCE}")
         try:
             node[k] = json.loads(v)
         except json.JSONDecodeError:
@@ -526,6 +547,20 @@ def cmd_check(a):
             flag("minor", "awaiting_verdict", nid,
                  "a result with no conclusion; blocks any stop decision")
 
+    # 10. MLClaw/ARA add -- who asked for this. A card with no provenance cannot be
+    # read as either a user's request or the agent's idea, and the queue's whole
+    # premise is that those differ.
+    for n in nodes:
+        if n.get("provenance") not in PROVENANCE:
+            flag("major", "untagged_provenance", n["id"],
+                 "no provenance -- a card the user demanded and one the agent invented "
+                 "read identically, and this queue is the user's")
+    human = [n for n in nodes if n.get("provenance") in ("user", "user-revised")]
+    if nodes and not human:
+        flag("minor", "no_human_proposal", None,
+             f"all {len(nodes)} cards are agent-originated. Not wrong, but the queue is "
+             f"meant to be the user's -- worth asking what they would put on it")
+
     # 4. no two running cards share (parent, delta)
     seen = {}
     for n in nodes:
@@ -581,6 +616,8 @@ def cmd_status(a):
         "killed": [{"id": n["id"], "killed_by": n.get("killed_by"),
                     "revive_if": n.get("revive_if")}
                    for n in nodes if n.get("state") == "killed"],
+        "provenance": {p: sum(1 for n in nodes if n.get("provenance") == p)
+                       for p in PROVENANCE},
         "awaiting_verdict": [n["id"] for n in nodes if n.get("state") == "filled"],
         "updated_at": graph.get("updated_at"),
     })
@@ -604,6 +641,9 @@ def main():
     a.add_argument("--parent")
     a.add_argument("--depends-on", action="append", dest="depends_on")
     a.add_argument("--kill-condition", dest="kill_condition")
+    a.add_argument("--provenance", choices=PROVENANCE, default="ai-suggested",
+                   help="who put this on the queue. Defaults to the conservative "
+                        "`ai-suggested`; pass `user` when the user asked for it")
     a.set_defaults(fn=cmd_add)
 
     s = sub.add_parser("set", help="complete or amend a card")
