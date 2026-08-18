@@ -453,5 +453,102 @@ class TheQueueRemembersWhoAskedForIt(GraphCase):
                          "an agent-proposed queue is worth noticing, not refusing")
 
 
+class ANumberCarriesTheLineItCameFrom(GraphCase):
+    """run-mechanics.md -> "Record integrity", the grounding row; borrowed from
+    ARA (arXiv:2604.24658) -> research-manager "Number grounding".
+
+    CLAUDE.md's "Never record a metric you did not read" is a prohibition, and a
+    prohibition leaves no trace when broken — a value typed from memory and one
+    read off a log are the same JSON, and the remembered one is likelier to be
+    round and plausible. The quote is what makes the difference visible.
+
+    The digit check is a FLOOR, not a proof: containing the digits does not show
+    the source was open, but NOT containing them shows it was not. That asymmetry
+    is the whole design, and it is why `pending` is not a finding while a bare
+    plausible path is.
+    """
+
+    def constants(self, *entries):
+        st = _template("state.json")
+        st["constants"] = list(entries)
+        self.write_json(os.path.join("stages", "exploration", "state.json"), st)
+
+    def invariants(self):
+        rc, out, _ = self.g("check")
+        return [f["invariant"] for f in out["findings"]], out
+
+    def test_a_bare_number_with_no_source_is_critical(self):
+        self.constants({"name": "neg_share", "value": 0.0462})
+        inv, out = self.invariants()
+        self.assertIn("ungrounded_number", inv)
+        self.assertEqual([f["severity"] for f in out["findings"]
+                          if f["invariant"] == "ungrounded_number"], ["critical"])
+
+    def test_a_path_with_no_quote_is_not_grounding(self):
+        self.constants({"name": "neg_share", "value": 0.0462,
+                        "sources": [{"ref": "logs/scan.txt:214", "kind": "result"}]})
+        inv, out = self.invariants()
+        self.assertIn("ungrounded_number", inv)
+        self.assertIn("quote", " ".join(f["detail"] for f in out["findings"]))
+
+    def test_a_quote_that_does_not_contain_the_number_is_refused(self):
+        self.constants({"name": "neg_share", "value": 0.0462, "sources": [
+            {"ref": "logs/scan.txt:214", "kind": "result",
+             "quote": "G>=52 frames: 254/5495 (47.0%)"}]})
+        inv, out = self.invariants()
+        self.assertIn("ungrounded_number", inv,
+                      "47.0% cannot be the source of 0.0462 — this is the exact "
+                      "failure the corpus rule cost an order of magnitude on")
+
+    def test_the_percentage_form_of_the_same_number_matches(self):
+        self.constants({"name": "neg_share", "value": 0.0462, "sources": [
+            {"ref": "logs/scan.txt:214", "kind": "result",
+             "quote": "G>=52 frames: 254/5495 (4.62%)"}]})
+        inv, _ = self.invariants()
+        self.assertNotIn("ungrounded_number", inv,
+                         "records keep the fraction and logs print the percentage; "
+                         "a check that cannot see through that would be turned off")
+
+    def test_a_source_must_say_input_or_result(self):
+        self.constants({"name": "lr", "value": 0.0003, "sources": [
+            {"ref": "config.yaml:12", "quote": "lr: 0.0003"}]})
+        inv, out = self.invariants()
+        self.assertIn("ungrounded_number", inv)
+        self.assertIn("`input`", " ".join(f["detail"] for f in out["findings"]))
+
+    def test_pending_is_honest_and_not_a_finding(self):
+        self.constants({"name": "neg_share", "value": None,
+                        "pending": "loader scan not run on this corpus yet"})
+        inv, _ = self.invariants()
+        self.assertNotIn("ungrounded_number", inv,
+                         "an admitted gap must cost less than a plausible citation, "
+                         "or the record fills up with plausible citations")
+
+    def test_a_value_and_a_pending_note_together_is_a_contradiction(self):
+        """And it is reported AS a contradiction, not as a missing source.
+
+        The two are different instructions to whoever reads this next: "decide
+        which of these is true" versus "go open the log". Collapsing them sends
+        the reader to the wrong repair, so the message is part of the contract —
+        without this assertion the `pending` branch is dead code that happens to
+        be reachable through the bare-number path.
+        """
+        self.constants({"name": "neg_share", "value": 0.0462, "pending": "not measured"})
+        inv, out = self.invariants()
+        self.assertIn("ungrounded_number", inv)
+        detail = " ".join(f["detail"] for f in out["findings"])
+        self.assertIn("decide which", detail)
+        self.assertNotIn("no source", detail)
+
+    def test_the_noise_floor_is_grounded_like_everything_else(self):
+        b = _template("baseline.json")
+        b.update(value=0.25, unit="AP", metric="AP50", runs=["a", "b"])
+        self.write_json(os.path.join("stages", "exploration", "baseline.json"), b)
+        inv, out = self.invariants()
+        self.assertIn("ungrounded_number", inv,
+                      "the floor is what every later verdict rests on — it is the "
+                      "last number that may be typed from memory")
+
+
 if __name__ == "__main__":
     unittest.main()

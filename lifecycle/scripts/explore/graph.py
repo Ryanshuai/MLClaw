@@ -109,6 +109,82 @@ REQUIRED_BY_KIND = {
 }
 
 
+# --------------------------------------------------------------- grounding
+#
+# Borrowed from ARA (arXiv:2604.24658) -> research-manager "Number grounding".
+# CLAUDE.md's "Never record a metric you did not read" is a PROHIBITION, and a
+# prohibition leaves no trace when it is broken: a value typed from memory and a
+# value read off a log are the same JSON. The quote is what makes the difference
+# visible, and it is what turns the rule into something `check` can enforce.
+#
+# Shape:  {"value": 0.0462,
+#          "sources": [{"ref": "logs/scan.txt:214",
+#                       "quote": "G>=52 frames: 254/5495 (4.62%)",
+#                       "kind": "result"}]}
+# or:     {"value": null, "pending": "loader scan not run on this corpus yet"}
+#
+# `[input]` vs `[result]`: a value you SET (cite what defines it) versus a value
+# a run PRODUCED (cite what reports it). MLClaw already draws this line one level
+# up as `workload` versus `scope`; it is the same distinction, and citing a
+# measured outcome to the config meant to produce it is the same error there.
+SOURCE_KINDS = ("input", "result")
+
+
+def _digits(x):
+    """Significant digits of a number, leading zeros stripped.
+
+    0.0462 -> "462"   so that a log reporting it as "4.62%" still matches, which
+    is the common case: records keep the fraction, logs print the percentage.
+    """
+    out = "".join(c for c in str(x) if c.isdigit()).lstrip("0")
+    return out or "0"
+
+
+def _grounding(label, obj):
+    """-> [(severity, detail)] for one {value, sources|pending} block.
+
+    ‼️ This is a FLOOR, not a proof. A quote containing the digits does not show
+    the source was open -- but a quote NOT containing them shows it was not, and
+    that is the failure mode worth catching: a number written from memory and
+    back-cited to a plausible path. `[pending]` beats a guess, so it is not a
+    finding; an unverified-but-plausible citation is fabrication and is.
+    """
+    if not isinstance(obj, dict) or "value" not in obj:
+        return []
+    v, out = obj.get("value"), []
+    srcs = obj.get("sources") or []
+    if obj.get("pending"):
+        if v is not None:
+            out.append(("major", f"{label}: has a value AND a `pending` note -- "
+                                 f"decide which is true"))
+        return out
+    if v is None:
+        return out
+    if not srcs:
+        return [("critical", f"{label}: a number with no source. Write `pending` if you "
+                             f"cannot open one -- a bare value is indistinguishable from "
+                             f"one recalled and back-cited")]
+    for i, s in enumerate(srcs):
+        tag = f"{label}.sources[{i}]"
+        if not s.get("ref"):
+            out.append(("critical", f"{tag}: no ref"))
+        if s.get("kind") not in SOURCE_KINDS:
+            out.append(("major", f"{tag}: kind must be `input` (a value you set) or "
+                                 f"`result` (a value a run produced)"))
+        q = s.get("quote")
+        if not q:
+            out.append(("critical", f"{tag}: no «quote». A bare path is not grounding -- "
+                                    f"the transcribed line is the evidence the source "
+                                    f"was open"))
+        elif isinstance(v, (int, float)) and not isinstance(v, bool):
+            if _digits(v) not in "".join(c for c in q if c.isdigit()):
+                out.append(("critical",
+                            f"{tag}: the quote does not contain {v!r}. Either the source "
+                            f"was not open when this was written, or the record carries "
+                            f"more precision than the source reports"))
+    return out
+
+
 def _paths(project, session=None):
     base = os.path.join(project, "stages", "exploration")
     if session:
@@ -571,6 +647,18 @@ def cmd_check(a):
             flag("major", "duplicate_arm", n["id"],
                  f"same parent and delta as {seen[key]} -- duplicated work, or one was forgotten")
         seen[key] = n["id"]
+
+    # 11. MLClaw/ARA add -- every transcribed number carries the line it came from.
+    for c in state.get("constants", []):
+        for sev, detail in _grounding(f"constant {c.get('name')!r}", c):
+            flag(sev, "ungrounded_number", None, detail)
+    for sev, detail in _grounding("noise floor", baseline):
+        flag(sev, "ungrounded_number", None, detail)
+    findings_rec = read_json(os.path.join(os.path.dirname(p["state"]), "findings.json"),
+                             required=False) or {}
+    for e in findings_rec.get("entries", []):
+        for sev, detail in _grounding(f"finding {e.get('id')!r}", e.get("measure") or {}):
+            flag(sev, "ungrounded_number", None, detail)
 
     # 7. cited constants still hold
     declared = corpus.get("declared_at")
