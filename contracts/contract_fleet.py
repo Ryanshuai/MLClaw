@@ -1103,5 +1103,116 @@ class WhatARoundCostIsAFloorUnlessEverythingWasPriced(unittest.TestCase):
         self.assertEqual(out["usd"], 1.0)
 
 
+class TheOnlyLambdaRentalPathRefusesAnImmortalBox(unittest.TestCase):
+    """`.claude/skills/lease/references/contract.md` -> Money rule 3; `provider_lambda`
+    docstring -> "The three places this provider is not Nebius" (3).
+
+    These two assertions were free while a second implementation existed: the global
+    `lambda_server` skill rented boxes with its own `curl`, so a regression here cost one
+    provider, not the ability to rent. That skill is now a shell over this adapter, which
+    makes the refusal below **the only thing standing between `lambda.sh up` and a GPU
+    that bills forever** — the shell has no TTL of its own to fall back on, by design.
+
+    Both run with no network and no credential: what is checked is that the refusal
+    happens BEFORE the launch call, which is the only ordering that does not cost money
+    to discover.
+    """
+
+    def setUp(self):
+        self.lam = load_script("lease/provider_lambda.py")
+
+    def _args(self, **kw):
+        base = {"res": None, "machine_type": "us-west-1:gpu_1x_a10", "ttl_s": 3600,
+                "tag": "mlclaw-lease_x", "run": None, "project": None,
+                "gpu_count": None, "gpu_memory_gb": None, "arch_min": None,
+                "host_ram_gb": None}
+        base.update(kw)
+        return types.SimpleNamespace(**base)
+
+    def test_up_refuses_before_it_launches_when_nothing_can_expire(self):
+        """A box that exists with no switch is already the failure. Discovering the
+        missing credential after the create call means paying for the discovery."""
+        reached = []
+        self.lam.conf = lambda _res: {"api_base": "https://example.invalid/api/v1",
+                                      "api_key": "k", "ssh_key_names": ["kn"]}
+        self.lam.api = lambda *a, **kw: reached.append(a) or ({}, None)
+        out = capture(self.lam.v_up, self._args())
+        self.assertEqual(out["error"], "permission")
+        self.assertEqual(reached, [],
+                         "the launch endpoint was called before the switch was checked")
+        self.assertIn("expire", out["detail"],
+                      "the refusal must say what is missing is the ability to expire, "
+                      "not merely that a config key is unset")
+
+    def test_nothing_provider_side_can_expire_the_box_either(self):
+        """Why the refusal above cannot be softened into a warning. The refusal is only
+        the right behaviour while BOTH other switches are absent, and both absences are
+        declared rather than assumed: no provider-side TTL, and — the inverted one — no
+        stopped state, so the guest-side `shutdown -h` the contract offers as a fallback
+        elsewhere stops no billing here and removes the last way in. If a future API grows
+        either one, this test fails and the refusal should be revisited; that is the point
+        of pinning it rather than pinning only the refusal."""
+        caps = self.lam.table()["capabilities"]
+        self.assertFalse(caps["native_ttl"],
+                         "a provider-side TTL would make the dead-man optional")
+        self.assertNotIn("stopped", set(self.lam.STATE_MAP.values()),
+                         "a stopped state would mean halting the guest pauses the meter, "
+                         "which is what makes shutdown a usable fallback elsewhere")
+
+    def test_out_of_stock_and_does_not_exist_are_different_rows(self):
+        """The defect the merge retired. The standalone skill filtered
+        `regions_with_capacity_available | length > 0`, so a card Lambda sells but has no
+        stock of rendered identically to a card Lambda does not sell — and a capacity
+        conclusion reached that way is how the L40S call went wrong on the other provider.
+        """
+        known = sorted(self.lam.table()["instance_types"])[0]
+        self.lam.conf = lambda _res: {"api_base": "x", "api_key": "k"}
+        self.lam.api_or_die = lambda _cfg, _path, **kw: {"data": {
+            known: {"instance_type": {"name": known, "price_cents_per_hour": 75,
+                                      "specs": {"gpus": 1, "memory_gib": 200}},
+                    "regions_with_capacity_available": []}}}
+        rows = capture(self.lam.v_capacity, self._args())
+        self.assertEqual(len(rows), 1, "an out-of-stock type must still report a row")
+        self.assertEqual(rows[0]["avail"], 0)
+        self.assertIsNone(rows[0]["machine_type"],
+                          "unusable right now, so there must be nothing for a caller to "
+                          "pass to `up`")
+        self.assertIn("stock", (rows[0]["binding_limit"] or "").lower(),
+                      "the row has to say WHY it is zero, or it reads as a card that "
+                      "does not exist")
+
+    def test_a_type_the_table_has_never_seen_is_named_not_dropped(self):
+        """The other half of the same rule, in the other direction: the provider sells
+        something this repo has not been taught. It cannot pass the `arch` check, so it is
+        unusable — but silently omitting it reads as "Lambda does not sell that card"."""
+        self.lam.conf = lambda _res: {"api_base": "x", "api_key": "k"}
+        self.lam.api_or_die = lambda _cfg, _path, **kw: {"data": {
+            "gpu_1x_notinthetable": {
+                "instance_type": {"name": "gpu_1x_notinthetable",
+                                  "price_cents_per_hour": 999,
+                                  "specs": {"gpus": 1, "memory_gib": 200}},
+                "regions_with_capacity_available": [{"name": "us-west-1"}]}}}
+        rows = capture(self.lam.v_capacity, self._args())
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["avail"], 0)
+        self.assertIn("machines_lambda.json", rows[0]["binding_limit"],
+                      "the row must name the file that has to be taught")
+
+    def test_price_is_read_live_and_says_so(self):
+        """On this provider the price is a measurement, so `price_status` must be
+        `verified`. A hand-copied table value would be a second author for a number that
+        has one — and `claim` is what a caller reads before trusting a cost estimate."""
+        known = sorted(self.lam.table()["instance_types"])[0]
+        self.lam.conf = lambda _res: {"api_base": "x", "api_key": "k"}
+        self.lam.api_or_die = lambda _cfg, _path, **kw: {"data": {
+            known: {"instance_type": {"name": known, "price_cents_per_hour": 75,
+                                      "specs": {"gpus": 1, "memory_gib": 200}},
+                    "regions_with_capacity_available": [{"name": "us-west-1"}]}}}
+        row = [r for r in capture(self.lam.v_capacity, self._args())
+               if r["machine_type"]][0]
+        self.assertEqual(row["price_hr"], 0.75)
+        self.assertEqual(row["price_status"], "verified")
+
+
 if __name__ == "__main__":
     unittest.main()

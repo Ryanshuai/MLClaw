@@ -33,6 +33,15 @@ answer looks like rather than just how a call is spelled:
    key on a rented machine, which is a decision the user makes, not this adapter --
    `up` REFUSES rather than renting something that can never expire. Money rule 3.
 
+‼️ **ONE CONSUMER LIVES OUTSIDE THIS REPO.** The global `lambda_server` skill
+(`skill-hub/skills/lambda_server/lambda.sh`) is a shell over this file — it renders these
+verbs and keeps the flags it has always had. Renaming a verb or changing an emitted key
+therefore breaks a script this repo's checks do not see, on three machines, and it breaks
+it the quiet way: the shell's `up` has no launch path of its own to fall back to, so the
+failure is "cannot rent" rather than a traceback. Same arrangement as
+`nebius_scan.py` / `nebius_audit.py`, and the same reason: one implementation means the
+next trap found on either side is fixed for both.
+
   provider_lambda.py capacity [--gpu-count N] [--gpu-memory-gb G] [--arch-min sm_80]
   provider_lambda.py up --machine-type T --ttl-s N [--tag ...] [--run ...] [--project ...]
   provider_lambda.py addr|state|down <instance_id>
