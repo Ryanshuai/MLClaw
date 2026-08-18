@@ -114,6 +114,14 @@ what, what is deliberately *not* a phase (Archive, Train), and how `/data` compo
 
 ## Skills & Dependencies
 
+**Every skill below is written `/name`, and that is deliberate.** Installed as a plugin the
+invocable name is `mlclaw:<name>` — plugin skills are *always* namespaced, so that two
+marketplaces cannot collide. Loaded standalone from `.claude/skills/` it is the bare `/name`.
+Both forms resolve to the same `SKILL.md`, so the prose keeps the short one: there are ~1270
+skill references across this repo, and rewriting them would be wrong in whichever of the two
+modes it was not written for. ‼️ Read a bare `/train-run` as *"the train-run skill"*, and take
+the name you actually invoke from the skills listing — never from this table.
+
 | Skill | What it does |
 |-------|-------------|
 | `/project-init` | Create a new project: directory structure, project.json, git init |

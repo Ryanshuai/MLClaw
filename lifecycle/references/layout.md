@@ -100,7 +100,10 @@ pixi.lock                       ← tracked on purpose; it is what makes that en
 
 CLAUDE.md                           ← routing + the always-loaded rules
 README.md                           ← what MLClaw is, and which stages are built
+.claude-plugin/
+  marketplace.json                  ← the catalog that makes this repo installable: one entry, source `./.claude`
 .claude/
+  .claude-plugin/plugin.json        ← the manifest that makes `.claude/` itself the plugin root, so `skills/` never moves
   skills/                           ← one dir per skill; a skill's own `references/` is its business, not listed here
     project-init/SKILL.md           ← /project-init
     infer-init/SKILL.md             ← /infer-init
