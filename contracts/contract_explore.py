@@ -550,5 +550,108 @@ class ANumberCarriesTheLineItCameFrom(GraphCase):
                       "last number that may be typed from memory")
 
 
+class TwoRecordsMayDisagreeWithoutOneBeingErased(GraphCase):
+    """run-mechanics.md -> "Record integrity"; borrowed from ARA
+    (arXiv:2604.24658) -> research-manager "Contradiction trigger".
+
+    MLClaw had no way to express this. A result contradicting a settled verdict
+    left two options and both destroy the record: rewrite the old card, losing
+    exactly what the next round reads, or say nothing. The third state — these
+    two disagree and nobody has ruled — is the true one, and these checks are
+    what keep it expressible.
+    """
+
+    def two_cards(self, t1="T2", t2="T2"):
+        a, b = self.add_complete(), self.add_complete()
+        for nid, tier in ((a, t1), (b, t2)):
+            self.run_it(nid, run_id="run_" + nid)
+            self.fill(nid, tier=tier)
+        return a, b
+
+    def test_a_dispute_marks_both_and_reverts_neither(self):
+        a, b = self.two_cards()
+        self.g("close", "--id", a, "--verdict", "won")
+        rc, out, _ = self.g("dispute", "--id", b, "--against", a,
+                            "--detail", "opposite sign on the same corpus")
+        self.assertEqual(rc, 0)
+        first = self.card(a)
+        self.assertEqual(first["state"], "closed")
+        self.assertEqual(first["verdict"], "won", "the verdict must survive the dispute")
+        self.assertIn(out["dispute"], first["disputed_by"])
+        self.assertIn(out["dispute"], self.card(b)["disputed_by"])
+
+    def test_a_cheaper_check_cannot_refute_a_dearer_one(self):
+        """SKILL.md Stage 3.5 rule 2: 便宜的检查能给你继续的理由，不能给你否掉的理由.
+
+        Most apparent contradictions between a short run and a controlled one are
+        not disagreements at all — they are incomparabilities. Adjudicating one
+        as a disagreement is how a good result gets thrown away by a cheap probe.
+        """
+        a, b = self.two_cards(t1="T2", t2="T1")
+        rc, out, _ = self.g("dispute", "--id", b, "--against", a, "--detail", "x")
+        self.assertEqual(rc, 1)
+        self.assertIsNone(self.card(a).get("disputed_by"),
+                          "a refused dispute must leave no mark")
+
+    def test_a_t4_approximation_cannot_dispute_anything(self):
+        a, b = self.two_cards(t1="T2", t2="T4")
+        rc, _, _ = self.g("dispute", "--id", b, "--against", a, "--detail", "x")
+        self.assertEqual(rc, 1, "an approximation failing never refutes the original")
+
+    def test_a_dearer_check_may_dispute_a_cheaper_one(self):
+        a, b = self.two_cards(t1="T1", t2="T2")
+        rc, _, _ = self.g("dispute", "--id", b, "--against", a, "--detail", "x")
+        self.assertEqual(rc, 0)
+
+    def test_check_reports_an_open_dispute_without_blocking_the_graph(self):
+        a, b = self.two_cards()
+        self.g("dispute", "--id", b, "--against", a, "--detail", "x")
+        rc, out, _ = self.g("check")
+        sev = {f["invariant"]: f["severity"] for f in out["findings"]}
+        self.assertEqual(sev.get("open_dispute"), "major",
+                         "a contested pair elsewhere must not stop unrelated arms, "
+                         "or check becomes the thing people route around")
+
+    def test_building_on_a_contested_card_is_critical(self):
+        a, b = self.two_cards()
+        self.g("close", "--id", a, "--verdict", "won")
+        self.g("dispute", "--id", b, "--against", a, "--detail", "x")
+        c = self.add_complete()
+        self.g("set", "--id", c, "--set", f'depends_on=["{a}"]')
+        rc, out, _ = self.g("check")
+        self.assertEqual(rc, 1)
+        self.assertIn("built_on_contested", [f["invariant"] for f in out["findings"]])
+
+    def test_upholding_marks_the_loser_and_still_does_not_rewrite_it(self):
+        a, b = self.two_cards()
+        self.g("close", "--id", a, "--verdict", "won")
+        rc, out, _ = self.g("dispute", "--id", b, "--against", a, "--detail", "x")
+        did = out["dispute"]
+        rc, _, _ = self.g("resolve", "--id", did, "--outcome", "upheld",
+                          "--note", "re-measured at T2 on the same corpus, 3 seeds")
+        self.assertEqual(rc, 0)
+        loser = self.card(a)
+        self.assertEqual(loser["verdict"], "won",
+                         "superseded is a forward pointer, not an erasure — the next "
+                         "round needs to know what was concluded AND that it fell")
+        self.assertEqual(loser["superseded_by"], b)
+
+    def test_a_resolution_must_say_why(self):
+        a, b = self.two_cards()
+        rc, out, _ = self.g("dispute", "--id", b, "--against", a, "--detail", "x")
+        rc, _, err = run_script(SCRIPT, "resolve", "--id", out["dispute"],
+                                "--outcome", "rejected", "--project", self.tmp)
+        self.assertEqual(rc, 2, "the outcome alone does not say why, and why is the "
+                                "only part the next round can check")
+
+    def test_a_resolved_dispute_stays_resolved(self):
+        a, b = self.two_cards()
+        rc, out, _ = self.g("dispute", "--id", b, "--against", a, "--detail", "x")
+        did = out["dispute"]
+        self.g("resolve", "--id", did, "--outcome", "rejected", "--note", "different gate")
+        rc, _, _ = self.g("resolve", "--id", did, "--outcome", "upheld", "--note", "n")
+        self.assertEqual(rc, 1, "a reopened dispute is a NEW dispute citing this one")
+
+
 if __name__ == "__main__":
     unittest.main()

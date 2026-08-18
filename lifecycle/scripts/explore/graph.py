@@ -80,6 +80,30 @@ TIERS = ("T0", "T1", "T2", "T3", "T4")
 
 VERDICTS = ("won", "lost", "downgraded")
 
+# When two records in this graph disagree. Borrowed from ARA (arXiv:2604.24658)
+# -> research-manager "Contradiction trigger", whose rule is the whole point:
+# NEITHER RECORD IS OVERWRITTEN. Both get marked, a node is appended that names
+# the pair, and it stops there -- adjudication is the researcher's.
+#
+# MLClaw had no way to say this at all. A new result contradicting a closed
+# verdict left exactly two options, and both destroy the record: rewrite the old
+# card (losing what the next round needs) or say nothing. `check` can now report
+# the third state, which is the true one -- these two disagree and nobody has
+# ruled.
+DISPUTE_OUTCOMES = {
+    "upheld": "the challenger is right; the disputed card no longer stands",
+    "rejected": "the challenger is wrong; the disputed card is untouched",
+    "not_comparable": "they never conflicted -- different corpus, metric or scope",
+}
+
+# Power ordering. T0 verified nothing and T4 is an approximation priced for the
+# original, so neither may contradict anything; among the rest, a cheaper check
+# CANNOT refute a dearer one -- SKILL.md Stage 3.5 rule 2: 「便宜的检查功率低：它能
+# 给你继续的理由，不能给你否掉的理由」. Most "contradictions" between a short run and
+# a controlled one are not disagreements at all, and adjudicating one as if it
+# were is how a good result gets thrown away by a cheap probe.
+TIER_POWER = {"T0": 0, "T1": 1, "T2": 2, "T3": 3, "T4": 0}
+
 # Who put this on the queue. Borrowed from ARA (arXiv:2604.24658) --
 # `research-manager/references/event-taxonomy.md` -> "Provenance Assignment".
 #
@@ -211,6 +235,12 @@ def _node(graph, nid):
         if n.get("id") == nid:
             return n
     refuse(f"no card {nid}", known=[n.get("id") for n in graph.get("nodes", [])])
+
+
+def _next_dispute_id(graph):
+    used = [d.get("id", "") for d in graph.get("disputes", [])]
+    nums = [int(i[1:]) for i in used if i.startswith("D") and i[1:].isdigit()]
+    return "D%02d" % ((max(nums) + 1) if nums else 1)
 
 
 def _next_id(graph):
@@ -555,6 +585,81 @@ def cmd_close(a):
                         and n["state"] not in SETTLED]})
 
 
+# ---------------------------------------------------------------- DISPUTE
+
+def cmd_dispute(a):
+    """Record that two cards disagree -- without touching either one.
+
+    ‼️ This verb exists so that "these two contradict each other" stops being a
+    state the graph cannot hold. Before it, a result contradicting a settled
+    verdict had two outcomes and both were wrong: overwrite the old card (and
+    lose what the next round reads) or stay silent.
+    """
+    p = _paths(a.project, a.session)
+    graph = _load(p["graph"], "graph")
+    chal, disp = _node(graph, a.id), _node(graph, a.against)
+    if a.id == a.against:
+        broke("a card cannot dispute itself")
+
+    ct, dt = chal.get("tier"), disp.get("tier")
+    if ct in TIER_POWER and dt in TIER_POWER and TIER_POWER[ct] < TIER_POWER[dt]:
+        refuse(f"{a.id} is {ct} and {a.against} is {dt} -- a cheaper check cannot "
+               f"refute a dearer one",
+               fix="SKILL.md Stage 3.5 rule 2: a cheap check gives you a reason to "
+                   "CONTINUE, never a reason to reject. Raise the challenger's tier "
+                   "and re-measure, or record this as an observation on the card. "
+                   "‼️ If the challenger is T4, note that an approximation failing "
+                   "never refutes the original.")
+
+    did = _next_dispute_id(graph)
+    graph.setdefault("disputes", []).append({
+        "id": did, "state": "open", "challenger": a.id, "disputed": a.against,
+        "detail": a.detail, "opened_at": now_utc(),
+        "tiers": {a.id: ct, a.against: dt},
+        "outcome": None, "note": None,
+    })
+    # Both sides are MARKED, neither is edited. A reader arriving at either card
+    # has to see that it is contested -- that is the entire mechanism.
+    for n in (chal, disp):
+        n.setdefault("disputed_by", [])
+        if did not in n["disputed_by"]:
+            n["disputed_by"].append(did)
+    graph["updated_at"] = now_utc()
+    atomic_write_json(p["graph"], graph)
+    emit({"dispute": did, "state": "open", "marked": [a.id, a.against],
+          "note": "‼️ Neither card was changed, and neither verdict was reverted. "
+                  "Adjudication is yours: `graph.py resolve`. Until then both read "
+                  "as contested, which is the true state."})
+
+
+def cmd_resolve(a):
+    p = _paths(a.project, a.session)
+    graph = _load(p["graph"], "graph")
+    d = next((x for x in graph.get("disputes", []) if x.get("id") == a.id), None)
+    if d is None:
+        refuse(f"no dispute {a.id}",
+               known=[x.get("id") for x in graph.get("disputes", [])])
+    if d["state"] != "open":
+        refuse(f"{a.id} is already {d['state']} ({d.get('outcome')})",
+               fix="a resolved dispute stays resolved. If it reopens, that is a NEW "
+                   "dispute citing this one")
+    d.update(state="resolved", outcome=a.outcome, note=a.note, resolved_at=now_utc())
+
+    if a.outcome == "upheld":
+        # The disputed card keeps its verdict AND gains a pointer forward. The
+        # append-only rule holds: history is what the next round reads, so a
+        # superseded conclusion is marked, never rewritten.
+        loser = _node(graph, d["disputed"])
+        loser["superseded_by"] = d["challenger"]
+        loser["history"].append({"at": now_utc(), "to": loser["state"],
+                                 "note": f"superseded by {d['challenger']} via {a.id}"})
+    graph["updated_at"] = now_utc()
+    atomic_write_json(p["graph"], graph)
+    emit({"dispute": a.id, "outcome": a.outcome,
+          "superseded": d["disputed"] if a.outcome == "upheld" else None,
+          "meaning": DISPUTE_OUTCOMES[a.outcome]})
+
+
 # ---------------------------------------------------------------- CHECK
 
 def cmd_check(a):
@@ -637,6 +742,21 @@ def cmd_check(a):
              f"all {len(nodes)} cards are agent-originated. Not wrong, but the queue is "
              f"meant to be the user's -- worth asking what they would put on it")
 
+    # 12. MLClaw/ARA add -- an open dispute is a state the reader must see.
+    #     Major, not critical: a contested pair elsewhere in the graph must not
+    #     stop unrelated arms, or `check` becomes the thing people route around.
+    #     It goes critical only where something is BUILT on the contested card.
+    open_disp = [d for d in graph.get("disputes", []) if d.get("state") == "open"]
+    for d in open_disp:
+        flag("major", "open_dispute", d.get("disputed"),
+             f"{d.get('challenger')} contradicts it ({d.get('id')}): {d.get('detail')}. "
+             f"Neither was reverted -- adjudicate with `resolve`")
+        for n in nodes:
+            if d.get("disputed") in (n.get("depends_on") or []) and n["state"] not in SETTLED:
+                flag("critical", "built_on_contested", n["id"],
+                     f"depends on {d.get('disputed')}, which is under open dispute "
+                     f"{d.get('id')} -- this arm would stand on contested ground")
+
     # 4. no two running cards share (parent, delta)
     seen = {}
     for n in nodes:
@@ -706,6 +826,9 @@ def cmd_status(a):
                    for n in nodes if n.get("state") == "killed"],
         "provenance": {p: sum(1 for n in nodes if n.get("provenance") == p)
                        for p in PROVENANCE},
+        "open_disputes": [{"id": d["id"], "challenger": d["challenger"],
+                           "disputed": d["disputed"], "detail": d.get("detail")}
+                          for d in graph.get("disputes", []) if d.get("state") == "open"],
         "awaiting_verdict": [n["id"] for n in nodes if n.get("state") == "filled"],
         "updated_at": graph.get("updated_at"),
     })
@@ -762,6 +885,25 @@ def main():
     k = sub.add_parser("check", help="the invariants; reports, never repairs")
     common(k)
     k.set_defaults(fn=cmd_check)
+
+    d = sub.add_parser("dispute", help="two cards disagree; mark both, revert neither")
+    common(d)
+    d.add_argument("--id", required=True, help="the challenging card")
+    d.add_argument("--against", required=True, help="the card it contradicts")
+    d.add_argument("--detail", required=True)
+    d.set_defaults(fn=cmd_dispute)
+
+    rs = sub.add_parser("resolve", help="adjudicate one dispute")
+    common(rs)
+    rs.add_argument("--id", required=True)
+    rs.add_argument("--outcome", required=True, choices=sorted(DISPUTE_OUTCOMES))
+    rs.add_argument("--note", required=True,
+                    help="WHY. The outcome alone does not say it, and why is the only "
+                         "part the next round can re-check. Required here rather than "
+                         "checked in the body: argparse is the enforcing layer, and a "
+                         "second check behind it is unreachable code that reads as a "
+                         "guard")
+    rs.set_defaults(fn=cmd_resolve)
 
     t = sub.add_parser("status", help="one-screen summary")
     common(t)
