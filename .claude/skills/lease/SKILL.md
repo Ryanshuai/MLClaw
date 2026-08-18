@@ -76,10 +76,33 @@ Only three things the user asks directly. None is a flow.
 
 | Ask | Do |
 |---|---|
-| "what am I holding / paying for" | `lease.py status` — report per lease: provider, machine_type, age, `$/hr` (`0` for owned hardware), accrued, owning run (**or none — that's the interesting case**), TTL remaining. It also reconciles: a row with no instance and an instance with no row are both surfaced. |
-| "any forgotten boxes" | `lease.py reap` — cloud-side truth by tag prefix, correct with `leases.json` missing or stale. **Read `complete` before quoting the count**: `orphans: []` off a sweep that reached nothing is byte-identical to "there are none", and `orphans_is_lower_bound` is the only thing separating them. Belongs in CLAUDE.md "On Conversation Start" as a third step, gated on a provider being registered — **not yet wired there**. |
+| "what am I holding / paying for" | `lease.py status` — report per lease: provider, machine_type, age, `$/hr` (`0` for owned hardware), accrued, owning run (**or none — that's the interesting case**), TTL remaining. It also reconciles: a row with no instance and an instance with no row are both surfaced. **Report `compute_usd_per_hr` and `storage_usd_per_hr` separately**, and `residual_storage` alongside — see "Two meters" below. |
+| "any forgotten boxes" | `lease.py reap` — cloud-side truth by tag prefix, correct with `leases.json` missing or stale. **Read `complete` before quoting the count**: `orphans: []` off a sweep that reached nothing is byte-identical to "there are none", and `orphans_is_lower_bound` is the only thing separating them. `orphan_storage` is the second list and it is the one nobody asks for. Belongs in CLAUDE.md "On Conversation Start" as a third step, gated on a provider being registered — **not yet wired there**. |
 | "did I actually release that one" | `lease.py history [--instance-id ID]` — the **past tense**, and the only verb that can speak about a machine that no longer exists. A box missing from `status` is equally consistent with a scope nobody enumerated; only a lifecycle event proves release. A provider with no log reports `supported: false`, which is an honest unanswerable rather than a silence to read as "gone". |
 | "kill that one" | `lease.py release <lease_id>` — it verifies `gone` before closing the row and refuses to close on an unverified teardown. If the owning run is still `running`, say so first: releasing kills the job. If the run `failed` and was kept for inspection, name what would be lost. |
+
+### Two meters, and only one of them stops on its own
+
+Compute is the loud one. It is also the one that ends by itself: the dead-man switch
+fires, the instance halts, the large number goes to zero. **Storage is the quiet one.**
+It starts when the box is created, it does not stop when the box stops, and on most
+providers it survives the box being deleted.
+
+So `sweep` returns two lists and `status` / `reap` report two subtotals. Quoting the
+compute figure alone answers "nothing is running" — which is *true*, standing next to a
+volume that has billed every hour since. Three ways one gets left behind, all ordinary:
+a create that never became reachable and was torn down without its disk; a delete that
+deliberately spared the volume in order to rescue data off it; a volume MLClaw never
+created at all.
+
+**`price_hr: null` on a storage row means nobody wrote the rate down** — never that it
+is free. `total_is_lower_bound` is set whenever a row went unpriced or the sweep was
+partial, and it must be said out loud before the number is.
+
+**An adapter that reports no `storage` key at all is treated as not having looked**, so
+its sweep is `complete: false`. That is deliberate and it is the difference between
+`storage: []` ("looked, nothing bills") and silence. Owned hardware says `[]` and means
+it: the disk was bought, so releasing a claim accrues nothing.
 
 **`status` and `reap` scan workspace-wide, not project-scoped.** Cost and exclusivity both cross
 project boundaries — a lease held by another project still blocks this one and still bills. That
@@ -93,10 +116,25 @@ table. `lease.py` discovers adapters by filename, and `_common.py` carries the s
 error / shape conventions so an adapter is not a copy-paste of the last one. If anything *else*
 has to change, the contract leaked and the fix belongs in the contract.
 
-Installed today: **`ssh`** (owned hardware, self-registering off `resources.json -> servers`)
-and **`nebius`** (rented, requires a `resources.json -> compute.nebius` block). An adapter
-being present is not the same as an account existing, which is why the block is what
-counts as registration.
+Installed today:
+
+| Adapter | Registration | What it is honest about |
+|---|---|---|
+| **`ssh`** | self-registering off `resources.json -> servers` | owned hardware. `up`/`down` are acquire/release of an `O_EXCL` per-GPU claim; nothing bills, `storage: []`, `history` **unsupported** — the marker is deleted on release, so the past is genuinely unreadable |
+| **`nebius`** | `resources.json -> compute.nebius` | rented, federated SSO. Has an audit log, so `history` answers "did I release it". Prices are hand-written **claims** — no per-hour price query exists. `credential_ttl_s: 43200`, so Money rule 5 refuses a long run |
+| **`lambda`** | `resources.json -> compute.lambda` | rented, static API key. Prices are read **live**, so they are `verified`. **No audit log → `history` is `supported: false` and "did I release that box" is unanswerable on this provider.** No stopped state; a guest `shutdown -h` stops nothing, so `up` **refuses** without a `dead_man_key_path` rather than renting a box that can never expire |
+
+An adapter being present is not the same as an account existing, which is why the block
+is what counts as registration.
+
+**The three disagree in useful ways, and that is the point of having more than one.**
+A single adapter makes every provider-shaped assumption invisible: Nebius's hand-written
+prices look like how prices work, its audit log looks like something every cloud has, and
+the contract's guest-side `shutdown -h` fallback looks universal. Against Lambda all three
+are false — price is live, there is no log, and a guest halt is *worse* than no switch
+because it removes the last way to reach the box. Read `machines_<name>.json ->
+capabilities` before assuming any of it; the `_comment_*` keys there carry the reasoning,
+not decoration.
 
 **No adapter pins an infrastructure id** — no tenant, project, subnet or image id, in the
 code or the table. Every one is discovered from the credential at call time. That is both

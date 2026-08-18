@@ -61,7 +61,7 @@ not. See `lifecycle/references/fleet.md` "The two questions, and why one list ca
 | `addr` | `(instance_id) -> reach://…` | Resolved live on **every** call. Never cached, never written into a config file. A stop/start cycle changes it on most providers. |
 | `state` | `(instance_id) -> pending\|running\|stopping\|gone\|failed` | Normalized enum only. The adapter owns the mapping, including the ones that cost money — see below. |
 | `down` | `(instance_id) -> ok` | Idempotent. Already-gone is **success**, not an error. Must leave **no residual billing** (Money rule 2). |
-| `sweep` | `(tag_prefix) -> {units: [{instance_id, tag, age_s, price_hr, expired}], scope: {complete, checked, unreached}}` | Echo the **`tag`** back — layer 2 reconciles on the token it issued, never on an `instance_id` whose format you own. Do **not** self-declare `provider`; layer 2 injects it, so a copy-pasted adapter cannot misroute a later `release`. Finds orphans from the **provider side only** — must work with `leases.json` deleted, corrupt, or written by a different machine. **Reports its own scope**: `complete: false` whenever any corner went unread, with `unreached` naming which. A bare list is not accepted — see "Scope completeness" below. |
+| `sweep` | `(tag_prefix) -> {units: [...], storage: [...], scope: {complete, checked, unreached}}` | Echo the **`tag`** back — layer 2 reconciles on the token it issued, never on an `instance_id` whose format you own. Do **not** self-declare `provider`; layer 2 injects it, so a copy-pasted adapter cannot misroute a later `release`. Finds orphans from the **provider side only** — must work with `leases.json` deleted, corrupt, or written by a different machine. **Reports its own scope**: `complete: false` whenever any corner went unread, with `unreached` naming which. A bare list is not accepted — see "Scope completeness" below. **Returns `storage` as well as `units`**, and omitting the key is not the same as returning `[]` — see "Storage is the second meter". |
 | `history` | `(tag_prefix \| instance_id, window_s) -> {events: [{instance_id, tag, action, at, actor, outcome}], scope: {...}, supported}` | The **past tense**, and the only verb that can distinguish "released" from "never looked there". Keyed on `instance_id`, never on a name — names are mutable and reusable, and a name-keyed join reports a live box as released (fleet.md "Group by id, never by name"). Only **completed** events count: a create that ended in error left nothing behind, and counting it invents machines. A provider with no lifecycle log returns `supported: false` — an honest unanswerable, never an inference from `sweep`'s silence. |
 
 ## Normalized enums
@@ -110,6 +110,43 @@ applied to billing — same rule, same three-way distinction between *did not an
 An adapter that cannot enumerate its own scope hard-codes `complete: false`. That is a
 correct adapter with a stated limit, and it is strictly better than one that implies
 completeness it never had.
+
+## Storage is the second meter
+
+`sweep` returns two lists, because there are two things billing and only one of them
+stops when the compute does.
+
+```
+units:   [{instance_id, tag, age_s, price_hr, expired, state}]
+storage: [{storage_id, kind, tag, size_gib, price_hr, attached_to, age_s}]
+```
+
+A volume is not a field on an instance row, and the reason is the whole point: **it
+outlives the instance.** By the time it matters there is no instance row to hang it on.
+Three ways one is left behind, none of them exotic:
+
+- a create that never became reachable — the box is torn down, the disk it declared is not;
+- a delete that deliberately spares the volume (`--boot-disk-managed-disk-forbid-deletion`
+  and its equivalents), which is the documented way to rescue data off a box you must
+  release;
+- a volume that was never created by MLClaw at all — a console launch, a colleague, an
+  earlier tool.
+
+`attached_to` names the instance holding it, or `null` for nothing. **Read attachment
+from the instance side**, not from the volume: several APIs do not put a holder on the
+volume object, and a volume that reads as unattached when it is not sends a reap after a
+live machine's data. Being wrong the other way costs cents until the next sweep.
+
+**An adapter that omits the `storage` key is treated as an unreached corner**, exactly
+like a project whose list errored — not as a provider with no storage. The two are one
+keystroke apart in an adapter and a world apart in a bill: "looked, nothing bills" is
+`storage: []`, and an adapter that never looked leaves residual billing unmeasured while
+`reap` goes on printing a total. Owned hardware says `storage: []` and means it — the
+disk was bought, so releasing a claim accrues nothing.
+
+**A price nobody wrote down is `null`, and `null` is a term missing from the total**, not
+a free row. L2 counts unpriced rows and reports `total_is_lower_bound`; a residual figure
+that silently dropped its largest term is worse than no figure, because it gets quoted.
 
 ## Created is not usable
 

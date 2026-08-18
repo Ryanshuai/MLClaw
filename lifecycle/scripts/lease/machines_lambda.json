@@ -1,0 +1,208 @@
+{
+  "_comment": [
+    "Hand-written table for provider_lambda. Contract: `.claude/skills/lease/references/contract.md`",
+    "'Shape resolution' — and specifically its rule 'Put in the table only what the API will not",
+    "tell you'.",
+    "",
+    "THIS TABLE IS THE OPPOSITE SHAPE FROM `machines_nebius.json`, FOR THE SAME REASON. Lambda's",
+    "`instance-types` endpoint returns `price_cents_per_hour`, gpu count, vCPU and host RAM live,",
+    "so none of those are here and `capacity` labels its price `verified` rather than `claim`. What",
+    "no Lambda API returns is compute capability, a human GPU name, and per-GPU memory — so that is",
+    "all this file carries. A hand-copied price here would be a second author for a value that",
+    "already has one, and the stale copy is the one that gets read.",
+    "",
+    "‼️ EVERY `arch` HERE IS A `claim`. The names below were transcribed from Lambda's published",
+    "type list, not measured on a box this repo has run. `arch` is a hard admission check — a wrong",
+    "value either refuses a machine that would have worked or admits one whose kernels will not",
+    "load — so nothing may read `verified` until a job has actually been built and run for it here.",
+    "Promote a row only after that happens, one row at a time.",
+    "",
+    "‼️ A TYPE NOT LISTED HERE IS NOT A TYPE THAT DOES NOT EXIST. `capacity` reports unlisted",
+    "types under `untabled_types` instead of dropping them, because an unlisted machine cannot pass",
+    "the `arch` check and a silent omission would read as 'Lambda does not sell that card'. When",
+    "that list is non-empty, this file is behind the provider — add the row, don't widen the filter."
+  ],
+  "instance_types": {
+    "gpu_1x_a10": {
+      "gpu": "A10",
+      "gpu_memory_gb": 24,
+      "arch": "sm_86",
+      "arch_status": "claim",
+      "note": "the cheapest GPU box; the right pick when the GPU is irrelevant and the job is bound by host RAM"
+    },
+    "gpu_1x_a100": {
+      "gpu": "A100 PCIe",
+      "gpu_memory_gb": 40,
+      "arch": "sm_80",
+      "arch_status": "claim"
+    },
+    "gpu_1x_a100_sxm4": {
+      "gpu": "A100 SXM4",
+      "gpu_memory_gb": 40,
+      "arch": "sm_80",
+      "arch_status": "claim"
+    },
+    "gpu_2x_a100": {
+      "gpu": "A100 PCIe",
+      "gpu_memory_gb": 40,
+      "arch": "sm_80",
+      "arch_status": "claim"
+    },
+    "gpu_4x_a100": {
+      "gpu": "A100 PCIe",
+      "gpu_memory_gb": 40,
+      "arch": "sm_80",
+      "arch_status": "claim"
+    },
+    "gpu_8x_a100": {
+      "gpu": "A100 SXM4",
+      "gpu_memory_gb": 40,
+      "arch": "sm_80",
+      "arch_status": "claim"
+    },
+    "gpu_8x_a100_80gb_sxm4": {
+      "gpu": "A100 SXM4",
+      "gpu_memory_gb": 80,
+      "arch": "sm_80",
+      "arch_status": "claim"
+    },
+    "gpu_1x_a6000": {
+      "gpu": "RTX A6000",
+      "gpu_memory_gb": 48,
+      "arch": "sm_86",
+      "arch_status": "claim"
+    },
+    "gpu_2x_a6000": {
+      "gpu": "RTX A6000",
+      "gpu_memory_gb": 48,
+      "arch": "sm_86",
+      "arch_status": "claim"
+    },
+    "gpu_4x_a6000": {
+      "gpu": "RTX A6000",
+      "gpu_memory_gb": 48,
+      "arch": "sm_86",
+      "arch_status": "claim"
+    },
+    "gpu_1x_h100_pcie": {
+      "gpu": "H100 PCIe",
+      "gpu_memory_gb": 80,
+      "arch": "sm_90",
+      "arch_status": "claim"
+    },
+    "gpu_1x_h100_sxm5": {
+      "gpu": "H100 SXM5",
+      "gpu_memory_gb": 80,
+      "arch": "sm_90",
+      "arch_status": "claim"
+    },
+    "gpu_8x_h100_sxm5": {
+      "gpu": "H100 SXM5",
+      "gpu_memory_gb": 80,
+      "arch": "sm_90",
+      "arch_status": "claim"
+    },
+    "gpu_8x_v100": {
+      "gpu": "V100",
+      "gpu_memory_gb": 16,
+      "arch": "sm_70",
+      "arch_status": "claim",
+      "note": "Volta — predates bf16; a recipe assuming bf16 autocast fails here rather than running slowly"
+    },
+    "gpu_1x_gh200": {
+      "gpu": "GH200",
+      "gpu_memory_gb": 96,
+      "arch": "sm_90",
+      "arch_status": "claim",
+      "note": "‼️ the host is aarch64, so an x86 wheel set does not apply. `arch` passing is not the same as the environment being installable — that check is `env_snapshot`'s, not this field's"
+    },
+    "gpu_8x_h200_sxm": {
+      "gpu": "H200 SXM",
+      "gpu_memory_gb": 141,
+      "arch": "sm_90",
+      "arch_status": "claim"
+    },
+    "gpu_8x_b200_sxm": {
+      "gpu": "B200 SXM",
+      "gpu_memory_gb": 180,
+      "arch": "sm_100",
+      "arch_status": "claim",
+      "note": "Blackwell — a torch built for cu121 will not load here; see the contract's arch paragraph"
+    }
+  },
+  "capabilities": {
+    "credential_ttl_s": 0,
+    "credential_refreshes": false,
+    "native_ttl": false,
+    "image_bake": false,
+    "tags": true,
+    "billing_granularity_s": null,
+    "_comment_credential_ttl": [
+      "0 = non-expiring static API key, and this is the one place Lambda is STRONGER than the",
+      "federated-SSO provider beside it. Money rule 5 refuses a job longer than the credential",
+      "TTL; on Nebius a 30-hour training run is refused because a 12-hour token cannot reach,",
+      "monitor or destroy the box for the second half of it. Here there is no such ceiling."
+    ],
+    "_comment_tags": [
+      "‼️ `true`, but through a WEAKER CHANNEL than a label, and the weakness has to be read.",
+      "This API has no label or tag field at all — the only writable per-instance string is the",
+      "`name`, set at create. So the tag rides in the name, which means `sweep`'s tag filter is",
+      "matching on a field a human can edit in the console. A renamed box silently drops out of",
+      "every tag-filtered sweep while it goes on billing.",
+      "",
+      "fleet.md 'Group by id, never by name' is about JOINS ACROSS TIME and still holds: nothing",
+      "here groups by name, and every join keys on the instance id. What the name carries is",
+      "OWNERSHIP, and it carries it forgeably. That is why `leases.json` bears more weight on this",
+      "provider than on one with real labels, and it is compounded by `history` being unsupported:",
+      "when the name has been edited, there is no second record to recover the truth from."
+    ],
+    "_comment_native_ttl": [
+      "false — and unlike every other provider, the guest-side fallback the contract offers is not",
+      "merely partial here, it is INVERTED. A Lambda instance has no stopped state: it exists or it",
+      "is terminated, and it bills for existing. `shutdown -h +N` therefore stops nothing and",
+      "removes the ssh access that was the last way to release the box by hand.",
+      "",
+      "So the only real dead-man switch is one that calls the terminate endpoint FROM the box,",
+      "which needs an API key on rented hardware. provider_lambda installs a systemd timer that",
+      "does exactly that, and `up` REFUSES when no `dead_man_key_path` is configured — renting a",
+      "machine that can never expire is the outcome Money rule 3 exists to prevent, and refusing",
+      "is the only alternative to it. Give it a key you are willing to have on a box a stranger",
+      "gets next; `dead_man_key_path` is deliberately separate from `api_key_path` so that is a",
+      "decision rather than a side effect."
+    ],
+    "_comment_billing_granularity": [
+      "null = nobody measured it. Not zero, not one hour. Lambda's published terms have changed",
+      "on this point, and a granularity written down from memory would make every `accrued` figure",
+      "wrong in a direction nobody could see."
+    ]
+  },
+  "storage": {
+    "_comment": [
+      "THE SECOND METER, and on this provider it is the ONLY residual one. Terminating an instance",
+      "releases its local disk with it — that disk is not a separate resource here, which is the",
+      "opposite of Nebius, where `instance delete` taking the boot disk is itself the hazard.",
+      "",
+      "What survives is a FILESYSTEM: created and deleted independently, billed while it exists,",
+      "and attached to no instance once the box is gone. `sweep` enumerates them for that reason.",
+      "",
+      "price null, as with the Nebius table: Lambda bills filesystems per GB-month and publishes",
+      "no per-hour rate through this API. null means nobody wrote it down and NEVER means free —",
+      "`lease.py` counts an unpriced row and reports the total as a lower bound."
+    ],
+    "filesystem": {
+      "price_gib_hr": null,
+      "price_status": "claim",
+      "price_asof": null
+    }
+  },
+  "defaults": {
+    "ssh_user": "ubuntu",
+    "_comment_no_image": [
+      "No `image_family` key, and its absence is a fact rather than an omission: the launch API",
+      "takes region, instance type, ssh keys, filesystems, quantity and name — nothing else. There",
+      "is no image selection and no user-data field, so this adapter cannot inject anything at",
+      "create time and must ssh in after the box is reachable to arm its expiry. That ordering is",
+      "why `up` polls to reachable before it can honour Money rule 3 at all."
+    ]
+  }
+}

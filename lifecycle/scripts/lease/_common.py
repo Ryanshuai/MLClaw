@@ -25,7 +25,10 @@ def die(cls, detail, **extra):
     """Exit with a normalized error class. See the contract's "Error classes" table —
     the caller's next action differs per class, so "it failed" is not a usable result."""
     assert cls in ERROR_CLASSES, f"unknown error class {cls}"
-    print(json.dumps({"error": cls, "detail": detail, **extra}))
+    # `ensure_ascii=False` for the same reason `emit` gives, and it matters more here:
+    # the error path is where the em-dashes and arrows live, and a hint that comes out
+    # as `\u2014` escapes is read by whoever is already having a bad time.
+    print(json.dumps({"error": cls, "detail": detail, **extra}, ensure_ascii=False))
     sys.exit(1)
 
 
@@ -47,7 +50,7 @@ def emit(obj, indent=None):
     print(json.dumps(obj, indent=indent, ensure_ascii=False))
 
 
-def sweep_result(units, checked=(), unreached=()):
+def sweep_result(units, checked=(), unreached=(), storage=None):
     """The `sweep` / `history` envelope. A helper rather than a convention because the
     convention is what fails: an adapter that returns a bare list is indistinguishable
     from one that swept everything and found nothing, and the difference is a bill.
@@ -57,12 +60,38 @@ def sweep_result(units, checked=(), unreached=()):
     credential could not reach. `complete` is derived from it, never passed in, so an
     adapter cannot report `complete: true` while naming what it missed.
 
-    Contract: `.claude/skills/lease/references/contract.md` "Scope completeness".
+    `storage` is the second billing category and it is separate from `units` because it
+    outlives them: a volume survives the instance that declared it, so it is not a field
+    on an instance row -- there may be no instance row left.
+
+    The default is `None` rather than `()`, and that is the load-bearing part. An adapter
+    that never learned about storage passes nothing and the key is ABSENT; one that looked
+    and found none passes `[]` and the key is present and empty. With `()` as the default
+    the first would silently render as the second, which is the exact reading that lets
+    residual billing go unmeasured while `reap` prints a total. See `sweep_storage_known`.
+
+    Contract: `.claude/skills/lease/references/contract.md` "Scope completeness" and
+    "Storage is the second meter".
     """
     unreached = list(unreached)
-    return {"units": list(units),
-            "scope": {"complete": not unreached,
-                      "checked": list(checked), "unreached": unreached}}
+    out = {"units": list(units),
+           "scope": {"complete": not unreached,
+                     "checked": list(checked), "unreached": unreached}}
+    if storage is not None:
+        out["storage"] = list(storage)
+    return out
+
+
+def sweep_storage_known(payload):
+    """Did this sweep look at storage at all?
+
+    Three states, not two, exactly as with `scope`: a list of volumes, an empty list
+    (looked, none there), and **no key** (this adapter never looked). Reading the third
+    as the second is how a provider whose adapter predates the storage rule reports
+    `$0.00/hr` in residual billing forever -- the number is not wrong, it is unmeasured,
+    and only the missing key says so.
+    """
+    return isinstance(payload, dict) and "storage" in payload
 
 
 def fan_out(items, fn):

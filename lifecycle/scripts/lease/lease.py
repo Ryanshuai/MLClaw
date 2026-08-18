@@ -46,7 +46,8 @@ from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _common import (DEFAULT_TTL_S, TAG_PREFIX, add_shape_args, die, emit,  # noqa: E402
-                     fan_out, load_resources, resources_from_workspace_root, shape_flags)
+                     fan_out, load_resources, resources_from_workspace_root, shape_flags,
+                     sweep_storage_known)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 OPEN_STATES = ("held", "requesting")
@@ -138,9 +139,15 @@ def collect(names, res, verb, *extra):
     list from those verbs is treated as **incomplete**, because an adapter written before
     the envelope existed cannot have checked what it never enumerated. Other verbs
     (`capacity`) legitimately return a list and are merged as complete.
+
+    A `sweep` that reports no `storage` key is treated as an **unreached corner**, not as
+    a provider with no storage. The two are one keystroke apart in an adapter and a
+    world apart in a bill: "looked, nothing bills" is `storage: []`, and an adapter that
+    never looked leaves residual billing unmeasured while `reap` still prints a total.
+    Making it `complete: false` is what turns that total into a stated lower bound.
     """
     scoped = verb in ("sweep", "history")
-    rows, errors, checked, unreached = [], {}, [], []
+    rows, store, errors, checked, unreached = [], [], {}, [], []
     results = fan_out(names, lambda n: call(n, res, verb, *extra))
     for name, (ok, data) in zip(names, results):
         if not ok:
@@ -150,16 +157,67 @@ def collect(names, res, verb, *extra):
             continue
         if isinstance(data, dict) and "units" in data:
             units, sc = data["units"], data.get("scope") or {}
-        else:
+        elif isinstance(data, (list, type(None))):
             units, sc = (data or []), ({} if not scoped else
                                        {"complete": False, "unreached": [
                                            {"scope": "*", "why": "adapter returned a bare "
                                             "list; scope unknown"}]})
+        else:
+            # Neither the envelope nor a list. `capacity` is contractually a bare list of
+            # rows, and an adapter that wraps it in an object of its own would otherwise
+            # be spread key-by-key here and crash on a string — a TypeError from L2 for a
+            # mistake in L1, blamed on the wrong file. Refuse it as an unread corner.
+            errors[name] = {"error": "transient",
+                            "detail": f"{verb} returned {type(data).__name__}, not a list "
+                                      f"of rows (keys: {sorted(data)[:6]})"}
+            unreached.append({"provider": name, "scope": "*",
+                              "why": f"{verb} returned a shape this layer cannot read"})
+            continue
         rows += [{"provider": name, **row} for row in units]
         checked += [{"provider": name, "scope": s} for s in (sc.get("checked") or [])]
         unreached += [{"provider": name, **u} for u in (sc.get("unreached") or [])]
+        if verb == "sweep":
+            if sweep_storage_known(data):
+                store += [{"provider": name, **row} for row in (data["storage"] or [])]
+            else:
+                unreached.append({"provider": name, "scope": "storage",
+                                  "why": "adapter does not report storage; residual "
+                                         "billing after teardown is unmeasured"})
     return rows, errors, {"complete": not unreached,
-                          "checked": checked, "unreached": unreached}
+                          "checked": checked, "unreached": unreached}, store
+
+
+def storage_orphans(stored, open_tags, live_instance_ids):
+    """Volumes that bill with nothing using them.
+
+    Two distinct shapes, and only the first is obvious. A volume with no attachment is
+    plainly abandoned. A volume still attached to an instance whose lease is closed is
+    the one that hides: the instance row was released, the ledger says so, and the disk
+    it declared went on billing because nothing ever asked the storage list about it.
+
+    Deliberately does NOT rank or delete. Ranking a delete is `/data-retire`'s shape and
+    it needs evidence this layer does not have — what is ON the volume. See `/lease`
+    "Releasing a box does not read it first".
+    """
+    out = []
+    for row in stored:
+        attached = row.get("attached_to")
+        if attached and attached in live_instance_ids:
+            continue
+        reason = ("unattached — nothing is using it" if not attached else
+                  f"attached to {attached}, which holds no open lease")
+        if row.get("tag") and row["tag"] in open_tags:
+            continue
+        out.append({**row, "orphan_reason": reason})
+    return out
+
+
+def usd_hr(rows):
+    """Sum, and say whether anything went unpriced. A row with `price_hr: null` is a
+    price nobody wrote down (contract, "Shape resolution"), never a free one — folding
+    it in as 0 is how a total reads as complete while missing its largest term."""
+    known = [r.get("price_hr") for r in rows if r.get("price_hr") is not None]
+    return round(sum(known), 2), len(rows) - len(known)
 
 
 # --- verbs --------------------------------------------------------------------
@@ -169,7 +227,7 @@ def v_capacity(args):
     if not names:
         die("permission", "no providers registered — run /resources first",
             hint="resources.json -> compute, or -> servers for owned hardware")
-    rows, errors, scope = collect(names, args.res, "capacity", *shape_flags(args))
+    rows, errors, scope, _ = collect(names, args.res, "capacity", *shape_flags(args))
     # viable first, then cheapest — the order L3 should present to the user
     rows.sort(key=lambda r: (-(r.get("avail") or 0),
                              r.get("price_hr") if r.get("price_hr") is not None
@@ -258,7 +316,8 @@ def v_status(args):
     # One sweep answers most of what a per-lease `state` would, and it is issued anyway
     # for the untracked half. Only leases the sweep does not mention fall through to an
     # individual `state` call — which keeps this correct for a tag-filtered sweep.
-    swept, errors, scope = collect(providers(res), res, "sweep", "--tag-prefix", args.tag_prefix)
+    swept, errors, scope, stored = collect(providers(res), res, "sweep",
+                                           "--tag-prefix", args.tag_prefix)
     by_tag = {}
     for row in swept:
         by_tag.setdefault(row.get("tag"), []).append(row)
@@ -291,14 +350,29 @@ def v_status(args):
     # lease reports one id but many swept rows.
     open_tags = {r.get("tag") for r in open_rows(ledger)}
     untracked = [r for r in swept if r.get("tag") not in open_tags]
+
+    # Storage the ledger cannot know about. `held` prices what was leased; a volume is
+    # billed under no lease at all once its instance is gone, so it is a separate line
+    # rather than a term folded into the lease total -- see `v_reap`'s two meters.
+    live_ids = {r.get("instance_id") for r in swept}
+    residual = storage_orphans(stored, open_tags, live_ids)
+    compute_usd, compute_unpriced = usd_hr(held)
+    storage_usd, storage_unpriced = usd_hr(residual)
+
     emit({"held": live, "untracked": untracked,
+          "residual_storage": residual,
           # `held` comes from the ledger and is whole; `untracked` comes from the sweep
           # and is only as complete as the sweep was. Saying which is which is the
           # difference between "nothing else is running" and "nothing else answered".
           "scope": scope,
           "untracked_is_lower_bound": not scope["complete"],
           "errors": errors or None,
-          "total_usd_per_hr": round(sum(r.get("price_hr") or 0 for r in held), 2)},
+          "total_usd_per_hr": round(compute_usd + storage_usd, 2),
+          "compute_usd_per_hr": compute_usd,
+          "storage_usd_per_hr": storage_usd,
+          "unpriced_rows": (compute_unpriced + storage_unpriced) or None,
+          "total_is_lower_bound": bool(compute_unpriced or storage_unpriced
+                                       or not scope["complete"])},
          indent=2)
 
 
@@ -369,13 +443,100 @@ def v_release(args):
           "released": row["instance_ids"], "verified_gone": True}, indent=2)
 
 
+def v_cost(args):
+    """What a round actually cost -- and how much of it could not be priced.
+
+    `status` answers "what am I burning right now"; this answers "what did this
+    cost", which is the same question integrated over time and the one that was
+    actually asked, repeatedly, across a six-day search. Derived from the ledger,
+    never cached: `requested_at`, `released_at` (or now, for a row still open) and
+    `price_hr` are already there.
+
+    ‼️ THE WINDOW STARTS AT REQUEST, AND BILLING DOES NOT. The ledger's only start
+    stamp is when the lease was asked for; the provider starts charging when the
+    instance comes up. On the round this was built for, one machine type took ~80
+    minutes to provision -- so this over-counts, per lease, by however long the
+    box took to appear. Stated rather than absorbed: a cost report that quietly
+    includes provisioning time is wrong in a direction nobody can see.
+
+    ‼️ THE UNPRICED COUNT IS THE POINT, not a footnote. `--price-hr` is optional
+    on `up`, so a ledger routinely holds rows with no price -- and a total summed
+    over the priced rows alone reads exactly like the whole bill. Same shape as a
+    census with `complete: false`: the number is a LOWER BOUND and has to say so,
+    or it becomes an inventory. A round that rented ten boxes and priced six does
+    not have a cost; it has a floor and four unknowns.
+    """
+    res = args.res
+    ledger = read_ledger(res)
+    now = int(time.time())
+    rows, priced, unpriced = [], [], []
+    since = int(args.since_epoch) if args.since_epoch else None
+    for r in ledger["leases"]:
+        start = r.get("requested_at")
+        if start is None:
+            continue
+        if since is not None and start < since:
+            continue
+        if args.project and r.get("project") != args.project:
+            continue
+        if args.tag and r.get("tag") != args.tag:
+            continue
+        end = r.get("released_at") or now
+        hours = max(0.0, (end - start) / 3600.0)
+        item = {"lease_id": r["lease_id"], "machine_type": r.get("machine_type"),
+                "tag": r.get("tag"), "run": r.get("run"), "state": r.get("state"),
+                "hours": round(hours, 2), "price_hr": r.get("price_hr"),
+                "still_open": r.get("released_at") is None}
+        if r.get("price_hr") is None:
+            unpriced.append(item)
+        else:
+            item["usd"] = round(r["price_hr"] * hours, 2)
+            priced.append(item)
+        rows.append(item)
+
+    total = round(sum(i["usd"] for i in priced), 2)
+    open_rows = [i for i in rows if i["still_open"]]
+    payload = {
+        "leases": len(rows),
+        "priced": len(priced), "unpriced": len(unpriced),
+        "gpu_hours_priced": round(sum(i["hours"] for i in priced), 2),
+        "gpu_hours_unpriced": round(sum(i["hours"] for i in unpriced), 2),
+        "usd": total,
+        "complete": not unpriced,
+        "window": "requested_at -> released_at (or now). INCLUDES provisioning time, "
+                  "which the provider does not bill — see the docstring",
+        "still_open": [i["lease_id"] for i in open_rows],
+        "rows": sorted(rows, key=lambda i: -(i.get("usd") or 0)),
+    }
+    if unpriced:
+        payload["‼️"] = (
+            f"${total} covers {len(priced)} of {len(rows)} leases. "
+            f"{len(unpriced)} carry no `price_hr` and are NOT in the total — this is a "
+            f"LOWER BOUND, not the bill. They account for "
+            f"{payload['gpu_hours_unpriced']} unpriced machine-hours. Quote it as a floor, "
+            f"or re-run `up` with `--price-hr` next time.")
+    if open_rows:
+        payload["note"] = (f"{len(open_rows)} lease(s) still open and still accruing; their "
+                           f"hours are counted to now, not to a release.")
+    emit(payload, indent=2)
+
+
 def v_reap(args):
     """Cloud-side truth. Must work with leases.json missing or stale — that is the case
-    that matters, since the session that created the box is the one that died."""
+    that matters, since the session that created the box is the one that died.
+
+    Two meters, reported apart. Compute is the loud one and it is the one that stops on
+    its own: a dead-man switch expires, an instance halts, the large number goes to zero.
+    Storage is the quiet one — it starts when the box is created, it does not stop when
+    the box stops, and it survives the instance being deleted. A reap that counted only
+    instances answered "nothing is running", which is true, next to a volume that has
+    billed every hour since.
+    """
     res = args.res
     ledger = read_ledger(res)
     open_tags = {r.get("tag") for r in open_rows(ledger)}
-    rows, errors, scope = collect(providers(res), res, "sweep", "--tag-prefix", args.tag_prefix)
+    rows, errors, scope, stored = collect(providers(res), res, "sweep",
+                                          "--tag-prefix", args.tag_prefix)
 
     orphans = []
     for row in rows:
@@ -384,17 +545,30 @@ def v_reap(args):
         if reason:
             orphans.append({**row, "orphan_reason": reason})
 
+    live_ids = {r.get("instance_id") for r in rows} - {o.get("instance_id") for o in orphans}
+    orphan_storage = storage_orphans(stored, open_tags, live_ids)
+    compute_usd, compute_unpriced = usd_hr(orphans)
+    storage_usd, storage_unpriced = usd_hr(orphan_storage)
+
     # `orphans: []` is the whole product of this verb, and it is exactly the shape a
     # sweep that reached nothing also produces. `complete` is what separates "there are
     # no forgotten boxes" from "nobody looked" -- state it before quoting the count.
     emit({"orphans": orphans,
+          "orphan_storage": orphan_storage,
           "complete": scope["complete"],
           "orphans_is_lower_bound": not scope["complete"],
           "scope": scope,
           "leases_without_instance": [r["lease_id"] for r in open_rows(ledger)
                                       if not r["instance_ids"]],
           "errors": errors or None,
-          "total_usd_per_hr": round(sum(o.get("price_hr") or 0 for o in orphans), 2)},
+          "total_usd_per_hr": round(compute_usd + storage_usd, 2),
+          "compute_usd_per_hr": compute_usd,
+          "storage_usd_per_hr": storage_usd,
+          # An unpriced row is a term missing from the total, not a free one. Saying how
+          # many keeps the figure from reading as an exhaustive bill.
+          "unpriced_rows": (compute_unpriced + storage_unpriced) or None,
+          "total_is_lower_bound": bool(compute_unpriced or storage_unpriced
+                                       or not scope["complete"])},
          indent=2)
 
 
@@ -471,6 +645,11 @@ def main():
     n.add_argument("--ttl-s", type=int, help="new expiry from now; default reuses the lease's")
 
     r = sub.add_parser("release"); r.set_defaults(fn=v_release)
+    c = sub.add_parser("cost", help="what a round cost, and how much could not be priced")
+    c.add_argument("--project"); c.add_argument("--tag")
+    c.add_argument("--since-epoch", dest="since_epoch",
+                   help="only leases started at or after this epoch second")
+    c.set_defaults(fn=v_cost)
     r.add_argument("lease_id")
 
     p = sub.add_parser("reap"); p.set_defaults(fn=v_reap)

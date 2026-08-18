@@ -35,6 +35,18 @@
       "project_name": "",
       "_comment_regions": "`allow_regions` narrows every scope walk. Leave empty to search everywhere; set it to keep a fleet in the region where the data bucket lives, since an out-of-region box pays cross-region egress on every pull and waits on it. `project_name` picks between several projects in the same region and is a name, not an id.",
       "_comment_credential": "Nebius auth is federated (SSO) and the token is short-lived — the adapter declares `credential_ttl_s` and Money rule 5 refuses a job longer than it. The OAuth refresh cannot complete headlessly, so an unattended run whose token expires cannot reach, monitor, or destroy its own boxes."
+    },
+    "_example_lambda": {
+      "api_key_path": "~/.config/lambda/api_key",
+      "dead_man_key_path": "",
+      "ssh_key_names": [],
+      "ssh_user": "ubuntu",
+      "ssh_identity": "~/.ssh/id_ed25519",
+      "allow_regions": [],
+      "_comment_dead_man": "‼️ REQUIRED, and `up` refuses without it. Lambda has no provider-side TTL, and its instances have no stopped state — a box exists or it is terminated, and it bills for existing. So a guest-side `shutdown -h` (the contract's usual fallback) stops nothing AND removes the ssh access that was the last way to release the box by hand. The only real dead-man switch is one that calls the terminate endpoint FROM the box, which means an API key sits on rented hardware that a stranger gets next. That is a decision, so it is a separate key from `api_key_path` rather than a silent reuse of it — provision one you are willing to lose. Money rule 3.",
+      "_comment_ssh_key_names": "Names of keys already registered in the Lambda console. Lambda injects authorized_keys ONLY at create, so a box launched without one can never be reached, released by hand, or read — `up` refuses rather than creating it.",
+      "_comment_credential": "A static API key: `credential_ttl_s: 0`, non-expiring. This is the one place Lambda is stronger than the federated-SSO provider beside it — Money rule 5 imposes no ceiling here, so a 30-hour run is not refused for want of a token that outlives it.",
+      "_comment_no_image": "No image or boot-disk keys, and their absence is a fact rather than an omission: the launch API takes region, instance type, ssh keys, filesystems, quantity and name and nothing else. There is no image selection and no user-data field."
     }
   },
   "local": {
@@ -53,7 +65,12 @@
       "name": "",
       "kind": "",
       "org": "",
-      "contact": { "person": "", "email": "", "im": "", "phone": "" },
+      "contact": {
+        "person": "",
+        "email": "",
+        "im": "",
+        "phone": ""
+      },
       "channel": "",
       "channel_ref": "",
       "spec_default": "",

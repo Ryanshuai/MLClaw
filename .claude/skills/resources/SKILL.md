@@ -52,6 +52,7 @@ credential on disk does not mean the user intends MLClaw to spend on it.
 | Provider | Tell | Liveness check |
 |---|---|---|
 | Nebius | `~/.nebius/bin/nebius` | `nebius iam whoami --format json` |
+| Lambda | `~/.config/lambda/api_key` | `GET /instances` with the key as the Basic username |
 
 **Probe liveness, never scope.** `whoami` is cheap and answers "is this credential
 alive". Do **not** enumerate tenants, projects or capacity during `/resources` — that is
@@ -64,6 +65,16 @@ Ask, in this order, and only `cli_path` is required: `cli_path`, `ssh_public_key
 (which key the boxes should trust), `allow_regions` (usually the region the data bucket
 is in — an out-of-region box pays cross-region egress on every pull), `image_family`,
 `boot_disk_gib`. The template's `_example_nebius` block lists them with the reasoning.
+
+**What to ask differs per provider, and the `_example_<name>` block in the template is
+the authority for which.** Lambda takes no image or disk keys at all — its launch API has
+no such fields — and instead takes `ssh_key_names` (keys already registered in its
+console; a box created without one can never be reached) and a **`dead_man_key_path`**
+without which `up` refuses. That refusal is worth explaining when you ask: Lambda
+instances cannot be stopped, only terminated, so a guest-side `shutdown -h` stops no
+billing and removes the last way in. The only switch that works calls the terminate API
+from the box, which puts a key on rented hardware — a decision for the user, which is why
+it is a separate key from `api_key_path` and why it is asked rather than assumed.
 
 **A federated / SSO credential's TTL is a fact worth recording at registration time**,
 because Money rule 5 refuses a job longer than it and the refusal is much cheaper than

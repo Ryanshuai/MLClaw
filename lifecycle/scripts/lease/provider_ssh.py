@@ -388,7 +388,11 @@ def v_sweep(args):
         else:
             checked.append(key)
             units += rows
-    emit(sweep_result(units, checked, unreached))
+    # `storage=[]`, explicitly, and it is not the same statement as omitting the key.
+    # Owned hardware has no second meter -- the disk was bought, so releasing a claim
+    # leaves nothing accruing. Saying so is what stops L2 marking this adapter's scope
+    # incomplete, which is the correct treatment for an adapter that simply never looked.
+    emit(sweep_result(units, checked, unreached, storage=[]))
 
 
 def v_history(args):

@@ -106,8 +106,15 @@ class LeaseMergesScope(TempDirCase):
         self.lease.call = lambda name, res, v, *extra: payloads[name]
         return self.lease.collect(list(payloads), "unused", verb)
 
+    @staticmethod
+    def _envelope(units, storage=(), **scope):
+        """A sweep payload that has looked at storage, so these checks exercise the
+        scope rules rather than tripping the storage one on every fixture."""
+        return (True, {"units": units, "storage": list(storage),
+                       "scope": {"complete": True, "checked": [], "unreached": [], **scope}})
+
     def test_failed_provider_makes_the_result_incomplete(self):
-        _, errors, scope = self._collect(
+        _, errors, scope, _ = self._collect(
             {"boom": (False, {"error": "credential_expired", "detail": "token"})})
         self.assertIn("boom", errors)
         self.assertFalse(scope["complete"],
@@ -115,21 +122,32 @@ class LeaseMergesScope(TempDirCase):
                          "line in `errors` beside an empty orphan list")
 
     def test_bare_list_from_sweep_is_treated_as_unknown_scope(self):
-        rows, _, scope = self._collect({"old": (True, [{"instance_id": "i", "tag": "t"}])})
+        rows, _, scope, _ = self._collect({"old": (True, [{"instance_id": "i", "tag": "t"}])})
         self.assertEqual(len(rows), 1)
+        self.assertFalse(scope["complete"])
+
+    def test_a_shape_this_layer_cannot_read_is_an_unread_corner_not_a_crash(self):
+        """`capacity` is contractually a bare list. An adapter that wraps its rows in an
+        object of its own used to be spread key-by-key here and blew up on a string — a
+        TypeError raised by L2 for a mistake in L1, which sends the reader to the wrong
+        file. It is refused as an unread corner instead, which is also what makes the
+        result honest: those rows were not merged, so the answer covers less than it looks."""
+        rows, errors, scope, _ = self._collect(
+            {"odd": (True, {"options": [{"machine_type": "x"}]})}, verb="capacity")
+        self.assertEqual(rows, [])
+        self.assertIn("odd", errors)
         self.assertFalse(scope["complete"])
 
     def test_capacity_may_return_a_bare_list(self):
         """Only `sweep`/`history` carry the envelope; holding `capacity` to it would
         make every adapter incomplete for no reason."""
-        _, _, scope = self._collect({"p": (True, [{"machine_type": "x"}])}, verb="capacity")
+        _, _, scope, _ = self._collect({"p": (True, [{"machine_type": "x"}])}, verb="capacity")
         self.assertTrue(scope["complete"])
 
     def test_envelope_is_unwrapped_and_merged(self):
-        rows, _, scope = self._collect({"p": (True, {
-            "units": [{"instance_id": "i", "tag": "t"}],
-            "scope": {"complete": False, "checked": ["one"],
-                      "unreached": [{"scope": "two", "why": "timeout"}]}})})
+        rows, _, scope, _ = self._collect({"p": self._envelope(
+            [{"instance_id": "i", "tag": "t"}], complete=False, checked=["one"],
+            unreached=[{"scope": "two", "why": "timeout"}])})
         self.assertEqual(rows[0]["provider"], "p", "L2 injects provider identity, not L1")
         self.assertFalse(scope["complete"])
         self.assertEqual(scope["unreached"][0]["provider"], "p")
@@ -154,7 +172,7 @@ class ReapSaysWhetherItLooked(TempDirCase):
         self.lease.collect = lambda names, res, verb, *extra: (
             [], {} if scope_complete else {"p": {"error": "transient"}},
             {"complete": scope_complete, "checked": [], "unreached":
-             [] if scope_complete else [{"provider": "p", "why": "timeout"}]})
+             [] if scope_complete else [{"provider": "p", "why": "timeout"}]}, [])
         args = types.SimpleNamespace(res=self.res, tag_prefix="mlclaw-")
         return capture(self.lease.v_reap, args)
 
@@ -407,6 +425,222 @@ class PreemptionIsNotEvidence(TempDirCase):
         self._release("ok")
         self.assertEqual(called, [], "release is a pool-side state change only")
         self.assertEqual(self.read_json("sess/pool.json")["slots"][0]["state"], "free")
+
+
+class StorageIsTheSecondMeter(TempDirCase):
+    """`.claude/skills/lease/references/contract.md` -> "Storage is the second meter".
+
+    Compute is the loud meter and it is the one that stops by itself: a dead-man switch
+    fires, the instance halts, the large number goes to zero. Storage is the quiet one —
+    it starts at create, it does not stop when the box stops, and it survives the box
+    being deleted. A `reap` that counted only instances answered "nothing is running",
+    which is true, standing next to a volume that has billed every hour since.
+
+    The failure has no error in it anywhere. It is a smaller number than the truth,
+    printed with the same confidence as the right one.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.lease = load_script("lease/lease.py")
+        self.common = load_script("lease/_common.py")
+        self.res = self.path("resources.json")
+        self.write_json("resources.json", {"compute": {}, "servers": {}})
+
+    # --- the envelope ---------------------------------------------------------
+
+    def test_never_looked_and_looked_and_found_none_are_different_payloads(self):
+        """One keystroke apart in an adapter, a world apart in a bill."""
+        never = self.common.sweep_result([], checked=["a"])
+        looked = self.common.sweep_result([], checked=["a"], storage=[])
+        self.assertNotIn("storage", never,
+                         "an adapter that passed nothing must not emit `storage: []` — "
+                         "that is the sentence 'I looked and there is none'")
+        self.assertIn("storage", looked)
+        self.assertFalse(self.common.sweep_storage_known(never))
+        self.assertTrue(self.common.sweep_storage_known(looked))
+
+    def test_an_adapter_that_never_looked_makes_the_sweep_incomplete(self):
+        """Same treatment as a project whose list errored, and for the same reason: the
+        answer covers less than it appears to. Anything else lets `reap` print a residual
+        total for a category nobody enumerated."""
+        self.lease.call = lambda name, res, verb, *extra: (True, {
+            "units": [], "scope": {"complete": True, "checked": ["all"], "unreached": []}})
+        _, _, scope, _ = self.lease.collect(["blind"], self.res, "sweep")
+        self.assertFalse(scope["complete"])
+        self.assertEqual([u["scope"] for u in scope["unreached"]], ["storage"])
+
+    def test_an_adapter_that_looked_and_found_none_stays_complete(self):
+        """Owned hardware is this case and it is the common one — the disk was bought,
+        so releasing a claim accrues nothing. Marking it incomplete would make every
+        sweep of a laptop-plus-one-server workspace a lower bound forever, and a warning
+        that is always on is a warning nobody reads."""
+        self.lease.call = lambda name, res, verb, *extra: (True, {
+            "units": [], "storage": [],
+            "scope": {"complete": True, "checked": ["all"], "unreached": []}})
+        _, _, scope, storage = self.lease.collect(["ssh"], self.res, "sweep")
+        self.assertTrue(scope["complete"])
+        self.assertEqual(storage, [])
+
+    def test_storage_rows_carry_provider_injected_by_l2(self):
+        self.lease.call = lambda name, res, verb, *extra: (True, {
+            "units": [], "storage": [{"storage_id": "d1", "attached_to": None}],
+            "scope": {"complete": True, "checked": [], "unreached": []}})
+        _, _, _, storage = self.lease.collect(["p"], self.res, "sweep")
+        self.assertEqual(storage[0]["provider"], "p",
+                         "adapter identity is L2's knowledge for storage as for units")
+
+    # --- what counts as abandoned --------------------------------------------
+
+    def test_a_volume_with_nothing_attached_is_an_orphan(self):
+        out = self.lease.storage_orphans(
+            [{"storage_id": "d1", "attached_to": None, "tag": ""}], set(), set())
+        self.assertEqual(len(out), 1)
+        self.assertIn("unattached", out[0]["orphan_reason"])
+
+    def test_a_volume_on_a_live_instance_is_not_an_orphan(self):
+        out = self.lease.storage_orphans(
+            [{"storage_id": "d1", "attached_to": "i-1", "tag": ""}], set(), {"i-1"})
+        self.assertEqual(out, [])
+
+    def test_a_volume_still_attached_to_a_closed_lease_is_an_orphan(self):
+        """The one that hides. The instance row was released, the ledger agrees, and the
+        disk it declared goes on billing because nothing asked the storage list about it."""
+        out = self.lease.storage_orphans(
+            [{"storage_id": "d1", "attached_to": "i-dead", "tag": ""}], set(), set())
+        self.assertEqual(len(out), 1)
+        self.assertIn("no open lease", out[0]["orphan_reason"])
+
+    def test_a_volume_under_an_open_lease_is_left_alone(self):
+        out = self.lease.storage_orphans(
+            [{"storage_id": "d1", "attached_to": None, "tag": "mlclaw-live"}],
+            {"mlclaw-live"}, set())
+        self.assertEqual(out, [], "a lease is still open; the volume is in use by design")
+
+    # --- what the total is allowed to claim -----------------------------------
+
+    def test_an_unpriced_row_is_a_missing_term_not_a_free_one(self):
+        total, unpriced = self.lease.usd_hr(
+            [{"price_hr": 2.5}, {"price_hr": None}])
+        self.assertEqual(total, 2.5)
+        self.assertEqual(unpriced, 1,
+                         "folding a null in as 0 is how a total reads as complete while "
+                         "missing its largest term")
+
+    def test_reap_reports_the_two_meters_apart_and_says_when_the_total_is_short(self):
+        self.lease.providers = lambda _res: ["p"]
+        self.lease.collect = lambda names, res, verb, *extra: (
+            [{"instance_id": "i-1", "tag": "mlclaw-x", "price_hr": 3.0}],
+            {}, {"complete": True, "checked": [], "unreached": []},
+            [{"storage_id": "d1", "attached_to": None, "tag": "", "price_hr": None}])
+        out = capture(self.lease.v_reap,
+                      types.SimpleNamespace(res=self.res, tag_prefix="mlclaw-"))
+        self.assertEqual(len(out["orphan_storage"]), 1,
+                         "an unattached volume is a finding, not a footnote")
+        self.assertEqual(out["compute_usd_per_hr"], 3.0)
+        self.assertEqual(out["storage_usd_per_hr"], 0.0)
+        self.assertTrue(out["total_is_lower_bound"],
+                        "the volume's rate is unknown, so the total is short by an "
+                        "unknown amount and must say so")
+
+
+class EveryAdapterDeclaresItsLimits(unittest.TestCase):
+    """`.claude/skills/lease/references/contract.md` -> "The eight verbs", "What every
+    adapter declares", "Shape resolution: requirements → machine type is a lookup, not a
+    translation".
+
+    Written across ALL adapters rather than against the one that exists today, because
+    the skill's promise is that a new provider is one new file — and a promise like that
+    decays by the second file, not the tenth. Everything here runs with no network and no
+    credential: it reads what each adapter DECLARES, which is exactly the part a caller
+    trusts before it has ever made a call.
+    """
+
+    LEASE_DIR = os.path.join(REPO_ROOT, "lifecycle", "scripts", "lease")
+    VERBS = ("capacity", "up", "addr", "state", "down", "renew", "sweep", "history")
+
+    @classmethod
+    def adapters(cls):
+        return sorted(f for f in os.listdir(cls.LEASE_DIR)
+                      if f.startswith("provider_") and f.endswith(".py"))
+
+    def test_there_is_more_than_one_adapter(self):
+        """The contract's claims about provider-blindness are untested by one adapter:
+        anything provider-specific that leaked upward is invisible while there is nothing
+        to disagree with it."""
+        self.assertGreaterEqual(len(self.adapters()), 2)
+
+    def test_every_adapter_registers_every_verb(self):
+        """A missing verb is not a degraded adapter, it is a crash at the moment L2 needs
+        it — and `history` is the one that goes missing, because it is the only verb a
+        working single-box flow never calls."""
+        for fname in self.adapters():
+            for verb in self.VERBS:
+                with self.subTest(adapter=fname, verb=verb):
+                    rc, _, err = run_script(f"lease/{fname}", verb, "--help")
+                    self.assertEqual(rc, 0, f"{fname} does not accept `{verb}`: {err[:200]}")
+
+    def test_every_table_declares_its_capabilities(self):
+        required = {"credential_ttl_s", "credential_refreshes", "native_ttl",
+                    "image_bake", "tags", "billing_granularity_s"}
+        for fname in sorted(os.listdir(self.LEASE_DIR)):
+            if not (fname.startswith("machines_") and fname.endswith(".json")):
+                continue
+            with self.subTest(table=fname), open(os.path.join(self.LEASE_DIR, fname),
+                                                 encoding="utf-8") as fh:
+                caps = json.load(fh).get("capabilities") or {}
+                self.assertEqual(required - set(caps), set(),
+                                 "a caller reads these before it can size a job or "
+                                 "trust an expiry")
+
+    def test_every_shape_row_declares_arch_and_how_sure_it_is(self):
+        """`arch` is a hard admission check, not metadata: a wrong value either refuses a
+        machine that would have worked or admits one whose kernels will not load. An
+        adapter whose table omits it disables the check silently."""
+        for fname, rows in self._shape_rows():
+            for name, spec in rows.items():
+                with self.subTest(table=fname, row=name):
+                    self.assertTrue(spec.get("arch"))
+                    self.assertIn(spec.get("arch_status"), ("verified", "claim"))
+
+    def test_no_price_field_anywhere_is_zero(self):
+        """Zero is the correct price for owned hardware and must not also mean 'nobody
+        wrote it down' — one reading makes a fleet estimate silently omit whole machine
+        types while presenting as a complete bill."""
+        for fname, rows in self._shape_rows(include_storage=True):
+            for name, spec in rows.items():
+                for key, value in spec.items():
+                    if not key.startswith("price_") or key in ("price_status", "price_asof"):
+                        continue
+                    with self.subTest(table=fname, row=name, field=key):
+                        self.assertNotEqual(value, 0)
+                        if value is not None:
+                            self.assertIn(spec.get("price_status"), ("verified", "claim"))
+                            if spec.get("price_status") == "claim":
+                                self.assertTrue(spec.get("price_asof"),
+                                                "a claimed price with no date cannot be "
+                                                "judged stale")
+
+    def _shape_rows(self, include_storage=False):
+        """(filename, {row_name: spec}) over every machine table. The shapes dict is
+        named per provider (`platforms`, `instance_types`), so this walks whichever
+        top-level dicts hold row-shaped values rather than pinning one key name."""
+        out = []
+        for fname in sorted(os.listdir(self.LEASE_DIR)):
+            if not (fname.startswith("machines_") and fname.endswith(".json")):
+                continue
+            with open(os.path.join(self.LEASE_DIR, fname), encoding="utf-8") as fh:
+                table = json.load(fh)
+            for key, block in table.items():
+                if key in ("capabilities", "defaults", "_comment"):
+                    continue
+                if key == "storage" and not include_storage:
+                    continue
+                rows = {k: v for k, v in block.items()
+                        if not k.startswith("_") and isinstance(v, dict)}
+                if rows:
+                    out.append((f"{fname}:{key}", rows))
+        return out
 
 
 class TableProvenance(unittest.TestCase):

@@ -22,46 +22,82 @@
   ],
   "platforms": {
     "gpu-h100-sxm": {
-      "gpu": "H100 SXM", "arch": "sm_90", "arch_status": "verified",
-      "price_gpu_hr": 3.85, "price_status": "claim", "price_asof": "2026-08-13",
+      "gpu": "H100 SXM",
+      "arch": "sm_90",
+      "arch_status": "verified",
+      "price_gpu_hr": 3.85,
+      "price_status": "claim",
+      "price_asof": "2026-08-13",
       "note": "the reference platform — started first try on every attempt in eu-north1"
     },
     "gpu-h200-sxm": {
-      "gpu": "H200 SXM", "arch": "sm_90", "arch_status": "claim",
-      "price_gpu_hr": null, "price_status": "claim", "price_asof": null,
+      "gpu": "H200 SXM",
+      "arch": "sm_90",
+      "arch_status": "claim",
+      "price_gpu_hr": null,
+      "price_status": "claim",
+      "price_asof": null,
       "note": "same Hopper generation as H100, 141GB HBM3e"
     },
     "gpu-l40s-a": {
-      "gpu": "L40S", "arch": "sm_89", "arch_status": "verified",
-      "price_gpu_hr": 1.55, "price_status": "claim", "price_asof": "2026-08-13",
+      "gpu": "L40S",
+      "arch": "sm_89",
+      "arch_status": "verified",
+      "price_gpu_hr": 1.55,
+      "price_status": "claim",
+      "price_asof": "2026-08-13",
       "note": "on-demand stock in eu-north1 has been persistently zero while quota reads fine; the preemptible pool is where this card is actually obtainable"
     },
     "gpu-l40s-d": {
-      "gpu": "L40S", "arch": "sm_89", "arch_status": "verified",
-      "price_gpu_hr": 2.28, "price_status": "claim", "price_asof": "2026-08-13",
+      "gpu": "L40S",
+      "arch": "sm_89",
+      "arch_status": "verified",
+      "price_gpu_hr": 2.28,
+      "price_status": "claim",
+      "price_asof": "2026-08-13",
       "note": "multi-GPU presets; same card as gpu-l40s-a, different host shape"
     },
     "gpu-b200-sxm": {
-      "gpu": "B200 SXM", "arch": "sm_100", "arch_status": "claim",
-      "price_gpu_hr": null, "price_status": "claim", "price_asof": null,
+      "gpu": "B200 SXM",
+      "arch": "sm_100",
+      "arch_status": "claim",
+      "price_gpu_hr": null,
+      "price_status": "claim",
+      "price_asof": null,
       "note": "Blackwell — a torch built for cu121 will not load here; see the contract's arch paragraph"
     },
     "gpu-b200-sxm-a": {
-      "gpu": "B200 SXM", "arch": "sm_100", "arch_status": "claim",
-      "price_gpu_hr": null, "price_status": "claim", "price_asof": null
+      "gpu": "B200 SXM",
+      "arch": "sm_100",
+      "arch_status": "claim",
+      "price_gpu_hr": null,
+      "price_status": "claim",
+      "price_asof": null
     },
     "gpu-b300-sxm": {
-      "gpu": "B300 SXM", "arch": "sm_100", "arch_status": "claim",
-      "price_gpu_hr": null, "price_status": "claim", "price_asof": null
+      "gpu": "B300 SXM",
+      "arch": "sm_100",
+      "arch_status": "claim",
+      "price_gpu_hr": null,
+      "price_status": "claim",
+      "price_asof": null
     },
     "gpu-gb300": {
-      "gpu": "GB300", "arch": "sm_100", "arch_status": "claim",
-      "price_gpu_hr": null, "price_status": "claim", "price_asof": null,
+      "gpu": "GB300",
+      "arch": "sm_100",
+      "arch_status": "claim",
+      "price_gpu_hr": null,
+      "price_status": "claim",
+      "price_asof": null,
       "note": "Grace-Blackwell; the host is aarch64, so an x86 wheel set does not apply"
     },
     "gpu-rtx6000": {
-      "gpu": "RTX PRO 6000", "arch": "sm_120", "arch_status": "claim",
-      "price_gpu_hr": null, "price_status": "claim", "price_asof": null,
+      "gpu": "RTX PRO 6000",
+      "arch": "sm_120",
+      "arch_status": "claim",
+      "price_gpu_hr": null,
+      "price_status": "claim",
+      "price_asof": null,
       "note": "96GB variant, so Blackwell rather than the 48GB Ada part"
     }
   },
@@ -94,5 +130,46 @@
     "boot_disk_type": "network_ssd",
     "boot_disk_gib": 512,
     "ssh_user": "ubuntu"
+  },
+  "storage": {
+    "_comment": [
+      "THE SECOND METER. A disk starts billing when it is created, keeps billing while the",
+      "instance is STOPPED, and survives the instance being deleted whenever it was not a",
+      "managed boot disk. `sweep` enumerates them for that reason; this table is where their",
+      "price would live.",
+      "",
+      "Every price here is null, and that is a measurement status, not a placeholder to be",
+      "filled with a guess. Nebius publishes no per-hour storage price through the API (the",
+      "same gap as compute: billing v1alpha1 offers only `calculator` and `one-time-export`),",
+      "and nobody has read a console page for it. Per the contract's 'Shape resolution',",
+      "null means nobody wrote it down and NEVER means free -- `lease.py` counts an unpriced",
+      "row and reports the total as a lower bound, which is the honest rendering of a volume",
+      "whose size is known and whose rate is not.",
+      "",
+      "Fill a rate here only from a console page, with the date, and it stays a `claim`."
+    ],
+    "network_ssd": {
+      "price_gib_hr": null,
+      "price_status": "claim",
+      "price_asof": null,
+      "note": "the `up` default; see defaults.boot_disk_type"
+    },
+    "network_ssd_non_replicated": {
+      "price_gib_hr": null,
+      "price_status": "claim",
+      "price_asof": null,
+      "note": "no replication, lower rate"
+    },
+    "network_ssd_io_m3": {
+      "price_gib_hr": null,
+      "price_status": "claim",
+      "price_asof": null,
+      "note": "high-IOPS tier"
+    },
+    "network_hdd": {
+      "price_gib_hr": null,
+      "price_status": "claim",
+      "price_asof": null
+    }
   }
 }

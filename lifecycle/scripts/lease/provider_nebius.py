@@ -612,6 +612,84 @@ def v_renew(args):
 
 # --- sweep / history ----------------------------------------------------------
 
+def instance_disk_refs(inst):
+    """Every storage id this instance declares. Attachment is read from the INSTANCE,
+    not from the volume, because that is the direction the API states reliably — a disk
+    object does not name its holder on every Nebius API version, and a volume that reads
+    as unattached when it is not sends a reap after a live box's data.
+
+    Being wrong in the other direction is the safe one: a genuinely orphaned disk missed
+    here shows up on the next sweep, and costs a few cents in the meantime."""
+    spec = inst.get("spec") or {}
+    ids = set()
+    boot = spec.get("boot_disk") or {}
+    for holder in (boot, *(spec.get("secondary_disks") or [])):
+        for key in ("existing_disk", "managed_disk"):
+            ref = (holder or {}).get(key) or {}
+            if ref.get("id"):
+                ids.add(ref["id"])
+    for fs in spec.get("filesystems") or []:
+        ref = (fs or {}).get("existing_filesystem") or fs
+        if isinstance(ref, dict) and ref.get("id"):
+            ids.add(ref["id"])
+    return ids
+
+
+def _size_gib(spec):
+    if spec.get("size_gibibytes"):
+        return int(spec["size_gibibytes"])
+    if spec.get("size_bytes"):
+        return round(int(spec["size_bytes"]) / (1024 ** 3))
+    if spec.get("block_size_bytes") and spec.get("size_blocks"):
+        return round(int(spec["block_size_bytes"]) * int(spec["size_blocks"]) / (1024 ** 3))
+    return None
+
+
+def storage_rows(cfg, pid, project, region, instances, tag_prefix, now):
+    """Disks and filesystems, with what is holding each.
+
+    Both are billed the moment they exist and go on billing when every instance is
+    STOPPED or deleted — `instance delete` takes a managed boot disk with it, but an
+    orphaned one (`--boot-disk-managed-disk-forbid-deletion`, a create whose instance
+    never materialised, a console launch) survives with nothing pointing at it and
+    nothing enumerating it. That is the volume this exists to find."""
+    # storage id -> the instance holding it, built once. Per-disk re-derivation was the
+    # obvious way to write this and is quadratic on a project with a few hundred volumes.
+    holder = {}
+    for inst in instances:
+        iid = (inst.get("metadata") or {}).get("id")
+        for sid in instance_disk_refs(inst):
+            holder.setdefault(sid, iid)
+    prices = table().get("storage") or {}
+
+    rows = []
+    for kind, argv in (("disk", ("compute", "disk", "list")),
+                       ("filesystem", ("compute", "filesystem", "list"))):
+        items, err = paged(cfg, *argv, "--parent-id", pid)
+        if err:
+            return None, f"{kind} list: {err[:160]}"
+        for obj in items:
+            meta, spec = obj.get("metadata") or {}, obj.get("spec") or {}
+            tag = (meta.get("labels") or {}).get("mlclaw_tag") or ""
+            if tag_prefix and not tag.startswith(tag_prefix):
+                continue
+            gib = _size_gib(spec)
+            rate = (prices.get(spec.get("type") or spec.get("kind") or "") or {}).get(
+                "price_gib_hr")
+            rows.append({
+                "storage_id": meta.get("id"), "kind": kind, "tag": tag,
+                "name": meta.get("name"), "size_gib": gib,
+                # null, never 0: Nebius publishes no per-hour storage price and nobody
+                # has written one into the table, so this is unmeasured. L2 counts it as
+                # an unpriced row and says the total is a lower bound.
+                "price_hr": round(rate * gib, 4) if (rate and gib) else None,
+                "attached_to": holder.get(meta.get("id")),
+                "age_s": max(0, now - _epoch(meta.get("created_at") or "")),
+                "project": project, "region": region,
+            })
+    return rows, None
+
+
 def v_sweep(args):
     cfg = conf(args.res)
     tab = table()["platforms"]
@@ -622,7 +700,7 @@ def v_sweep(args):
         pid, name, region, _ = entry
         items, err = paged(cfg, "compute", "instance", "list", "--parent-id", pid)
         if err:
-            return name, None, err
+            return name, None, None, err
         rows = []
         for inst in items:
             meta = inst.get("metadata") or {}
@@ -645,16 +723,23 @@ def v_sweep(args):
                 "name": meta.get("name"), "project": name, "region": region,
                 "run": labels.get("mlclaw_run") or None,
             })
-        return name, rows, None
+        # Storage is swept from the SAME instance listing, in the same pass. Two passes
+        # would let a box be created between them and read as an orphaned disk.
+        store, serr = storage_rows(cfg, pid, name, region, items, args.tag_prefix, now)
+        if serr:
+            return name, rows, None, serr
+        return name, rows, store, None
 
-    units, checked = [], []
-    for name, rows, err in fan_out(found, one):
-        if rows is None:
-            unreached.append({"scope": name, "why": f"instance list: {err[:160]}"})
+    units, storage, checked = [], [], []
+    for name, rows, store, err in fan_out(found, one):
+        if rows is None or store is None:
+            unreached.append({"scope": name, "why": err})
+            units += rows or []          # whatever did answer is still worth reporting
         else:
             checked.append(name)
             units += rows
-    emit(sweep_result(units, checked, unreached))
+            storage += store
+    emit(sweep_result(units, checked, unreached, storage=storage))
 
 
 def _preset_gpus(preset):
