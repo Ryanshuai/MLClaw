@@ -60,8 +60,14 @@ class AraCase(TempDirCase):
         self.assertEqual(rc, 0, f"check broke: {out or err}")
         return out
 
-    def md(self):
-        with open(self.path("proj", "ara", "ARTIFACT.md"), encoding="utf-8") as f:
+    def ids(self):
+        base = self.path("proj", "ara")
+        return sorted(d for d in (os.listdir(base) if os.path.isdir(base) else [])
+                      if os.path.isdir(os.path.join(base, d)))
+
+    def md(self, aid=None):
+        with open(self.path("proj", "ara", aid or self.ids()[-1], "ARTIFACT.md"),
+                  encoding="utf-8") as f:
             return f.read()
 
     def findings(self, severity=None):
@@ -111,8 +117,8 @@ class TheLayersAreARAsPlusTheOneItDoesNotHave(AraCase):
         out = self.build()
         self.assertIn("logic/conclusions.json", out["copied"])
         self.assertIn("trace/graph.json", out["copied"])
-        self.assertTrue(os.path.exists(self.path("proj", "ara", "logic",
-                                                 "conclusions.json")))
+        self.assertTrue(os.path.exists(self.path("proj", "ara", out["id"],
+                                                 "logic", "conclusions.json")))
 
     def test_the_index_never_contradicts_the_directory_beside_it(self):
         """The counts must include what was copied in. Reporting 「no logic
@@ -257,11 +263,13 @@ class AFrozenBeliefDoesNotUpdateItself(AraCase):
 
     def test_check_repairs_nothing(self):
         self.build()
-        before = self.read(os.path.join("proj", "ara", "ara.json"))
+        aid = self.ids()[-1]
+        before = self.read(os.path.join("proj", "ara", aid, "ara.json"))
         self.conclude([{"id": "K01", "statement": "s", "status": "refuted",
                         "tier": "T2"}])
         self.a("check", "--no-fail")
-        self.assertEqual(self.read(os.path.join("proj", "ara", "ara.json")), before)
+        self.assertEqual(self.read(os.path.join("proj", "ara", aid, "ara.json")),
+                         before)
         self.assertIn("reports", self.check()["repaired"])
 
     def test_the_index_says_the_statuses_are_a_snapshot(self):
@@ -298,6 +306,58 @@ class AnArtifactNeedsNoMachine(AraCase):
         rc, out, err = self.a("build", "--root", self.path("no_such_box"))
         self.assertEqual(rc, 1, f"expected a refusal, got {rc}: {out or err}")
         self.assertIn("unverifiable", json.dumps(out))
+
+
+class AnArtifactIsADatedReadingNotAFile(AraCase):
+    """`lifecycle/references/layout.md` — `census/census_{ts}.json`,
+    `evacuations/evac_{ts}/`, `retire/retire_{ts}.json`: everything in MLClaw
+    that GOES AND LOOKS is dated and kept. And CLAUDE.md's reason, from
+    `/conclude`: 「what was believed at the time is what explains the runs
+    launched at the time.」
+
+    Round two building on top of round one destroys the only record of what was
+    believed during round one — and that record is what makes round one's runs
+    legible. So `build` dates a new one by default; rebuilding in place stays
+    available, because `check` reporting drift is a legitimate reason to refresh
+    one, but it has to be asked for.
+    """
+
+    def test_two_builds_produce_two_artifacts(self):
+        a = self.build()["id"]
+        b = self.build()["id"]
+        self.assertNotEqual(a, b)
+        self.assertEqual(len(self.ids()), 2)
+
+    def test_the_earlier_one_still_says_what_it_said(self):
+        first = self.build()["id"]
+        self.conclude([{"id": "K01", "statement": "one-to-one helps",
+                        "status": "refuted", "tier": "T2"}])
+        self.build()
+        self.assertIn("supported", self.md(first))
+
+    def test_check_reads_the_newest_by_default(self):
+        self.build()
+        self.conclude([{"id": "K01", "statement": "one-to-one helps",
+                        "status": "unverifiable", "tier": "T2"}])
+        second = self.build()["id"]
+        self.assertEqual(self.check()["id"], second)
+        self.assertEqual(self.findings("critical"), [],
+                         "the newest artifact was built from the current record")
+
+    def test_an_older_artifact_can_be_checked_by_id(self):
+        first = self.build()["id"]
+        self.conclude([{"id": "K01", "statement": "one-to-one helps",
+                        "status": "unverifiable", "tier": "T2"}])
+        self.build()
+        rc, out, err = self.a("check", "--no-fail", "--id", first)
+        self.assertEqual(rc, 0, f"check broke: {out or err}")
+        blob = " ".join(f["detail"] for f in out["findings"])
+        self.assertIn("froze `supported`", blob)
+
+    def test_rebuilding_in_place_must_be_asked_for(self):
+        first = self.build()["id"]
+        self.build("--id", first)
+        self.assertEqual(self.ids(), [first])
 
 
 if __name__ == "__main__":

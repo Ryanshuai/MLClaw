@@ -593,5 +593,60 @@ class TheArtifactIsCalledNotOwned(EvacCase):
         self.assertNotIn("\ndef classify(", src)
 
 
+class ClearingAMachineAlsoLeavesTheCoverPage(EvacCase):
+    """The user's requirement — every round from here on produces an artifact —
+    applied at the release path, where it is easiest to skip.
+
+    ‼️ Built, not demanded. Refusing clearance over a markdown file deadlocks a
+    box that goes on burning money, and CLAUDE.md is explicit that losing the
+    bytes is the worst outcome here — so nothing about the artifact may block a
+    release. Building it is the "just do it" bucket exactly: cheap, local,
+    recoverable, and the answer is readable. What it may not do is fail
+    silently.
+    """
+
+    def test_clearance_builds_the_artifact_nobody_built(self):
+        self.plan()
+        self.freeze()
+        self.copy_all()
+        self.verify()
+        rc, out = self.clearance()
+        self.assertEqual(rc, 0, f"clearance failed: {out}")
+        self.assertTrue(os.path.exists(self.path(
+            "proj", "evacuations", "evac_T", "bundle", "ARTIFACT.md")))
+
+    def test_it_does_not_rebuild_one_that_exists(self):
+        self.plan()
+        self.freeze()
+        self.e("bundle", "--id", "evac_T")
+        built = self.rec()["bundle"]["written_at"]
+        self.copy_all()
+        self.verify()
+        self.clearance()
+        self.assertEqual(self.rec()["bundle"]["written_at"], built)
+        self.assertNotIn("auto", self.rec()["bundle"])
+
+    def test_a_blocked_clearance_still_leaves_one(self):
+        """The blocked case is exactly when somebody else has to pick this up,
+        so it is the case that most needs a cover page."""
+        self.plan()
+        self.freeze()
+        self.copy_all(truncate="output/epoch_12.pth")
+        self.verify()
+        rc, out = self.clearance()
+        self.assertEqual(rc, 1)
+        self.assertTrue(os.path.exists(self.path(
+            "proj", "evacuations", "evac_T", "bundle", "ARTIFACT.md")))
+
+    def test_a_failed_build_never_holds_the_machine(self):
+        self.plan()
+        self.freeze()
+        self.copy_all()
+        self.verify()
+        rc, out = self.clearance()
+        self.assertEqual(rc, 0)
+        self.assertEqual(out["verdict"], "clear")
+
+
 if __name__ == "__main__":
     unittest.main()

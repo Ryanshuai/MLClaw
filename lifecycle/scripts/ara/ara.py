@@ -48,8 +48,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(_HERE), "shared"))
 # reimplemented: two walkers that sort differently produce two manifests of the
 # same tree that do not diff.
 sys.path.insert(0, os.path.join(os.path.dirname(_HERE), "data-label"))
-from _records import (atomic_write_json, broke, emit, now_utc,  # noqa: E402
-                      read_json, refuse)
+from _records import (atomic_write_json, broke, emit, id_stamp,  # noqa: E402
+                      now_utc, read_json, refuse)
 from handoff import iter_files                                  # noqa: E402
 
 
@@ -226,6 +226,47 @@ def render(project, root, counts, byte_totals, repro, concs, title, extra=None):
     return L
 
 
+def artifacts_dir(project):
+    return os.path.join(project, "ara")
+
+
+def resolve_out(project, aid=None, out=None, *, create=False):
+    """Where one artifact lives. Dated, and NEVER overwritten by default.
+
+    ‼️ An artifact is a dated reading, like a census or an evacuation -- not a
+    file that gets refreshed. Building round two on top of round one destroys
+    the only record of what was believed during round one, which is what
+    explains the runs launched during round one. Same rule as `/conclude`
+    refusing to edit a settled conclusion, and for the same reason.
+
+    Rebuilding IN PLACE stays available via `--id`, because `check` reporting
+    drift is a legitimate reason to refresh one -- but it has to be asked for.
+    """
+    if out:
+        return os.path.expanduser(out)
+    base = artifacts_dir(project)
+    if aid:
+        return os.path.join(base, aid)
+    if create:
+        # Collision-free, mirroring `shared/create_run.py -> allocate_run_dir`:
+        # `id_stamp()` is second-resolution, so two builds in one second would
+        # land on the same directory and the second would OVERWRITE the first --
+        # which is precisely the loss the dating exists to prevent. Same `_2`
+        # suffix, same ceiling, and the caller is told it happened.
+        stamp = f"ara_{id_stamp()}"
+        for n in range(1, 100):
+            cand = stamp if n == 1 else f"{stamp}_{n}"
+            if not os.path.exists(os.path.join(base, cand, "ara.json")):
+                return os.path.join(base, cand)
+        broke(f"100 artifacts already exist for {stamp} -- refusing to guess further")
+    ids = sorted(d for d in (os.listdir(base) if os.path.isdir(base) else [])
+                 if os.path.isdir(os.path.join(base, d)))
+    if not ids:
+        refuse(f"no artifact under {base}",
+               fix="`ara.py build --project <p>` first")
+    return os.path.join(base, ids[-1])
+
+
 def cmd_build(a):
     project = os.path.expanduser(a.project)
     root = os.path.expanduser(a.root) if a.root else project
@@ -233,7 +274,7 @@ def cmd_build(a):
         refuse(f"cannot read {root}",
                why="nothing answered, which is `unverifiable` -- never record it "
                    "as 'there was nothing there'")
-    out = os.path.expanduser(a.out) if a.out else os.path.join(project, "ara")
+    out = resolve_out(project, a.id, a.out, create=True)
     os.makedirs(out, exist_ok=True)
 
     counts, byte_totals, members = layer_index(root)
@@ -290,7 +331,8 @@ def cmd_build(a):
            "copied": copied}
     atomic_write_json(os.path.join(out, "ara.json"), rec)
 
-    payload = {"ok": True, "artifact": md, "out": out, "layers": counts,
+    payload = {"ok": True, "artifact": md, "out": out,
+               "id": os.path.basename(out), "layers": counts,
                "reproducible": repro["verdict"], "copied": copied}
     if repro["verdict"] != "yes":
         payload["reproducibility"] = repro["reason"]
@@ -314,7 +356,7 @@ def cmd_check(a):
     changes when its evidence rots.
     """
     project = os.path.expanduser(a.project)
-    out = os.path.expanduser(a.out) if a.out else os.path.join(project, "ara")
+    out = resolve_out(project, a.id, a.out)
     rec = read_json(os.path.join(out, "ara.json"), required=False)
     if rec is None:
         refuse(f"no artifact at {out}", fix="`ara.py build --project <p>` first")
@@ -359,7 +401,8 @@ def cmd_check(a):
     order = ("critical", "major", "minor")
     findings.sort(key=lambda f: order.index(f[0]))
     n_crit = sum(1 for f in findings if f[0] == "critical")
-    payload = {"artifact": out, "built_at": rec.get("built_at"),
+    payload = {"artifact": out, "id": os.path.basename(out),
+               "built_at": rec.get("built_at"),
                "layers": rec.get("layers"),
                "findings": [{"severity": s, "detail": d} for s, d in findings],
                "critical": n_crit, "repaired": "nothing -- this verb reports"}
@@ -380,6 +423,9 @@ def main():
                    help="what to classify. Defaults to the project; `/evacuate` "
                         "passes the doomed machine's path instead")
     s.add_argument("--out", default=None)
+    s.add_argument("--id", default=None,
+                   help="rebuild this artifact in place instead of dating a new "
+                        "one. Overwrites what it believed then -- ask for it")
     s.add_argument("--title", default=None)
     s.add_argument("--note", default=None)
     s.set_defaults(func=cmd_build)
@@ -387,6 +433,7 @@ def main():
     s = sub.add_parser("check")
     s.add_argument("--project", required=True)
     s.add_argument("--out", default=None)
+    s.add_argument("--id", default=None, help="default: the newest")
     s.add_argument("--no-fail", action="store_true")
     s.set_defaults(func=cmd_check)
 

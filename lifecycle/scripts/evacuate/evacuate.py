@@ -590,6 +590,24 @@ def cmd_clearance(a):
                    "this skill exists to stop. `unverifiable` is not `nothing "
                    "was there`")
 
+    # ‼️ Build the artifact if nobody did, rather than refusing to clear without
+    # one. It is cheap, local and recoverable -- CLAUDE.md's "just do it" bucket
+    # exactly -- and the alternative deadlocks: a box that cannot be released
+    # goes on burning money over a markdown file. Losing the bytes is worse than
+    # every other outcome here, so nothing about the artifact may block a
+    # release. What it may do is refuse to be silent about having failed.
+    bundled = (rec.get("bundle") or {}).get("written_at")
+    if not bundled and (rec.get("manifest") or {}).get("frozen_at"):
+        rc_b, _ = _ara("build", "--project", project,
+                       "--root", (rec.get("source") or {}).get("root") or project,
+                       "--out", os.path.join(evac_dir(project, rec["evacuation_id"]),
+                                             "bundle"),
+                       "--title", f"{rec.get('project')} — evacuated from "
+                                  f"{(rec.get('source') or {}).get('host')}")
+        rec["bundle"] = {"path": "bundle", "written_at": now_utc(),
+                         "auto": True, "ok": rc_b == 0}
+        _save(project, rec)
+
     v = rec.get("verification") or {}
     counts = v.get("counts") or {}
     blocked = []
@@ -617,7 +635,13 @@ def cmd_clearance(a):
     _save(project, rec)
 
     out = {"evacuation_id": rec["evacuation_id"], "verdict": verdict,
-           "hash_verified": n_ver, "of": n_ver + n_size, "blocked_by": blocked}
+           "hash_verified": n_ver, "of": n_ver + n_size, "blocked_by": blocked,
+           "artifact": (rec.get("bundle") or {}).get("path")}
+    if (rec.get("bundle") or {}).get("ok") is False:
+        out["‼️artifact"] = ("`/ara build` failed, so these bytes ship as a "
+                             "directory with no cover page. NOT a reason to hold "
+                             "the machine -- losing them is worse -- but build it "
+                             "by hand before anybody is handed this")
     if verdict == "clear_size_only":
         out["‼️"] = (f"{n_size} file(s) were never hash-compared -- the destination "
                      f"reported no comparable checksum. Present and the right length "

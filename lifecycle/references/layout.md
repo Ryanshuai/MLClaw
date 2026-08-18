@@ -323,11 +323,14 @@ evacuations/                        ← one directory per machine emptied before
                                       logic/ and trace/ copied in physically, so the conclusions
                                       and the ablation graph stay readable without pulling 40GB
                                       of weights back down
-ara/                                ← the round's work as a readable artifact, ARA-shaped
-  ARTIFACT.md                         (arXiv:2604.24658). `ara.json` records what it was
-  ara.json                            built out of, so `check` can report where the FROZEN
-  logic/ trace/                       copy stopped agreeing with the live record — the copy
-                                      people read does not update when its evidence rots
+ara/                                ← one directory per artifact, DATED and never overwritten:
+  ara_{YYYYMMDD}_{HHmmss}/            round two building over round one destroys the record of
+    ARTIFACT.md                       what was believed during round one, which is what makes
+    ara.json                        ← round one's runs legible. Same rule as a settled conclusion
+    logic/ trace/                     not being edited. `ara.json` records what the artifact was
+                                      built out of, so `check` reports where the FROZEN copy
+                                      stopped agreeing with the live record — the copy people
+                                      read does not update when its evidence rots
 knowledge/                          ← what is now BELIEVED, as opposed to what happened. Project-level
   conclusions.json                    because a conclusion outlives the exploration that produced it and
                                       may come from an eval, a tune session or an audit just as easily.

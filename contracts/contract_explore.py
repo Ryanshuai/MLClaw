@@ -928,5 +928,78 @@ class ANumberIsNotAConclusion(GraphCase):
         self.assertEqual(len(out["disputes_opened"]), 1)
 
 
+class ASettledRoundLeavesSomethingToHandOver(GraphCase):
+    """CLAUDE.md -> `/ara`, and the user's requirement that every round from
+    here on produce one.
+
+    `graph.json` is a MACHINE record. `verdict: won`, `killed_by:
+    faithful_but_inert`, a card id — none of it is what a person reads six weeks
+    later and none of it survives a handover. Until this fired, a round could
+    close with every invariant green and leave behind a directory of runs.
+
+    ‼️ Staleness counts as much as absence: an artifact built before the last arm
+    settled describes a DIFFERENT round, and reads as current. Both facts are
+    already recorded (`built_at` vs the settlement in `history`), so the check
+    opens no network and walks no tree.
+    """
+
+    def _settled(self):
+        nid = self.add_complete()
+        self.run_it(nid)
+        self.fill(nid)
+        rc, out, err = self.g("close", "--id", nid, "--verdict", "won")
+        self.assertEqual(rc, 0, f"close failed: {out or err}")
+        return nid
+
+    def _artifact(self, built_at):
+        self.write_json(os.path.join("ara", "ara_20260101_000000", "ara.json"),
+                        {"built_at": built_at, "layers": {"src": 1}})
+
+    def _findings(self):
+        rc, out, err = self.g("check")
+        payload = out if isinstance(out, dict) else {}
+        return [f for f in (payload.get("findings") or [])
+                if f.get("invariant") == "artifact"]
+
+    def test_a_settled_round_with_no_artifact_is_flagged(self):
+        self._settled()
+        blob = " ".join(f["detail"] for f in self._findings())
+        self.assertIn("no artifact", blob)
+        self.assertIn("/ara build", blob)
+
+    def test_an_unsettled_round_is_not_nagged(self):
+        """A gate that fires before there is anything to hand over is a gate
+        people learn to ignore."""
+        self.add_complete()
+        self.assertEqual(self._findings(), [])
+
+    def test_an_artifact_older_than_the_last_settlement_is_flagged(self):
+        self._settled()
+        self._artifact("2020-01-01T00:00:00+00:00")
+        blob = " ".join(f["detail"] for f in self._findings())
+        self.assertIn("different round", blob)
+
+    def test_a_current_artifact_clears_it(self):
+        self._settled()
+        self._artifact("2099-01-01T00:00:00+00:00")
+        self.assertEqual(self._findings(), [])
+
+    def test_it_does_not_block_the_graph(self):
+        """Major, not critical: a missing cover page must not stop the next arm.
+        CLAUDE.md reserves the refusal for what makes the NEXT measurement wrong,
+        and a round with no artifact measures fine — it just cannot be handed to
+        anybody.
+
+        Asserted on the finding's own severity rather than on the exit code,
+        because this fixture legitimately trips an unrelated critical (no
+        measured noise floor) and a test depending on the graph being otherwise
+        clean would break every time a new invariant landed."""
+        self._settled()
+        self.assertTrue(self._findings(), "the artifact finding should be there")
+        for f in self._findings():
+            self.assertEqual(f["severity"], "major",
+                             "a missing artifact is a worklist item, not a refusal")
+
+
 if __name__ == "__main__":
     unittest.main()

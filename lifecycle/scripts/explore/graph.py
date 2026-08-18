@@ -975,6 +975,46 @@ def cmd_check(a):
 
     order = {"critical": 0, "major": 1, "minor": 2}
     findings.sort(key=lambda f: order[f["severity"]])
+    # ---- a settled round with nothing to hand anybody ---------------------
+    #
+    # ‼️ The graph is a MACHINE record. `verdict: won`, `killed_by:
+    # faithful_but_inert`, a card id -- none of it is what somebody reads six
+    # weeks later, and none of it survives being handed over. That is what
+    # `/ara` builds, and until this check existed nothing anywhere noticed a
+    # round that closed without one.
+    #
+    # Staleness matters as much as absence: an artifact built before the last
+    # arm settled describes a different round. Dated artifacts are compared by
+    # `built_at` against the newest settlement, both of which are already
+    # recorded, so this is a records-only read.
+    settled_at = None
+    for n in nodes:
+        if n.get("state") not in SETTLED:
+            continue
+        for h in n.get("history") or []:
+            if h.get("to") in SETTLED and h.get("at"):
+                if settled_at is None or h["at"] > settled_at:
+                    settled_at = h["at"]
+    if settled_at:
+        adir = os.path.join(a.project, "ara")
+        built = None
+        for d in sorted(os.listdir(adir)) if os.path.isdir(adir) else []:
+            rec = read_json(os.path.join(adir, d, "ara.json"), required=False) or {}
+            if rec.get("built_at") and (built is None or rec["built_at"] > built):
+                built = rec["built_at"]
+        if built is None:
+            flag("major", "artifact", "-",
+                 "this round has settled cards and no artifact. The graph is a "
+                 "machine record -- `verdict: won` is not what anybody reads six "
+                 "weeks later, and it does not survive a handover. `/ara build` "
+                 "after `/conclude`")
+        elif built < settled_at:
+            flag("major", "artifact", "-",
+                 f"the newest artifact was built at {built} and a card settled at "
+                 f"{settled_at} -- it describes a different round. `/ara build` "
+                 f"again; the old one stays, because it is the record of what was "
+                 f"believed then")
+
     payload = {"cards": len(nodes), "findings": findings,
                "counts": {s: sum(1 for f in findings if f["severity"] == s)
                           for s in ("critical", "major", "minor")}}
