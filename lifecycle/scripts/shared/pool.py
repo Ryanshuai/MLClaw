@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """pool — the slot pool a search holds while it runs. Layer 3.
 
-  /train-tune, /explore-*  ->  pool.py  ->  lease.py  ->  provider_<name>.py
+  /train-tune, /explore    ->  pool.py  ->  lease.py  ->  provider_<name>.py
 
 Read `lifecycle/references/fleet.md` before changing anything here; every rule this file
 implements is stated there with what it costs when broken. The short version:

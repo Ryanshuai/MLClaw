@@ -89,8 +89,10 @@ MLClaw:   [iter 0] [baseline]    lr=1e-4                        → val_acc 0.96
           Wrote chain.md — best 0.972 @ lr=2.5e-4 + warmup=0.03, 18 trials.
 ```
 
-`/train-tune` is an agent-driven search loop, not a grid. Each iteration it re-reads every
-comparable prior run, asks *where is the evidence weakest*, and tags the decision it makes:
+`/train-tune` is an agent-driven search loop, not a grid. It runs on a model that is
+**already settled** — fixed architecture, fixed code, fixed data — and finds that model's
+best operating point. Each iteration it re-reads every comparable prior run, asks *where is
+the evidence weakest*, and tags the decision it makes:
 `fill_grid` (an axis has a gap) · `refine_best` (densify around the leader) · `add_axis`
 (current axes are covered) · `verify` (re-run for noise). Each trial gets a **hypothesis**
 written before it launches and an **outcome** written after.
@@ -120,6 +122,17 @@ structurally can't.
 **And it will tell you when the search was worthless.** If every trial comes back with the
 exact same metric, the session refuses to name a winner: status `no_signal`, no recipe, and
 a diagnosis pointing at the likeliest cause — a swept flag that never reached the code.
+
+**Its sibling one step earlier is `/explore`.** `/train-tune` answers *how should this model
+be configured*; `/explore` answers *what should the model be* — structure, components,
+network selection — and it comes first, because hyperparameters tuned around a component
+you are about to remove are paid for twice. The dividing test is not parameters-vs-code:
+ask whether the earlier runs are still answers to the same question. If they are, you are
+moving along a curve that exists, and that is a tune. If they are not, the criterion and the
+noise floor have to be re-established first, and that is an exploration. `/explore` searches
+parameters too — when the parameter *is* the hypothesis ("is it a capacity problem?"), or
+when a ported component needs a fair operating point before it can be judged — but each such
+search is a pre-registered card, and the control arm gets the same budget.
 
 ## When Someone Else Has Your Data
 
@@ -254,7 +267,6 @@ that passed.
 - [ ] Model identity — `models/<id>@<release>`, the primitive the next two need. Not a skill: data gets a citable frozen id and a deletion that respects citations, models get a file path and a `retention.py` that ranks by metric and does not know who cited them
 - [ ] Deployment (edge + cloud) — `/deploy-init` + `/deploy-run`. "Better", "approved" and "serving" are three records, and conflating the first with the last is how a leaderboard's winner is believed to be live while something else is
 - [ ] Model curate — export/quantization as a recorded derivation, whose one refusal is that an exported model never inherits the source model's metrics
-- [ ] Exploration (architecture search)
 - [ ] Data quality checks + auto-format conversion — the curate stage *records* a conversion and the census reads no file content; neither performs one
 
 ## License

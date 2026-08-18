@@ -76,8 +76,8 @@ Every skill knows its position in this graph. Two types of edges:
 | `/eval-triage` | eval-run completed **and** `output.json -> per_sample.path` non-null | whatever the piles named: `/data-label` (`label_wrong`), the data line (`sample_hard`), `/train-init` or a `/train-run` fork (`model_wrong`). Never `/eval-run` "to try again" |
 | `/train-init` | project.json, code available. Calls `/discover` for the data half of Step 0 | `/train-run` |
 | `/train-run` | train-init done. **A fine-tune also requires an evaluation stage** — the base must be measured on this run's data before launch, and that is `/eval-run`'s to perform, not this skill's. No eval stage → route to `/eval-init`, never measure it by hand here | `/eval-run`, `/train-tune` |
-| `/train-tune` | train-init done, ≥1 prior train-run completed | `/train-tune-report` (auto at close) |
-| `/explore` | project.json, code available, **a declared corpus** (`datasets/<id>/dataset.json` + a frozen snapshot). Calls `/eval-run` for the noise floor and `/discover` when sourcing a paper's code | `/train-run` or `/eval-run` (open an arm), then **`/train-tune` — after the architecture settles, never before**: tuning hyperparameters around a component you are about to remove spends the budget twice |
+| `/train-tune` | train-init done, ≥1 prior train-run completed, **and the architecture settled** — the search varies `runtime_params` on a model that is no longer in question. If it still is, the search is `/explore`'s; see "`/train-tune` vs `/explore`" below | `/train-tune-report` (auto at close) |
+| `/explore` | project.json, code available, **a declared corpus** (`datasets/<id>/dataset.json` + a frozen snapshot). Calls `/eval-run` for the noise floor and `/discover` when sourcing a paper's code | `/train-run` or `/eval-run` (open an arm), then **`/train-tune` — after the architecture settles, never before**: tuning hyperparameters around a component you are about to remove spends the budget twice. A *scoped* tune inside one arm, to give a ported component a fair operating point, is not that and does not wait — it is part of the arm, its result belongs to the card rather than to the model, and the control arm gets the same budget |
 | `/train-tune-report` | a tune session with ≥1 run | (done) |
 | `/ara` | ≥1 finished run. `/conclude` first if the round produced a belief — an artifact with no `logic/` layer is a directory of runs with a cover page | (done). **`/explore` routes here at close**, after `/conclude` |
 | `/evacuate` | a machine with work on it, and somewhere durable to put it (`resources.json -> aws.s3_bucket`). **Runs BEFORE `/lease release` or `pool.py release`, never after** — after is not a workflow, it is an archaeology | `/lease` (release, now safe), `/conclude` (the bundle's `logic/` layer is its output) |
@@ -127,6 +127,48 @@ Two reasons the sweep is not `/train-init`'s, and be precise about the first: **
 
 **`/data-label`** is a utility skill too, but the asymmetric kind: it is entered from a stage and returns *weeks later*, so it must not hold the workflow stack while it waits. Its `suggests` edge fires at `close --accept`, not at `send`. A run that consumes an accepted handoff cites it in `lineage.parents` as `handoffs/<handoff_id>` — that citation, not the stack, is what connects the two.
 
+## `/train-tune` vs `/explore` — one layer, two questions
+
+Both are **searches**: they decide what to run and execute nothing themselves, and both
+emit ordinary runs into `stages/*/runs/`. They get confused with each other constantly,
+and the confusion is expensive in one direction — a tune session run on an architecture
+that is not settled yet produces a config that dies with the component it was tuned
+around, and nothing in the record says so afterwards.
+
+| | `/train-tune` | `/explore` |
+|---|---|---|
+| The question | **这个模型怎么配** — where is this model's operating point | **这个模型该是什么** — structure, components, network selection |
+| Precondition | the architecture is **settled** | it is not, and settling it is the work |
+| Unit | one point in `runtime_params` | one **proposal**: a hypothesis, a pre-registered criterion, a guardrail, a kill condition |
+| What holds still | code SHA + dataset + split + mode + scope — the comparability contract that makes trials one *series* | nothing by construction: each arm is judged against its own control and a measured noise floor |
+| Output | a config | a decision about what the model is — and a `/conclude` belief, because a winning arm is a result, not yet a conclusion |
+| Record | `tune_sessions/<id>/state.json` + `chain.md` | `stages/exploration/graph.json` |
+
+**The test is not "parameters vs code."** Ask instead: **after this change, are the earlier
+runs still answers to the same question?** Yes → `/train-tune`; you are moving along a curve
+that already exists. No → `/explore`; the question changed, so the criterion and the noise
+floor have to be re-established before any number on the new arm means anything.
+
+‼️ **Whether a knob is exposed on the command line decides nothing.** `--num-layers`,
+`--width`, `--use-fpn` are flags and they change what the network *is*; `--lr`,
+`--batch-size`, `--warmup` are flags and they do not. A capacity sweep driven entirely by
+existing flags is `/explore`'s work wearing `/train-tune`'s clothes — cheap to run, which is
+fine, but its conclusion still belongs on a card, because what it settles is the model's
+identity and the next round will read it as such.
+
+**`/explore` searches parameters too** — "necessary parameter search is part of exploring."
+Three shapes, and only the middle one is `/train-tune`'s:
+
+1. **The parameter IS the proposal** — 「是不是容量不够」, 「这个模块没用，是不是因为 lr 定得太保守」. That is a claim about *why* something came out flat, not an optimization; it gets a card and a pre-registered criterion like any other proposal, and it stays in `/explore`.
+2. **The architecture is settled and you want the best point on it** — `/train-tune`. This is the only shape whose output is a config.
+3. **A scoped tune inside one arm, so a ported component is judged at a fair operating point.** Legitimate and often necessary: a technique that is good at the paper's lr can be worthless at this repo's, and calling that a refutation is a false negative. Two conditions, both load-bearing — the result belongs to the **card**, not to the model (it does not become the project's config), and **the control arm gets the same budget**. Tuning only the treatment arm and comparing it against a control on defaults manufactures an improvement out of the search budget, and afterwards the two arms' records look identical.
+
+**Order: `/explore` first, then `/train-tune`** — the `suggests` edge in the table above,
+and it holds in both directions. Tuning around a component you are about to remove spends
+the budget twice; an architecture judged at whatever hyperparameters happened to be lying
+around is judged at a point nobody chose. Shape 3 is how the second half gets paid for
+without inverting the order.
+
 ## Requirement checks
 
 | Requirement | How to check |
@@ -137,6 +179,7 @@ Two reasons the sweep is not `/train-init`'s, and be precise about the first: **
 | eval-init done | `{PROJECT}/stages/evaluation/config.json → entry_command` is non-empty |
 | train-init done | `{PROJECT}/stages/training/config.json → entry_command` is non-empty |
 | ≥1 prior train-run completed | `{PROJECT}/stages/training/runs/*/run.json` with `status: "completed"` exists |
+| the architecture is settled (for `/train-tune`) | nothing declares it, and only one thing can contradict it: if `{PROJECT}/stages/exploration/graph.json` exists, `graph.py status --project {PROJECT}` reports **zero** cards in `draft` / `blocked` / `ready` / `running` / `filled`. Non-zero is a **warning, not a gate** — say which cards are open, record the resulting config as provisional, and proceed if the user still wants the session. No graph at all is not evidence either way; it is the ordinary case |
 | tune session exists with ≥1 run | `{PROJECT}/stages/training/tune_sessions/*/state.json` exists AND ≥1 run with `lineage.session = <id>` |
 | resources.json for credentials | checked lazily — `{WORKSPACE}/resources.json`, only when a source needs non-local credentials |
 | eval-run completed | `{PROJECT}/stages/evaluation/runs/*/run.json` with `status: "completed"` exists |

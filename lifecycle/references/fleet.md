@@ -1,7 +1,7 @@
 # Fleet mechanics — many machines, one search
 
 Loaded on demand. Read this before holding **more than one machine at a time**:
-`/train-tune` with `max_concurrent > 1`, the exploration stage when it lands, or any
+`/train-tune` with `max_concurrent > 1`, `/explore` running arms in parallel, or any
 sweep that rents rather than borrows. A single box needs none of this — `/lease` plus
 `run-mechanics.md` "Path Mapping (Cross-Machine Execution)" already covers it.
 
@@ -14,7 +14,7 @@ caller does with N leases once L2 can hand them out one at a time. Nothing here 
 mention a provider by name, and the moment something does, it belongs in an adapter.
 
 ```
-   /train-tune, /explore-*        decide WHAT to run          ← the search
+   /train-tune, /explore          decide WHAT to run          ← the search
         │  slots, not machines
    pool.py                        decide WHERE it runs        ← this file
         │  one lease per unit

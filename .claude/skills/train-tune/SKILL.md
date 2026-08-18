@@ -1,30 +1,63 @@
 ---
 name: train-tune
 description: >
-  Use this skill to run adaptive hyperparameter optimization on a fixed model + dataset.
-  Triggers when user wants to find best hyperparameters via an agent-driven search loop:
-  the agent reads prior runs, identifies coverage gaps, hypothesizes the next config,
-  launches trials, observes outcomes, and iterates until budget exhausted or coverage
-  sufficient. Trigger for: "tune lr / hyperparams", "find best config", "search hyperparams",
-  "调超参", "tune 一下", "搜个 lr". This is the HPO loop skill — not for architecture search
-  (that's /explore) or single-trial training (that's /train-run). Auto-invokes
-  /train-tune-report at session close.
+  Use this skill to run adaptive hyperparameter optimization on a model that is ALREADY
+  SETTLED — the architecture, the code, the dataset and the split are no longer in
+  question, and what is wanted is that model's best operating point. Triggers when user
+  wants to find best hyperparameters via an agent-driven search loop: the agent reads
+  prior runs, identifies coverage gaps, hypothesizes the next config, launches trials,
+  observes outcomes, and iterates until budget exhausted or coverage sufficient. Trigger
+  for: "tune lr / hyperparams", "find best config", "search hyperparams", "调超参",
+  "tune 一下", "搜个 lr", "模型定了，调一下参", "在这个模型上调到最好". This is the HPO
+  loop skill, and its unit is one point in runtime_params. NOT for deciding what the model
+  should BE — architecture, components, network selection, or a parameter change that is
+  itself the hypothesis ("是不是容量不够", "这个模块没用是不是 lr 太保守") — all of that is
+  /explore, and it comes first. Not for single-trial training (that's /train-run).
+  Auto-invokes /train-tune-report at session close.
 ---
 
 # /train-tune — Adaptive HPO Loop
 
-Run an autonomous adaptive hyperparameter search. The agent itself decides what to vary
-and when to stop. User starts with one command and walks away; comes back to a
-chain.md report.
+Run an autonomous adaptive hyperparameter search **on a model that is already settled**.
+The agent itself decides what to vary and when to stop. User starts with one command and
+walks away; comes back to a chain.md report.
 
 **Coverage-driven, not exploit-driven**: each iter the agent asks "where is evidence
 weakest?" — fill gaps in axis ranges, refine around current best, or add a new axis —
 not just "what's near current best". This avoids local optima trap.
 
 **Train-stage contract assumed**: same code SHA + same dataset + same split. Variation
-is in `runtime_params` only (lr / bs / warmup / etc.). For architecture search use
-`/explore` — same layer, different unit: it searches over PROPOSALS (a hypothesis, a
-pre-registered criterion, a guardrail, a kill condition), and its arms change the code.
+is in `runtime_params` only (lr / bs / warmup / etc.). That contract is not paperwork —
+it is what makes the trials **one series** instead of a pile of unrelated numbers, and it
+is also the precondition this skill cannot check for itself.
+
+## What this skill is not: `/explore`
+
+**`/train-tune` answers 「这个模型怎么配」. `/explore` answers 「这个模型该是什么」** —
+structure, components, and network selection, down to whether this is the right family of
+model at all. Same layer, different unit and different precondition: `/explore`'s unit is a
+**proposal** (a hypothesis, a pre-registered criterion, a guardrail, a kill condition), and
+it runs while the architecture is still in question, which is exactly when this skill must
+not.
+
+‼️ **The test is not "parameters vs code."** Ask: *after this change, are the earlier runs
+still answers to the same question?* Yes → here. No → `/explore`, because the question
+changed and the criterion and noise floor have to be re-established first. And whether a
+knob is exposed on the command line decides nothing — `--num-layers` and `--width` are
+flags that change what the network *is*; `--lr` and `--batch-size` are flags that do not.
+A capacity sweep driven entirely by existing flags is `/explore`'s work in this skill's
+clothes.
+
+**Running a tune session on an unsettled architecture is the expensive mistake**, and it is
+silent: the config comes out fine, and then dies with the component it was tuned around
+without anything in the record saying so. Order is `/explore` first, `/train-tune` after.
+
+**`/explore` searches parameters too**, and that is not a boundary violation — one of its
+three shapes calls *this* skill: a **scoped** tune inside one arm, so a ported component is
+judged at a fair operating point rather than at the paper's. When invoked that way, the
+result belongs to that card, not to the model — it does not become the project's config —
+and the control arm gets the same budget. The full three shapes and the dividing test:
+`lifecycle/references/skill-graph.md` -> "`/train-tune` vs `/explore`".
 
 ## Re-entry behavior
 
@@ -42,6 +75,13 @@ When invoked again, route by `--session <id>` arg (or auto-detect latest):
 Follow `lifecycle/references/skill-graph.md` -> "Workflow State Protocol". Stage = `training`. Upstream:
 - `/train-init` done (`stages/training/config.json -> entry_command` non-empty)
 - At least one prior `/train-run` completed (so we have a baseline configuration to fork from). If none, suggest user run a baseline first.
+- **The architecture is settled.** Nothing declares this, but one thing can contradict it: if `stages/exploration/graph.json` exists, read it —
+
+  ```bash
+  python <mlclaw_root>/lifecycle/scripts/explore/graph.py status --project <PROJECT>
+  ```
+
+  Any card in `draft` / `blocked` / `ready` / `running` / `filled` means the model is still in question. **This is a warning, not a gate** — the user asked for a tune and may well want one anyway. Name the open cards, say in one line that a config tuned around a component under an open card is **provisional**, note it in the session's `state.json` and in `chain.md`'s recipe, and carry on. What is not acceptable is running the session as if nothing were open: the config comes out looking final, and it dies silently with whatever the open card removes.
 
 ## Step 1: Resolve / Initialize Session
 

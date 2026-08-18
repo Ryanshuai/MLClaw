@@ -2,7 +2,11 @@
 """The experiment graph — the four operations, and the scan that says it broke.
 
 `/explore` is a search whose unit is a PROPOSAL, not a trial: one card per thing
-worth trying, verified by an ordinary run, adjudicated once. The design came from
+worth trying, verified by an ordinary run, adjudicated once. What it searches over
+is what the model IS -- structure, components, network selection -- and that is the
+line against `/train-tune`, which searches the operating point of a model already
+settled. A parameter can be a card here (「is it a capacity problem」); a card is
+never a point in `runtime_params`. The design came from
 the `arch-transplant` skill, where the graph lived in a markdown design doc and
 its own invariant section said "scan periodically, report don't repair". Nothing
 scanned. `check` is that scanner, and it is the reason this file exists at all —

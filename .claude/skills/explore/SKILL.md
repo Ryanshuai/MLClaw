@@ -1,20 +1,27 @@
 ---
 name: explore
 description: >
-  Use this skill for ARCHITECTURE SEARCH — turning "our results are bad" or "the
-  architecture is still primitive" into a numbered, pre-registered, controlled list of
-  changes, then sourcing the paper plus its open-source code, porting one flag at a time,
-  and ablating. Trigger for: what is worth borrowing, what technique are we missing,
-  should we adopt X, is this improvement real, did we port it correctly. Also trigger for
-  Chinese requests like "什么值得借鉴", "缺什么技巧", "要不要上 X", "架构是不是太原始",
-  "把某篇论文的做法移植进来", "这版比上版好吗", "这个提升是真的吗", "搬对了没有".
+  Use this skill for ARCHITECTURE SEARCH — the model is NOT settled yet, and settling it
+  is the work: structure, components, and network selection, down to which family of model
+  this should be. It turns "our results are bad" or "the architecture is still primitive"
+  into a numbered, pre-registered, controlled list of changes, then sources the paper plus
+  its open-source code, ports one flag at a time, and ablates. Trigger for: what is worth
+  borrowing, what technique are we missing, should we adopt X, which backbone / which
+  network should we use, is this improvement real, did we port it correctly. Also trigger
+  for Chinese requests like "什么值得借鉴", "缺什么技巧", "要不要上 X", "架构是不是太原始",
+  "换个网络试试", "选哪个模型", "把某篇论文的做法移植进来", "这版比上版好吗",
+  "这个提升是真的吗", "搬对了没有".
+  Parameter search belongs here too when the parameter IS the hypothesis — "是不是容量不够",
+  "这个模块没用是不是 lr 太保守", a width / depth / layer-count sweep — because those decide
+  what the model is, not how to configure a settled one.
   Pushy trigger: invoke it even when the user only pasted a screenshot or a paper quote
   and asked "你看这个对吗" — that is exactly the moment the proposal list gets made from
   vibes instead of counts, which is the failure this skill exists to prevent. Also invoke
   before writing any port of a published technique into an existing training codebase.
-  Not for hyperparameter search (use /train-tune), data or label quality (use /data-audit),
-  pure engineering speedups that do not change prediction quality, or a one-line change
-  whose location is already known.
+  Not for tuning a model that is already settled — finding the best lr / batch size /
+  warmup on a fixed architecture is /train-tune, which runs AFTER this skill, never before.
+  Not for data or label quality (use /data-audit), pure engineering speedups that do not
+  change prediction quality, or a one-line change whose location is already known.
 ---
 
 # /explore — 架构搜索：从实测失败到移植过来的技巧
@@ -32,9 +39,9 @@ description: >
 ---
 
 **不适用**，每条都有别的去处：数据/标注质量是 `/data-audit`（它开文件，不需要模型）；
-超参搜索是 `/train-tune`（同一层，不同单位）；一次转换器不合的来回是 `adaptation`；
-纯工程性能优化（不改预测质量）和"已经知道要改哪一行"的一行改动 —— 那些直接做，
-别走这条流水线。
+**模型已经定了、只是找最优操作点** 是 `/train-tune`（同一层，晚一步 —— 见下节）；
+一次转换器不合的来回是 `adaptation`；纯工程性能优化（不改预测质量）和"已经知道要改哪一行"
+的一行改动 —— 那些直接做，别走这条流水线。
 
 ## references —— 七块，**本文只留判断，操作细节在里面**
 
@@ -53,9 +60,42 @@ description: >
 
 ## 在 MLClaw 里，这个 stage 是什么
 
-**它是一次搜索，单位是「提案」而不是「试验」。** `/train-tune` 搜超参，单位是一组
-`runtime_params`；这里搜的是**架构改动**，单位是一张卡：一个假设、一个预注册判据、一条
-护栏、一个杀死条件。同一层，不同的单位。
+**它是一次搜索，单位是「提案」而不是「试验」。** 一张卡 = 一个假设、一个预注册判据、
+一条护栏、一个杀死条件。搜的是**结构**：加什么组件、去什么组件、换什么网络 ——
+乃至这个模型该不该是这一类模型。
+
+### 和 `/train-tune` 的分界
+
+**`/explore` 答「这个模型该是什么」，`/train-tune` 答「这个模型怎么配」。** 同一层，
+差一步：模型还没定的时候是这边，定了之后是那边。
+
+‼️ **判据不是「改参数还是改代码」。** 问这一句：**这次改动之后，之前那些 run 还是同一个
+问题的答案吗？** 是 → `/train-tune`，你在一条已经成立的曲线上找点；不是 → 这边，
+问题换了，判据和噪声底都得重新立，之前的数一个都不能直接比。
+
+**能不能在命令行里改，什么都不决定。** `--num-layers`、`--width`、`--use-fpn` 是 flag，
+但它们改的是**网络本身**；`--lr`、`--batch-size`、`--warmup` 也是 flag，它们不改。
+一次纯靠现成 flag 的容量扫描是**穿着 `/train-tune` 衣服的 `/explore`** —— 跑起来便宜是好事，
+但它的结论落在卡上，因为它定的是模型的身份，下一轮会当身份来读。
+
+**参数搜索这边也做**，三种形状，只有中间那种是 `/train-tune` 的：
+
+| 形状 | 归谁 |
+|---|---|
+| **参数本身就是提案** —「是不是容量不够」「这个模块没用，是不是 lr 定得太保守」 | **这边。** 它是一个关于「为什么那条臂是平的」的主张，不是一次优化 —— 照常开卡、照常预注册判据 |
+| **架构定了，找这个模型的最优点** | `/train-tune`。只有这一种的产出是一份配置 |
+| **在一条臂内部做一次限定范围的调参**，让移植进来的组件在公平的操作点上被判 | **这边，算这条臂的一部分。** 可以直接调 `/train-tune` 来执行 |
+
+第三种是必要的：一个技巧在论文的 lr 下好、在本 repo 的 lr 下一文不值，把这个叫「否掉了」
+是一次假阴性。但它有**两个都不能省的条件** —— 结果属于**那张卡**，不属于模型（不会变成
+项目的配置）；**控制组必须拿到同样的预算**。只给实验臂调参、拿默认配置的控制组去比，
+是拿搜索预算凭空造出一次「提升」，而且事后两条臂的记录长得一模一样，记录层看不出来。
+
+**顺序：先 `/explore` 再 `/train-tune`。** 反过来两头都亏 —— 围着一个即将被删掉的组件调出来
+的超参，组件一删就作废；而一个架构如果是在「手边刚好是什么参数」下判的，那就是在一个没人
+选过的点上判的。第三种形状就是在不倒转顺序的前提下把后半句付掉。
+
+完整对照表在 `lifecycle/references/skill-graph.md` -> "`/train-tune` vs `/explore`"。
 
 **它不跑任何东西。** 一条臂是 `stages/<target_stage>/runs/` 里一次**普通的 run**，由
 `/train-run` 或 `/eval-run` 发起，卡上用 `run_id` 引它。这是 `/data-curate` 对转换划的
@@ -114,8 +154,8 @@ MLClaw 加的两条，是原版靠记忆执行的两条规矩：
 | | |
 |---|---|
 | **Requires** | `project.json`；code available；**一个已声明的语料**（`datasets/<id>/dataset.json` + 一个冻结快照）——`premise_share` 没有语料就没有意义 |
-| **Suggests** | `/train-run`（开一条臂）· `/eval-run`（测量卡、噪声底）· `/train-tune`（架构定了之后再调超参，不是之前） |
-| **Calls** | `/discover`（Stage 4 找论文和代码时）· `/eval-run`（Stage 0 噪声底要两次同权重同口径的测量）· `/ask-human`（‼️ 见下） |
+| **Suggests** | `/train-run`（开一条臂）· `/eval-run`（测量卡、噪声底）· `/train-tune`（**架构定了之后**再调超参，不是之前）· `/conclude` → `/ara`（收尾） |
+| **Calls** | `/discover`（Stage 4 找论文和代码时）· `/eval-run`（Stage 0 噪声底要两次同权重同口径的测量）· `/train-tune`（**限定范围**地跑在一条臂内部，给移植的组件一个公平操作点 —— 见上节第三种形状，控制组同预算）· `/ask-human`（‼️ 见下） |
 
 ‼️ **这条流水线有大量只有人能答的问题**（哪个指标是主判据、这个 delta 值不值得上、
 盲评算不算过）。按 CLAUDE.md「File the question; do not block on it」：**不要停在第 3 问

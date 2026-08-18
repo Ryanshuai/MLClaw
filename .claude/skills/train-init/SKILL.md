@@ -54,7 +54,7 @@ Follow `lifecycle/references/skill-graph.md` -> "Workflow State Protocol": push 
 | Signal | Likely mode |
 |---|---|
 | `project.json -> stages.training.code_source.source` is `github`, or `git log` authors aren't the user | `inherited` |
-| an `/explore-*` output exists for this project | `explored` |
+| an `/explore` output exists for this project (`stages/exploration/graph.json`) | `explored` |
 | local source, git authored by the user | `authored` |
 
 `authored` → the user knows the answers, so ask instead of inferring. `inherited` → dig (code, git history, tracking backend) and record evidence, because nobody can confirm it for you. `explored` → read the upstream output first; most of it is already structured.
