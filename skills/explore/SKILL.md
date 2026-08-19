@@ -24,988 +24,1218 @@ description: >
   change prediction quality, or a one-line change whose location is already known.
 ---
 
-# /explore — 架构搜索：从实测失败到移植过来的技巧
+# /explore — architecture search: from a measured failure to a ported technique
 
-改模型架构最容易出的错不是改错了，而是**改对了但不知道为什么对**，或者**照着一个不存在的病去抄一个技巧**。
-这个 skill 是一条流水线，把「结果不好」变成「有序号、有预注册指标、有对照的改动」。
+The commonest mistake in changing a model's architecture is not changing it wrongly. It is
+**changing it correctly without knowing why it worked**, or **copying a technique to treat a
+disease that does not exist**. This skill is a pipeline turning "the results are bad" into
+"numbered changes with pre-registered metrics and controls".
 
-**三条硬规则：**
+**Three hard rules:**
 
-1. 现象要先变成**计数**，提案才有资格进表；
-2. 提案要先有**预注册指标**，代码才有资格改；
-3. ‼️ 预注册指标要先过**独立性检验**才有资格当判据 ——
-   **能构造出「实现错了而它不动、甚至变好」的情形，它就不独立**（AABB 就是这么过去的）。
+1. A phenomenon must become a **count** before a proposal is eligible for the table;
+2. A proposal must have a **pre-registered metric** before the code is eligible to change;
+3. ‼️ A pre-registered metric must pass an **independence test** before it is eligible to be a
+   criterion — **if you can construct a case where the implementation is wrong and it does not
+   move, or even improves, it is not independent** (AABB got through exactly that way).
 
 ---
 
-**不适用**，每条都有别的去处：数据/标注质量是 `/data-audit`（它开文件，不需要模型）；
-**模型已经定了、只是找最优操作点** 是 `/train-tune`（同一层，晚一步 —— 见下节）；
-一次转换器不合的来回是 `adaptation`；纯工程性能优化（不改预测质量）和"已经知道要改哪一行"
-的一行改动 —— 那些直接做，别走这条流水线。
+**Not applicable**, and each has somewhere else to go: data / annotation quality is
+`/data-audit` (it opens files and needs no model); **the model is already settled and you only
+want its best operating point** is `/train-tune` (same layer, one step later — see the next
+section); a round trip over a converter that does not fit is `adaptation`; pure engineering
+speedups (which do not change prediction quality) and a one-line change whose location is
+already known — just do those, without this pipeline.
 
-## references —— 七块，**本文只留判断，操作细节在里面**
+## references — seven of them, **this file keeps only the judgement; the operating detail is in them**
 
-本文回答「该不该、值不值、信不信」；下面七份回答「怎么做」。**动手前读对应那份。**
+This file answers "should we, is it worth it, do we believe it"; the seven below answer "how".
+**Read the relevant one before starting.**
 
-| 文件 | 什么时候读 | 它管什么 |
+| File | When to read it | What it owns |
 |---|---|---|
-| `references/experiment-graph.md` | 每次开工的第一件事 | 节点 schema · 状态机（⬜🟨🟩🔵🟪✅❌）· 四个操作（ADD / TAKE / FILL / CLOSE）· 图的不变量。**ready set 怎么算、回填怎么传播** |
-| `references/porting.md` | Stage 4 / 4.5 / 5 | 怎么搜（三层关键词、交叉领域）· 证据强度分级（**被用过 ≠ 被消融过**）· ‼️ **偏离分适配和改坏，事后长得一样** · 起效没有的四种裁决 |
-| `references/cluster-ops.md` | 开跑前、收尾时 | 稳定容量的不等式 · 容量的四种静默失败 · **选卡判据是时钟÷单价不是 FLOPS** · 同组必须同卡型 · **释放已交给常驻 janitor，收尾只剩它看不见的两条** |
-| `references/explore-or-stop.md` | 跑完几条臂之后 | 该继续 vs 该停的判据 · ‼️ **六种假的「搜完了」** · 停 ≠ 结束 |
-| `references/debate-roles.md` | 起辩论时 | 六处各自的**角色 prompt 和反驳清单**（可直接抄）· 盲输入协议 · 六行裁决记录格式 |
-| `references/run-card.md` | 开一条臂之前 | MLClaw 的 `run.json` 已经盖住哪几样、**还差哪三样** · 四条硬规则的完整论证 · ‼️ **记录层自己会坏的四种形状**（全都不报错） |
-| `references/human-review.md` | Stage 6.5 要人看图时 | 预先选帧带控制组 · **盲评两个独立视觉通道**（一个通道无法检错）· 丢弃率当指标 · 人的判断怎么写回 `findings.json` |
-| `stages/exploration/state.json` | **每轮先核一眼** | 此刻的实测常数、定档表、已杀清单。‼️ 换了权重/取帧/度量**整份作废** —— 模板在 `lifecycle/exploration/state.json`。**它是项目记录，不是 skill 文件**，所以没有全局副本要同步 |
+| `references/experiment-graph.md` | the first thing every working session | node schema · state machine (⬜🟨🟩🔵🟪✅❌) · the four operations (ADD / TAKE / FILL / CLOSE) · the graph's invariants. **How the ready set is computed, how a fill propagates** |
+| `references/porting.md` | Stage 4 / 4.5 / 5 | how to search (three keyword layers, across fields) · grading evidence (**used ≠ ablated**) · ‼️ **deviation splits into adaptation and breakage, and afterwards they look the same** · the four verdicts on whether it worked |
+| `references/cluster-ops.md` | before starting, and when wrapping up | the stable-capacity inequality · the four silent capacity failures · **GPU selection is clock ÷ price, not FLOPS** · one GPU model per comparison group · **release has been handed to a resident janitor; only the two things it cannot see are left** |
+| `references/explore-or-stop.md` | after a few arms have run | the criteria for continuing vs stopping · ‼️ **six false "the search is finished"** · stopping ≠ finishing |
+| `references/debate-roles.md` | when convening a debate | the **role prompts and rebuttal checklists** for each of the six (copy them directly) · the blind-input protocol · the six-line adjudication record format |
+| `references/run-card.md` | before opening an arm | which parts MLClaw's `run.json` already covers, **and which three it does not** · the full argument for the four hard rules · ‼️ **the four shapes in which the record layer breaks** (none of which raises) |
+| `references/human-review.md` | Stage 6.5, when a person must look | choose frames in advance with a control group · **two independent visual channels for blind review** (one channel cannot detect its own errors) · the discard rate as a metric · how a person's judgement is written back to `findings.json` |
+| `stages/exploration/state.json` | **check it first, every round** | the currently measured constants, the tiering table, the killed list. ‼️ Change the weights, the frame sampling or the metric and **the whole file is void** — the template is `lifecycle/exploration/state.json`. **It is a project record, not a skill file**, so there is no global copy to keep in sync |
 
-## 在 MLClaw 里，这个 stage 是什么
+## What this stage is, inside MLClaw
 
-**它是一次搜索，单位是「提案」而不是「试验」。** 一张卡 = 一个假设、一个预注册判据、
-一条护栏、一个杀死条件。搜的是**结构**：加什么组件、去什么组件、换什么网络 ——
-乃至这个模型该不该是这一类模型。
+**It is a search whose unit is a PROPOSAL, not a trial.** One card = one hypothesis, one
+pre-registered criterion, one guardrail, one kill condition. What is being searched is
+**structure**: which component to add, which to remove, which network to swap in — up to
+whether this model should be this kind of model at all.
 
-### 和 `/train-tune` 的分界
+### The boundary with `/train-tune`
 
-**`/explore` 答「这个模型该是什么」，`/train-tune` 答「这个模型怎么配」。** 同一层，
-差一步：模型还没定的时候是这边，定了之后是那边。
+**`/explore` answers *what should this model BE*; `/train-tune` answers *how should this model
+be configured*.** Same layer, one step apart: before the model is settled it is this side;
+after, it is that side.
 
-‼️ **判据不是「改参数还是改代码」。** 问这一句：**这次改动之后，之前那些 run 还是同一个
-问题的答案吗？** 是 → `/train-tune`，你在一条已经成立的曲线上找点；不是 → 这边，
-问题换了，判据和噪声底都得重新立，之前的数一个都不能直接比。
+‼️ **The test is NOT "parameters versus code".** Ask this instead: **after this change, are the
+previous runs still answers to the same question?** Yes → `/train-tune`, and you are finding a
+point on a curve that already holds. No → this side: the question changed, the criterion and
+the noise floor must both be re-established, and none of the previous numbers is directly
+comparable.
 
-**能不能在命令行里改，什么都不决定。** `--num-layers`、`--width`、`--use-fpn` 是 flag，
-但它们改的是**网络本身**；`--lr`、`--batch-size`、`--warmup` 也是 flag，它们不改。
-一次纯靠现成 flag 的容量扫描是**穿着 `/train-tune` 衣服的 `/explore`** —— 跑起来便宜是好事，
-但它的结论落在卡上，因为它定的是模型的身份，下一轮会当身份来读。
+**Whether it can be changed on the command line decides nothing.** `--num-layers`, `--width`
+and `--use-fpn` are flags, but they change **the network itself**; `--lr`, `--batch-size` and
+`--warmup` are also flags, and they do not. A capacity sweep done entirely with existing flags
+is **`/explore` wearing `/train-tune`'s clothes** — being cheap to run is a good thing, but its
+conclusion lands on a card, because it settles the model's identity and the next round will read
+it as identity.
 
-**参数搜索这边也做**，三种形状，只有中间那种是 `/train-tune` 的：
+**Parameter search happens here too**, in three shapes, and only the middle one is
+`/train-tune`'s:
 
-| 形状 | 归谁 |
+| Shape | Whose |
 |---|---|
-| **参数本身就是提案** —「是不是容量不够」「这个模块没用，是不是 lr 定得太保守」 | **这边。** 它是一个关于「为什么那条臂是平的」的主张，不是一次优化 —— 照常开卡、照常预注册判据 |
-| **架构定了，找这个模型的最优点** | `/train-tune`。只有这一种的产出是一份配置 |
-| **在一条臂内部做一次限定范围的调参**，让移植进来的组件在公平的操作点上被判 | **这边，算这条臂的一部分。** 可以直接调 `/train-tune` 来执行 |
+| **The parameter IS the proposal** — "maybe it just does not have the capacity", "maybe that module looks useless only because the lr was set too conservatively" | **This side.** It is a claim about *why that arm came out flat*, not an optimisation — so it gets a card and a pre-registered criterion like anything else |
+| **The architecture is settled; find this model's best point** | `/train-tune`. Only this shape produces a configuration as its output |
+| **A bounded search INSIDE one arm**, so that a ported component is judged at a fair operating point | **This side, as part of that arm.** `/train-tune` may be invoked to execute it |
 
-第三种是必要的：一个技巧在论文的 lr 下好、在本 repo 的 lr 下一文不值，把这个叫「否掉了」
-是一次假阴性。但它有**两个都不能省的条件** —— 结果属于**那张卡**，不属于模型（不会变成
-项目的配置）；**控制组必须拿到同样的预算**。只给实验臂调参、拿默认配置的控制组去比，
-是拿搜索预算凭空造出一次「提升」，而且事后两条臂的记录长得一模一样，记录层看不出来。
+The third shape is necessary: a technique that is good at the paper's lr and worthless at this
+repo's lr, called "ruled out", is a false negative. But it has **two conditions, neither
+optional** — the result belongs to **that card**, not to the model (it does not become the
+project's configuration); and **the control arm must get the same budget**. Tuning only the
+experimental arm and comparing it against a default-configured control manufactures an
+"improvement" out of search budget, and afterwards the two arms' records look identical, so the
+record layer cannot see it.
 
-**顺序：先 `/explore` 再 `/train-tune`。** 反过来两头都亏 —— 围着一个即将被删掉的组件调出来
-的超参，组件一删就作废；而一个架构如果是在「手边刚好是什么参数」下判的，那就是在一个没人
-选过的点上判的。第三种形状就是在不倒转顺序的前提下把后半句付掉。
+**Order: `/explore` first, then `/train-tune`.** The reverse loses on both ends — hyperparameters
+tuned around a component you are about to delete are void the moment it goes; and an
+architecture judged at "whatever parameters happened to be lying around" was judged at a point
+nobody chose. The third shape is how the second half of that gets paid for without inverting the
+order.
 
-完整对照表在 `<mlclaw_root>/references/skill-graph.md` -> "`/train-tune` vs `/explore`"。
+The full comparison table is in `<mlclaw_root>/references/skill-graph.md` ->
+"`/train-tune` vs `/explore`".
 
-**它不跑任何东西。** 一条臂是 `stages/<target_stage>/runs/` 里一次**普通的 run**，由
-`/train-run` 或 `/eval-run` 发起，卡上用 `run_id` 引它。这是 `/data-curate` 对转换划的
-同一条边界、`adaptation` 对转换器划的同一条边界，理由也一样：自己跑试验的搜索是第二套
-run 机制，它会跟第一套漂移。
+**It runs nothing.** An arm is an **ordinary run** in `stages/<target_stage>/runs/`, started by
+`/train-run` or `/eval-run`, and the card cites it by `run_id`. This is the same boundary
+`/data-curate` draws around a transform and `adaptation` draws around a converter, for the same
+reason: a search that runs its own trials is a second run mechanism, and it will drift from the
+first.
 
-### 记录在哪
+### Where the record lives
 
 ```
 stages/exploration/
-  config.json      入口、语料、度量脚本、可比性指纹、design_doc 指向哪
-  findings.json    输入 A —— 现象变成的计数。Stage 8 重量的就是它
-  baseline.json    噪声底：一个数 + 它是从哪两个 run 算出来的
-  audit.json       四态审计表 + 成本画像（Stage 1 / 1.5）
-  graph.json       ‼️ 实验图。节点卡 · 七态 · 依赖边 —— 顺序的唯一真相
-  state.json       会过期的东西：常数表 · 定档表 · 已杀清单带复活条件
-stages/<target_stage>/runs/   ← 臂住在这儿，不在 exploration 下
+  config.json      entry points, corpus, metric script, comparability fingerprint, where design_doc points
+  findings.json    Input A — phenomena turned into counts. This is what Stage 8 re-weighs
+  baseline.json    the noise floor: one number plus which two runs it was computed from
+  audit.json       the four-state audit table + the cost profile (Stage 1 / 1.5)
+  graph.json       ‼️ the experiment graph. Node cards · seven states · dependency edges — the single source of truth about order
+  state.json       the things that expire: the constants table · the tiering table · the killed list with revival conditions
+stages/<target_stage>/runs/   ← arms live here, not under exploration
 ```
 
-**`graph.json` 是机器读的那半，`config.json -> design_doc` 指向人读的那半。**
-两者不是副本：`graph.py check` 读前者，人读后者。原版把两者都放在 `model_design.md`
-的一个章节里，而那正是那七条不变量说了「定期扫」却没有人扫的原因。
+**`graph.json` is the half a machine reads; `config.json -> design_doc` points at the half a
+person reads.** They are not copies of each other: `graph.py check` reads the first, a person
+reads the second. The original put both in one section of `model_design.md`, and that is
+precisely why those seven invariants said "scan periodically" while nobody ever scanned.
 
-### 那七条不变量现在有执行者了
+### Those seven invariants now have an executor
 
 ```bash
 python <mlclaw_root>/scripts/explore/graph.py <verb> --project <PROJECT>
 ```
 
-| verb | 干什么 |
+| verb | What it does |
 |---|---|
-| `add` | 一句话想法 → 一张卡（`draft`）。缺字段的卡进不了 ready set |
-| `set` | 补卡 / 改卡。‼️ **已裁决的卡拒绝编辑** —— 结论变了是开新卡引用旧卡 |
-| `ready` | 算 ready set。空集 + 队列非空 = **死锁**，并说清是环还是同一个前置 |
-| `fill` | 结果上卡，**并列出这个结果可能作废了什么**（依赖它的、正文引它的、源自这个 run 的常数） |
-| `close` | 一个裁决，或四种死法之一 |
-| `check` | ‼️ **那七条不变量 + MLClaw 加的两条。报，不修** |
-| `status` | 一屏摘要。⬜🟨🟩 是**现算**的（和 `ready` 同一个函数），存下来的标签落后于推导时另报一行 `state_drift` |
+| `add` | a one-line idea → a card (`draft`). A card missing fields cannot enter the ready set |
+| `set` | complete or amend a card. ‼️ **A closed card refuses edits** — a changed conclusion means a new card citing the old one |
+| `ready` | compute the ready set. Empty set + non-empty queue = **deadlock**, and it says whether that is a cycle or one shared predecessor |
+| `fill` | results onto the card, **plus a list of what this result may have voided** (whatever depends on it, whatever cites it in prose, the constants that came from this run) |
+| `close` | a verdict, or one of the four deaths |
+| `check` | ‼️ **those seven invariants plus MLClaw's two additions. Reports, never repairs** |
+| `status` | a one-screen summary. ⬜🟨🟩 are **computed live** (the same function as `ready`), and a stored label lagging the derivation is reported separately as `state_drift` |
 
-**`check` 的退出码按 CLAUDE.md「Script Integration」：有 critical 就 exit 1 —— 脚本工作了，
-答案是不行。这不是失败，不要回退到手工绕过它。**
+**`check`'s exit code follows CLAUDE.md "Script Integration": a critical finding exits 1 — the
+script worked and the answer is no. That is not a failure, so do not fall back and work around
+it by hand.**
 
-MLClaw 加的两条，是原版靠记忆执行的两条规矩：
+MLClaw's two additions are two rules the original executed from memory:
 
-- **`premise_share` 的 `measured_on` 必须等于本图的 `corpus`。** 引自别处的份额不是弱证据，
-  是关于另一个问题的证据 —— 所以按**没有前提**处理，卡留在 `draft`。这条是原版最贵的一次
-  翻车（预测 47%，本语料实测 4.62%，五条臂已经排在后面），也是 CLAUDE.md
-  「Never compare metrics across different `mode` or non-equivalent `scope`」下探一层：
-  那条管两个数能不能相减，这条管一条提案能不能存在。
-- **每个结果必须带档位。** 没有档位的数会被提拔，而那正是一个假噪声底进入记录的路径。
+- **`premise_share`'s `measured_on` must equal this graph's `corpus`.** A share quoted from
+  elsewhere is not weak evidence; it is evidence about a different question — so it is treated as
+  **having no premise**, and the card stays in `draft`. This is the original's most expensive
+  crash (predicted 47%, measured 4.62% on this corpus, with five arms already queued behind it),
+  and it is CLAUDE.md's *"Never compare metrics across different `mode` or non-equivalent
+  `scope`"* one level down: that rule governs whether two numbers may be subtracted, this one
+  governs whether a proposal may exist.
+- **Every result must carry a tier.** A number with no tier gets promoted, and that is exactly
+  how a false noise floor enters the record.
 
 ### On entry
 
-按 `<mlclaw_root>/references/skill-graph.md` -> "Workflow State Protocol"。Stage = `exploration`。
+Per `<mlclaw_root>/references/skill-graph.md` -> "Workflow State Protocol". Stage = `exploration`.
 
 | | |
 |---|---|
-| **Requires** | `project.json`；code available；**一个已声明的语料**（`datasets/<id>/dataset.json` + 一个冻结快照）——`premise_share` 没有语料就没有意义 |
-| **Suggests** | `/train-run`（开一条臂）· `/eval-run`（测量卡、噪声底）· `/train-tune`（**架构定了之后**再调超参，不是之前）· `/conclude` → `/ara`（收尾） |
-| **Calls** | `/discover`（Stage 4 找论文和代码时）· `/eval-run`（Stage 0 噪声底要两次同权重同口径的测量）· `/train-tune`（**限定范围**地跑在一条臂内部，给移植的组件一个公平操作点 —— 见上节第三种形状，控制组同预算）· `/ask-human`（‼️ 见下） |
+| **Requires** | `project.json`; code available; **a declared corpus** (`datasets/<id>/dataset.json` plus a frozen snapshot) — `premise_share` is meaningless without one |
+| **Suggests** | `/train-run` (open an arm) · `/eval-run` (measurement cards, the noise floor) · `/train-tune` (**after** the architecture is settled, never before) · `/conclude` → `/ara` (wrapping up) |
+| **Calls** | `/discover` (Stage 4, finding the paper and the code) · `/eval-run` (Stage 0's noise floor needs two measurements at the same weights and convention) · `/train-tune` (**bounded**, inside one arm, to give a ported component a fair operating point — the third shape above, with the control arm on the same budget) · `/ask-human` (‼️ see below) |
 
-‼️ **这条流水线有大量只有人能答的问题**（哪个指标是主判据、这个 delta 值不值得上、
-盲评算不算过）。按 CLAUDE.md「File the question; do not block on it」：**不要停在第 3 问
-等人**。做完所有不依赖那个答案的事，`ask.py open` 把问题落成记录，在
-`config.json -> open_asks` 里标出哪个字段是开的，然后继续。一个停住的访谈和一份带三个
-未决问题的完整记录，对接手的人来说完全是两回事。
+‼️ **This pipeline is full of questions only a person can answer** (which metric is primary,
+whether this delta is worth acting on, whether the blind review passed). Per CLAUDE.md's
+*"File the question; do not block on it"*: **do not stop at question 3 waiting for somebody.**
+Do everything that does not depend on that answer, turn the question into a record with
+`ask.py open`, mark which field is open in `config.json -> open_asks`, and carry on. A halted
+interview and a complete record with three open questions are entirely different things to
+whoever picks this up.
 
-‼️ **正文里每一处「本 repo」指的是这条流水线诞生的那个项目**（`e2e_3D_detection`），
-不是当前项目，也不是 MLClaw。它们是**实测记录**，不是配置 —— 每一条规矩后面挂的那次
-翻车就是它存在的理由，所以数字原样保留。**照抄那些数字到你的项目里就是假数据**；
-要抄的是规矩。
+‼️ **Every "this repo" below means the project this pipeline was born in**
+(`e2e_3D_detection`) — not the current project, and not MLClaw. They are **measured records**,
+not configuration: the crash behind each rule is the reason that rule exists, which is why the
+numbers are kept verbatim. **Copying those numbers into your project makes them fake data**;
+what you copy is the rule.
 
-### 「现在有什么新的结论了吗？」
+### "So what new conclusions are there?"
 
 ```bash
 python <mlclaw_root>/scripts/explore/graph.py new --project <P> [--since 12h]
 ```
 
-‼️ **这个动词存在的理由不是方便，是它挡住一次特定的滑坡。** 这个问题在原版那一轮里被问了
-大约十五次，而它恰好是最诱人把 🟪 当 ✅ 报的那一刻：一条臂跑完了，数在卡上，
-脱口而出的句子就是「e13h 回来了，92.15」—— 那是把**结果**当成了**结论**。
-而很多时候裁决确实还下不了，因为它在等另一条臂。
+‼️ **This verb exists not for convenience but to block one specific slide.** The question was
+asked roughly fifteen times over the original round, and it is exactly the moment when it is
+most tempting to report a 🟪 as a ✅: an arm finished, the numbers are on the card, and the
+sentence that comes out is "e13h came back, 92.15" — which is treating a **result** as a
+**conclusion**. Much of the time the verdict genuinely cannot be reached yet, because it is
+waiting on another arm.
 
-所以答案分成两个列表，第二个带标注：`conclusions`（真裁决了的）和
-`results_without_a_verdict`（有数、没结论）。**报后者时要说它在等什么。**
-窗口里什么都没有时它明说「这是个真答案，别去找东西来报」。
+So the answer comes in two lists, the second annotated: `conclusions` (genuinely adjudicated)
+and `results_without_a_verdict` (numbers in, no conclusion). **When reporting the second, say
+what it is waiting for.** When the window holds nothing it says so explicitly: "this is a real
+answer; do not go looking for something to report."
 
-## 一轮长什么样
+## What one round looks like
 
-每步的**产出物是硬的**，没有它这一步就没做完：
+**Every step's artifact is hard** — without it, that step is not done:
 
-| 步 | 产出物 |
+| Step | Artifact |
 |---|---|
-| 0 | 噪声底一个数 |
-| 1 | 四态审计表（+1.5 成本画像） |
-| 2 | 现成 flag 给候选技巧的定价 |
-| 3 | **plan 落地**：设计文档里的 ablation 章 —— 提案表（每条一个预注册指标 **+ 一个护栏指标 + 前提及其本语料份额**）。‼️ **这一章从这里开始存在，后面每一步只 update 它，不新写** |
-| 3.5 | 每条一个档位 T0–T4 |
-| 4 | `repo@sha` + 关键行号 |
-| 4.5 | 接口对照表（含「初判」列） |
-| 5 | flag 默认关的 diff，**每个 hunk 有 `ref:`** |
-| 6 | 三个同向的数 + 档位标签 |
-| 6.5 | 人的盲评比例（双通道核对过） |
-| 7 | **update** 第 3 步那一章（不新开），补齐已杀清单和没做的实验 |
-| 8 | `findings.json` 的 `value` 被重量 + P 更新 + 技术债过一遍 |
-| 每个 run | **run card**：跑前 declare（含代码快照），跑后 attach，比之前 check |
+| 0 | one number: the noise floor |
+| 1 | the four-state audit table (+1.5, the cost profile) |
+| 2 | a price for each candidate technique, from existing flags |
+| 3 | **the plan lands**: the ablation chapter in the design document — the proposal table (one pre-registered metric **plus one guardrail metric plus a premise and its share on this corpus** per row). ‼️ **That chapter begins to exist HERE, and every later step only updates it, never writes a new one** |
+| 3.5 | one tier per row, T0–T4 |
+| 4 | `repo@sha` plus the key line numbers |
+| 4.5 | the interface comparison table (with a "first judgement" column) |
+| 5 | a diff whose flag defaults to off, **with a `ref:` on every hunk** |
+| 6 | three numbers moving the same way, plus a tier label |
+| 6.5 | the human blind-review ratio (both channels reconciled) |
+| 7 | **update** step 3's chapter (do not open a new one); complete the killed list and the experiments not run |
+| 8 | `findings.json`'s `value` re-weighed, P updated, technical debt walked once |
+| every run | **a run card**: declared before the run (including the code snapshot), attached after, checked against earlier ones |
 
-## 从哪儿进来（用户基本不会从头开始）
+## Where you come in (users essentially never start from scratch)
 
-**允许从任何 Stage 进，但有几步无论如何要回补** —— 不回补的后果写在最后一列：
+**Entry at any stage is allowed, but a few steps must be filled in afterwards regardless** — the
+consequence of not doing so is in the last column:
 
-| 用户说 | 从哪进 | 必须回补 | 不回补会怎样 |
+| The user says | Enter at | Must be filled in | What happens if it is not |
 |---|---|---|---|
-| 甩一张截图 / "感觉这批不对" | 输入 A | —（这就是起点） | — |
-| "架构是不是太原始 / 缺什么技巧" | Stage 1 | 输入 A 的计数 | 照着一个不存在的病抄技巧 |
-| "要不要上 X" | Stage 1 先查 X 在不在 → Stage 3.5 定档 | 四态表 + 一条 FINDINGS | 移植一个已经在代码里的东西 |
-| "把 X 论文的做法移植进来" | Stage 4 | 四态表 + Stage 3.5 的 V/U | 在幻觉风险区里裸奔 |
-| "跑完了，这个提升是真的吗" | Stage 6 + 辩论 ① | **Stage 0 噪声底** | 把噪声当结果 |
-| "搬完了，搬对了吗" | 辩论 ⑤ | **Stage 4.5 接口对照表** | 没有靶子，忠实度辩不出来 |
+| throws a screenshot / "this batch feels wrong" | Input A | — (this IS the start) | — |
+| "is the architecture too primitive / what technique are we missing" | Stage 1 | Input A's counts | copying techniques for a disease that does not exist |
+| "should we adopt X" | Stage 1 first: is X already here → Stage 3.5 to tier it | the four-state table + one FINDINGS entry | porting something already in the code |
+| "port the method from paper X" | Stage 4 | the four-state table + Stage 3.5's V/U | running naked in the hallucination-risk zone |
+| "it finished — is this improvement real" | Stage 6 + debate ① | **Stage 0's noise floor** | mistaking noise for a result |
+| "the port is done — did we do it right" | debate ⑤ | **Stage 4.5's interface comparison table** | no target, so fidelity cannot be argued |
 
-回补不等于重做全套：回补的是**那一张表 / 那一个数**，通常十几分钟。
+Filling in is not redoing everything: it is **that one table or that one number**, usually
+fifteen minutes.
 
-‼️ **噪声底是这里唯一的例外，而接手的人恰恰最容易撞上它。** 底是同权重同口径两次测量的差，
-补它要两次 `/eval-run` —— 要机器、要那个 ckpt 还在。接手一个已有项目时，这两样常常都没有：
-机器释放了，盘停了，当年那条流水线根本不写 `run.json`，所以 `runs` 里填不出任何东西。
-**这种情况不许编两个 run id 去糊弄 `check`**（那正是记录层曾经唯一放行的写法）。
-写 `baseline.json -> origin: "external"`，把数和它的 `sources` 照常写全，
-再用 `unchecked` 说清这儿为什么没法重测。它是个 `claim`：**照常挡 T2，永远不撑 T3**。
-等哪天 ckpt 回来了，两次 eval 把它换成 `verified` 的。
+‼️ **The noise floor is the one exception here, and it is exactly what somebody taking over runs
+into.** The floor is the difference between two measurements at the same weights and the same
+convention, so filling it in means two `/eval-run`s — which needs a machine, and needs that
+checkpoint to still exist. Taking over an existing project, neither is usually true: the machine
+was released, the disk is stopped, that pipeline never wrote `run.json` at all, so nothing can be
+put in `runs`. **In that case, do not invent two run ids to fool `check`** (which is precisely
+the one form the record layer used to let through). Write
+`baseline.json -> origin: "external"`, fill in the number and its `sources` as normal, and use
+`unchecked` to state why it cannot be re-measured here. It is a `claim`: **it gates T2 as normal
+and never supports T3.** The day the checkpoint comes back, two evals replace it with a
+`verified` one.
 
 ---
 
-## 两个输入
+## Two inputs
 
-用户会给你的东西是不定的。这里定死接口，不定死来源。
+What a user gives you is not fixed. What is fixed here is the interface, not the source.
 
-### 输入 A — 结果（多源，可插拔）
+### Input A — results (multi-source, pluggable)
 
-来源允许是：**人眼**（截图、"感觉这批框不对"）、**agent 分析**（误差分解脚本、指标扫描）、
-**产线 / 部署回流**（现场抱怨、抓取失败率）、**训练日志 / 指标**（loss 曲线、AP、tfevents）。
+Permitted sources: **a person's eye** (a screenshot, "these boxes feel wrong"), **agent analysis**
+(error-decomposition scripts, metric sweeps), **production / deployment feedback** (field
+complaints, grasp failure rates), **training logs / metrics** (loss curves, AP, tfevents).
 
-**所有来源一律先落到同一个 `stages/exploration/findings.json`**（模板在 `lifecycle/exploration/findings.json`）。
-用 JSON 而不是表格，是为了**换权重之后能一条命令用同一把尺子重量**，然后 diff：
+**Every source lands first in the same `stages/exploration/findings.json`** (template at
+`lifecycle/exploration/findings.json`). JSON rather than a table, so that **after a weight change
+one command re-measures with the same ruler**, and the two can be diffed:
 
 ```json
 [{
   "id": "F1",
   "source": "human|agent|production|metrics",
-  "claim": "一个错框占了对框的位置，导致对框出不来",
+  "claim": "a wrong box occupies the right box's place, so the right box never comes out",
   "measure": {"script": "scratchpad/miss_mechanism.py", "corpus": "ep49_0813/rig",
               "n": 5495, "gate": "IoU 0.2-0.5",
               "value": 0.488, "unit": "share", "worse": "up"},
   "status": "live|killed|blocked-on-data",
-  "killed_by": "份额太小|机理不对症|实现忠实但无效|阻塞在数据",
-  "revive_if": "换了度量 / 换了数据分布 / 依赖的提案落地了",
-  "note": "56.9% 的错框跨在 >=2 个标签上"
+  "killed_by": "share_too_small|wrong_mechanism|faithful_but_inert|blocked_on_data",
+  "revive_if": "the metric changed / the data distribution changed / the proposal it depends on landed",
+  "note": "56.9% of the wrong boxes straddle >=2 labels"
 }]
 ```
 
-‼️ **`value` / `unit` / `worse` 三个字段必须是可比标量**，不许把统计塞进自由 dict ——
-否则"换权重后一条命令重量再 diff"根本做不到，这个接口就退化成了一张手抄表。
-`worse: "up"` 是说这个量变大是更糟，diff 的时候才知道方向。要给人看再渲染成表，别手维护两份。
+‼️ **`value` / `unit` / `worse` must be comparable scalars**; do not stuff statistics into a free
+dict — otherwise "re-measure with one command after a weight change and diff it" is impossible,
+and this interface degenerates into a hand-copied table. `worse: "up"` says that a larger value
+is worse, which is how the diff knows the direction. Render it as a table for people to read; do
+not maintain two copies by hand.
 
-- **人眼输入是假设发生器，不是证据。** 一张截图只能提出「一个错框占了对框的位置」这个假设；
-  它要变成「48.8% 的漏检标签上压着一个 IoU 0.2–0.5 的错框，56.9% 的错框跨在 ≥2 个标签上」
-  才能进下一步。没有分母的现象不许进提案表。
-- **量化必须落在一个语料上，不是几帧。** 一堆奇怪的样本能单独把尾巴拉起来；
-  报 p50/p90/p95 + n，而不是「我看了 9 帧」。
-- ‼️ **而且必须落在「这一轮要训练/评估的那个语料」上。** 这条是 2026-08-14 用十三台机器买的：
-  F1 的机理是 `negatives = nqueries − repeat_num·G`，立项时写「**47% 的产线帧** G ≥ 52」，
-  据此起了五条臂。在**这一轮实际用的语料**上实测：`G ≥ 52` 的帧占 **4.62%**，
-  `G` 的 **max 是 56**，`match_neg_zero_frames = 0.0000`。**差一个数量级，病根本不存在。**
-  结果侧同向：一对一在第一个 warmup 后的干净点上 AP50 **5.57**，反而低于基线的 **7.88**。
-  份额是**语料的属性，不是现象的属性** —— `measure.corpus` 那个字段存在就是为了这个，
-  而我填了它却没核它和训练语料是不是同一个。
-- ‼️ **机械量要在起机器之前读。** 上面那三个数里有两个（`match_neg_frac`、
-  `match_neg_zero_frames`）和 G 的分布一样，**不需要训练好的模型**：过一遍 loader、
-  过一遍 matcher 就有。它们是零成本的，而这一次它们能省下五条臂。
-  **凡是「不需要权重就能读」的预注册指标，先读，再决定花不花钱。**
-- **`measure.script` 是这个接口的核心**，不是装饰：下一轮换了权重要用**同一把尺子**重量，
-  不能凭印象说"感觉好点了"。`corpus` 也要记，否则换了取帧方式你会以为是模型变了。
-- **`status: killed` 比 live 更值钱。** 被数据否掉的现象要留在文件里，别下周再提一次。
+- **Human input is a hypothesis generator, not evidence.** A screenshot can only propose the
+  hypothesis "a wrong box occupies the right box's place"; it has to become "48.8% of missed
+  labels have a wrong box at IoU 0.2–0.5 sitting on them, and 56.9% of the wrong boxes straddle
+  ≥2 labels" before the next step. A phenomenon with no denominator may not enter the proposal
+  table.
+- **Quantification must land on a corpus, not a few frames.** A handful of odd samples can pull
+  the tail up by themselves; report p50/p90/p95 plus n, not "I looked at 9 frames".
+- ‼️ **And it must land on THE corpus this round will train or evaluate on.** This rule was
+  bought with thirteen machines on 2026-08-14: F1's mechanism is
+  `negatives = nqueries − repeat_num·G`, and the justification said "**47% of production frames**
+  have G ≥ 52", on which five arms were opened. Measured on **the corpus this round actually
+  used**: frames with `G ≥ 52` are **4.62%**, `G`'s **max is 56**, and
+  `match_neg_zero_frames = 0.0000`. **An order of magnitude out; the disease does not exist.**
+  The result side agreed: one-to-one at the first clean point after warmup scored AP50 **5.57**,
+  below the baseline's **7.88**. A share is **a property of the corpus, not of the phenomenon** —
+  the `measure.corpus` field exists for exactly this, and I filled it in without checking it
+  against the training corpus.
+- ‼️ **Mechanical quantities must be read before starting a machine.** Two of the three numbers
+  above (`match_neg_frac`, `match_neg_zero_frames`), like G's distribution, **need no trained
+  model**: one pass through the loader and one through the matcher produce them. They are
+  zero-cost, and this time they would have saved five arms. **Any pre-registered metric readable
+  without weights: read it first, then decide whether to spend money.**
+- **`measure.script` is the core of this interface**, not decoration: next round, after a weight
+  change, the **same ruler** must re-measure it — "feels better" is not available. Record
+  `corpus` too, or a change of frame sampling will look like a change in the model.
+- **`status: killed` is worth more than live.** A phenomenon the data refuted stays in the file,
+  so nobody proposes it again next week.
 
-### 输入 B — 任务
+### Input B — the task
 
-同一个失败在不同任务里值不同的分。写清楚：
+The same failure is worth different amounts on different tasks. Write down:
 
-- 任务是什么、下游怎么用这个输出（"吸盘落在近表面上" ≠ "IoU 高"）；
-- **哪个自由度的精度真的重要**，哪个是抄目录抄来的（我们这里：面精度 ±12 mm 重要；
-  深度 25.3% 的标签本身就有 74–210 mm 的歧义，再准也没用）；
-- 部署约束：延迟、显存、算子支持（能不能上 deformable attention 有时是 TensorRT 说了算）；
-- **数据里还不存在的工况**（比如"一整面墙"我们一帧都没有，最贴的只有 69% 正对）。
+- what the task is, and how downstream consumes this output ("the suction cup lands on the near
+  surface" ≠ "IoU is high");
+- **which degree of freedom's precision actually matters**, and which was copied from a
+  catalogue (here: face precision at ±12 mm matters; depth labels are themselves ambiguous by
+  74–210 mm on 25.3% of boxes, so more precision there buys nothing);
+- deployment constraints: latency, memory, operator support (whether deformable attention is
+  available is sometimes TensorRT's decision);
+- **operating conditions absent from the data** (we have not one frame of "a whole wall"; the
+  closest is 69% face-on).
 
-输入 B 允许单独驱动提案 —— 见下面「任务驱动提案」。
-
----
-
-## Stage 0 — 先量噪声底
-
-**在相信任何 delta 之前，用完全相同的权重、完全相同的口径，跑两次。**
-
-这里实测：同权重同口径两次 91.66 / 91.41，**噪声底 0.25 AP**。任何小于噪声底的改进不是结果。
-我在这条上翻过车：先报了 0.06，然后据此写了一个 "+0.30 有效" 的结论，全部撤回。
-
-‼️ **这个数写进 `baseline.json` 时要配一把尺子，不是手算。** 底是两次测量的**差**，
-没有任何日志会打印它 —— 所以别把 `sources` 写成两条日志行（谁都不含那个差），
-更别编一句 `"31.09 - 28.16 = 2.93"` 当 quote（那正是 grounding 检查存在的理由）。
-写一个小脚本 `stages/exploration/scripts/<name>.py`，读两个 run 的 metric 行、打印所有档位的差，
-把**它的 stdout** 当 quote，`kind: "derived"`，并带上 `command`；两条端点日志照常 `kind: "result"` 并列。
-这样换了权重是**重跑尺子**，不是手改 JSON。细则见 `baseline.json -> _comment_value`。
-
-‼️ **底测不了的时候，`null` 不是唯一诚实的答案。** 底有四态，写在 `origin` 上：
-本项目量的（`runs` 两条以上，`check` 会把它们的 `run.json` 读回来核 `mode`/`scope`）是
-`verified`；进 MLClaw 之前量的、或者在一台已经释放的机器上量的，写 `origin: "external"` +
-`unchecked`，是 `claim`；声称是本项目的、但 run 记录读不出来，是 `unverifiable`；
-剩下的才是 `not_measured`。**后三种里，只有最后一种会把全轮 T2/T3 打回 `[T1 趋势]`。**
-`claim` 和 `unverifiable` 挡 T2、不撑 T3 —— T3 是大跑前最后一道闸，撑不住一个本流水线
-没自己量过的底。四态的理由见 `references/experiment-graph.md -> §4`。
-
-顺带两条同源的规矩：
-- **跨源对比必须同口径。** 两边过滤门限不同源时，量到的是门限差，不是模型差。
-- **换了度量/渲染器/取帧方式，旧曲线就作废。** 要和昨天比，先把日环比拆成
-  （渲染规则变化 / 取帧变化 / 模型变化）三份，否则你会像我一样编出一整套"过拟合"故事。
+Input B may drive a proposal on its own — see "task-driven proposals" below.
 
 ---
 
-## Stage 1 — 先审自己的代码，再读任何论文
+## Stage 0 — measure the noise floor first
 
-**大多数"没上的技巧"其实是"上了但被削弱了"。** 这一步的产出是四态表，不是二态：
+**Before believing any delta, run twice at exactly the same weights and exactly the same
+convention.**
 
-| 状态 | 含义 | 举证要求 |
+Measured here: 91.66 / 91.41 at the same weights and convention, a **noise floor of 0.25 AP**.
+Any improvement smaller than the floor is not a result. I crashed on this one: I reported 0.06
+first, wrote a "+0.30 is real" conclusion on top of it, and retracted all of it.
+
+‼️ **When this number goes into `baseline.json`, it needs a ruler, not mental arithmetic.** The
+floor is the **difference** between two measurements, and no log prints it — so do not write
+`sources` as two log lines (neither contains the difference), and certainly do not invent
+`"31.09 - 28.16 = 2.93"` as a quote (which is precisely why the grounding check exists). Write a
+small script at `stages/exploration/scripts/<name>.py` that reads both runs' metric lines and
+prints the difference at every tier, use **its stdout** as the quote with `kind: "derived"` and a
+`command` alongside; the two endpoint logs sit beside it as `kind: "result"` as usual. Then a
+weight change means **re-running the ruler**, not hand-editing JSON. Details in
+`baseline.json -> _comment_value`.
+
+‼️ **When the floor cannot be measured, `null` is not the only honest answer.** The floor has
+four states, carried on `origin`: measured by this project (two or more `runs`, whose `run.json`
+`check` reads back to verify `mode`/`scope`) is `verified`; measured before MLClaw, or on a
+machine already released, is `origin: "external"` + `unchecked`, and is a `claim`; claimed to be
+this project's but with unreadable run records is `unverifiable`; only what is left is
+`not_measured`. **Of the last three, only `not_measured` knocks the whole round's T2/T3 back to
+`[T1 trend]`.** `claim` and `unverifiable` gate T2 and do not support T3 — T3 is the last gate
+before a large run, and it cannot rest on a floor this pipeline never measured itself. The
+reasoning behind the four states is in `references/experiment-graph.md -> §4`.
+
+Two rules from the same root, while we are here:
+- **Cross-source comparison requires one convention.** When two sides' filtering thresholds come
+  from different places, what you measured is the threshold difference, not the model difference.
+- **Change the metric, the renderer or the frame sampling and the old curves are void.** To
+  compare against yesterday, first split the day-over-day change into three parts (renderer
+  change / frame-sampling change / model change), or you will invent an entire "overfitting"
+  story, as I did.
+
+---
+
+## Stage 1 — audit your own code before reading any paper
+
+**Most "techniques we don't have" are in fact "techniques we have, weakened".** This step
+produces a four-state table, not a two-state one:
+
+| State | Meaning | Evidence required |
 |---|---|---|
-| ✅ 有 | 完整实现 | 指到函数名 + 调用点 |
-| ⚠️ 有但被削弱 | 实现在，但某一行把它废了 | **指出那一行** |
-| ❌ 无 | 真没有 | grep 过至少两种命名 |
-| 🅾️ 无，但是有意取舍 | 作者拿这个预算换了别的东西 | 说出换成了什么 |
+| ✅ present | fully implemented | point at the function and the call site |
+| ⚠️ present but weakened | the implementation is there, and one line kills it | **name that line** |
+| ❌ absent | genuinely not there | grepped under at least two namings |
+| 🅾️ absent, but deliberately | the authors spent that budget on something else | say what they spent it on |
 
-实测收益：本轮审下来，「逐层迭代精化」是 ✅，但层间 reference 全是 `.clone().detach()`
-→ 实际是 look forward **once**，DINO 的 look-forward-twice 才是 ❌；
-「一对多正样本」是 ✅ 但**放在主分支**而不是 aux 分支（这才是病根）。
-如果跳过这一步直接列"缺什么"，会把这三条都写成 ❌，然后去移植已经存在的东西。
+Measured payoff: in this round's audit, "layer-by-layer iterative refinement" is ✅, but the
+inter-layer references are all `.clone().detach()` → so it is actually look-forward **once**, and
+DINO's look-forward-twice is the ❌; "one-to-many positives" is ✅ but **sits on the main branch**
+rather than an auxiliary one (which is the actual disease). Skipping this step and listing "what
+is missing" would have written all three as ❌, and sent us porting things that already exist.
 
-🅾️ 这一态很重要：一篇 3D 论文没上 deformable attention 可能不是没想到，
-而是把预算花在了它自己的贡献上（这里是 3DV-RPE）。**先问"作者为什么会跳过它"，
-再决定要不要抄回来。**
+🅾️ matters: a 3D paper not using deformable attention may not have overlooked it — it may have
+spent the budget on its own contribution (here, 3DV-RPE). **Ask why the authors would skip it
+before deciding to copy it back.**
 
-### Stage 1.5 — 顺手做一次成本画像
+### Stage 1.5 — take a cost profile while you are here
 
-**被成本逼出来的超参，可能就是精度 bug 的根。** 这里的链条：
-3DV-RPE 的开销 = `nqueries × preenc_npoints`（`grid_sample` 反向的 atomicAdd），
-所以脚本把 `nqueries` 从上游默认 1024 钉到 256 → prod 47% 的帧正样本占满 256 个 query
-→ 没有负样本 → objectness 饱和在 0.999 → NMS 贪心排序等于抛硬币。
+**A hyperparameter forced by cost may be the root of an accuracy bug.** The chain here:
+3DV-RPE's cost = `nqueries × preenc_npoints` (the atomicAdd in `grid_sample`'s backward), so the
+script pinned `nqueries` from the upstream default of 1024 down to 256 → in 47% of production
+frames the positives filled all 256 queries → no negatives → objectness saturated at 0.999 →
+NMS's greedy ordering became a coin flip.
 
-**一个精度失败的根因在成本表里。** 认这个签名：报 100% 利用率但功耗只有 154 W/700 W、
-TF32 完全无效（0.93×）、batch 8→48 吞吐不动 —— 全部串行在一个 kernel 上。
-
----
-
-## Stage 2 — 先跑不用改代码的实验
-
-‼️ **这一步和 Stage 3 是一个小环，不是前后脚：粗提案（几条候选技巧）→ Stage 2 定价 → 提案表定稿。**
-所以到这儿手上应该已经有一份未定价的候选清单了；如果没有，先跳到 Stage 3 列个草稿再回来。
-
-port 之前，grep argparse 找**已经存在的开关**，用它们给提案定价。
-
-这里现成的：`--test_no_nms`（"对的框到底是没提出来，还是被压掉了"）、
-`--nms_iou`（抬门限）、`--repeat_num`（5→2→1，可 warm start）、`--nqueries`。
-成本 = 一次 eval，收益 = 知道 Stage 3 里那条提案到底值几分。
-
-**不做这一步，你会花一周移植一个只值 0.2 AP 的东西。**
+**An accuracy failure's root cause was in the cost table.** Recognise this signature: 100%
+reported utilisation at only 154 W of 700 W, TF32 entirely ineffective (0.93×), and throughput
+unchanged from batch 8 to 48 — everything serialised on one kernel.
 
 ---
 
-## Stage 3 — 提案表 ‼️ 这一步的产出是一份**落到文件里的 plan**，不是脑子里的排序
+## Stage 2 — run the experiments that need no code change first
 
-**这一章从这里开始存在**。两半：机器读的那半是 `stages/exploration/graph.json`
-（`graph.py add` 建卡），人读的那半是 `config.json -> design_doc` 指向的设计文档。
-‼️ 两者不是副本 —— `check` 只读得懂前者，而**拦住一条提案**这件事发生在人读后者的时候。
-Stage 3.5 给它加档位、Stage 5 加实现状态、Stage 6 填结果、Stage 8 填裁决 ——
-**全部是往同一张表里填格子，不是每步新开一节**。
+‼️ **This step and Stage 3 form a small loop rather than a sequence: rough proposals (a few
+candidate techniques) → Stage 2 prices them → the proposal table is finalised.** So by now you
+should already hold an unpriced candidate list; if not, jump to Stage 3, draft one, and come back.
 
-理由是这条流水线自己的伤：ablation 章如果等到跑完才写，它记录的就只是**已经发生的事**；
-而它最值钱的用途是**在起跑前拦住一条提案**。拦不住的代价见规则 2.5。
+Before porting, grep argparse for **switches that already exist**, and use them to price the
+proposals.
 
-### ‼️ 这一章是**用户维护的执行队列**，不是 agent 的记录本
+Available here: `--test_no_nms` ("was the right box never proposed, or proposed and suppressed"),
+`--nms_iou` (raise the threshold), `--repeat_num` (5→2→1, warm-startable), and `--nqueries`. Cost
+= one eval; benefit = knowing what that Stage 3 proposal is actually worth.
 
-这是它的常态工作模式，不是特例：**用户随时往里加条目**（通常只有一句话，例如
-「SKU 之间的 cross attention 有没有做」），**agent 按顺序往下做**。所以：
+**Skip this and you will spend a week porting something worth 0.2 AP.**
 
-| agent 的三件事 | 说明 |
+---
+
+## Stage 3 — the proposal table ‼️ this step's artifact is a plan IN A FILE, not a ranking in somebody's head
+
+**This chapter begins to exist here.** Two halves: the machine-readable half is
+`stages/exploration/graph.json` (`graph.py add` creates cards), and the human-readable half is
+the design document that `config.json -> design_doc` points at. ‼️ They are not copies — `check`
+can only read the first, while **stopping a proposal** happens when a person reads the second.
+Stage 3.5 adds tiers, Stage 5 adds implementation status, Stage 6 fills in results, Stage 8 fills
+in verdicts — **all of it filling cells in the same table, never opening a new section per step.**
+
+The reason is this pipeline's own injury: an ablation chapter written only after the runs finish
+records **what already happened**, whereas its most valuable use is **stopping a proposal before
+it starts**. The cost of not stopping one is rule 2.5.
+
+### ‼️ This chapter is a queue MAINTAINED BY THE USER, not the agent's notebook
+
+This is its normal mode of operation, not an exception: **the user adds entries at any time**
+(usually one sentence, e.g. "has anyone done cross attention between SKUs"), and **the agent
+works down the list in order**. So:
+
+| The agent's three jobs | Notes |
 |---|---|
-| **1. 补卡** | 把一句话想法补成完整提案卡。‼️ **缺必填字段的条目不许开跑** |
-| **2. 按队列顺序执行** | 一条做完回填再动下一条。顺序由用户定，但 agent 要主动标出「前置未满足」 |
-| **3. 回填** | `graph.py fill` —— 结果上卡，**并读它返回的 `must_review`**：依赖这张卡的、正文引它的、源自这个 run 的常数。‼️ 那份清单是候选，不是判决；判断是你的。改了常数就同步 `state.json` |
+| **1. Complete the card** | turn a one-line idea into a full proposal card. ‼️ **An entry missing a required field may not start** |
+| **2. Execute in queue order** | finish one and fill it back before moving on. The order is the user's, but the agent must actively flag "predecessor unmet" |
+| **3. Fill back** | `graph.py fill` — results onto the card, **and read the `must_review` it returns**: whatever depends on this card, whatever cites it in prose, the constants that came from this run. ‼️ That list is candidates, not a verdict; the judgement is yours. If a constant changed, sync `state.json` |
 
-**章首必须有一张队列表**（`# | 条目 | 类型 | 父节点 | 主判据 | 状态 | 卡`），
-它是**唯一的顺序真相** —— 改顺序改这张表，不要改小节编号（编号会被交叉引用）。
-状态词：`待补卡` → `待 oracle / 待前置` → `就绪` → `在跑` → `已回填` → `已杀`。
+**The chapter must open with a queue table** (`# | entry | kind | parent | primary criterion |
+state | card`), and it is the **single source of truth about order** — change the order by
+changing that table, never by changing section numbers (those are cross-referenced).
+State words: `draft` → `awaiting oracle / awaiting predecessor` → `ready` → `running` →
+`filled` → `killed`.
 
-**必填字段**（缺一不可）：`前提` · `前提在本语料的份额`（规则 2.5）· `主判据 + 预测方向` ·
-`护栏` · `父节点（单 key delta）` · **`依赖：[条目号 + 它挡的是什么]`**（见下 —— 挡开跑 / 挡读数 / 不挡）·
-`oracle 上限` · `什么结果算杀掉它`（规则 6）。
+**Required fields** (all of them): `premise` · `the premise's share on this corpus` (rule 2.5) ·
+`primary criterion + predicted direction` · `guardrail` · `parent (single-key delta)` ·
+**`depends_on: [entry id + what it blocks]`** (see below — blocks launching / blocks reading /
+blocks nothing) · `oracle ceiling` · `what result counts as killing it` (rule 6).
 
-### ‼️ 队列其实是一张**依赖图** —— 每次开工先算 ready set，并行跑
+### ‼️ The queue is really a DEPENDENCY GRAPH — compute the ready set first and run in parallel
 
-线性队列会把**本来能同时跑的东西做成串行**，这是纯浪费。所以每张卡多一个字段
-`依赖：[条目号]`，开工时的第一个动作是：**算出所有依赖已满足的条目（ready set），
-在容量允许的范围内全部并行开**。
+A linear queue **serialises things that could have run at once**, which is pure waste. So each
+card carries a `depends_on: [entry ids]` field, and the first action of any working session is:
+**compute every entry whose dependencies are met (the ready set) and open all of them in parallel,
+within capacity.**
 
-#### ‼️ 一条边先回答「它挡的是什么」，不是「它在不在」
+#### ‼️ An edge answers "what does it block" before "does it exist"
 
-**这是本节最贵的一行。** 原来这里只有真 / 假两栏，于是每条**真**依赖都自动变成串行 ——
-而真依赖里有一半根本不是关于顺序的。三个答案，写法和后果都不同：
+**This is the most expensive line in this section.** There used to be only true and false here,
+so every **true** dependency automatically became serial — and half of the true ones were never
+about ordering at all. Three answers, written differently and with different consequences:
 
-| 它挡的 | 怎么写 | 什么时候能跑 | 什么时候能裁决 |
+| What it blocks | How to write it | When it can run | When it can be adjudicated |
 |---|---|---|---|
-| **开跑** | `"N06"`（裸 id 就是这个）或 `{"id":"N06","blocks":"launch"}` | N06 结案之后 | 之后 |
-| **读数** | `{"id":"N06","blocks":"reading"}` | ‼️ **现在** | 现在也能，裁决自动盖上 `conditional_on` |
-| 什么都不挡 | **根本不写这条边** | 现在 | 现在 |
+| **launching** | `"N06"` (a bare id means this) or `{"id":"N06","blocks":"launch"}` | after N06 closes | after |
+| **reading** | `{"id":"N06","blocks":"reading"}` | ‼️ **now** | now as well; the verdict is automatically stamped `conditional_on` |
+| nothing | **do not write the edge at all** | now | now |
 
-**判据一句话：我要的是它的「结论」，还是只要它的一个值 / 一份产物 / 一行代码？**
-只有前者是 `launch`。‼️ **只要一个参数的，那不是依赖，是参数** —— 参数可以先假定、
-可以并行、可以事后代回；结论不能。
+**The test in one sentence: do I need its CONCLUSION, or only one value / one artifact / one line
+of code from it?** Only the former is `launch`. ‼️ **Needing one parameter is not a dependency,
+it is a parameter** — a parameter can be assumed, parallelised, and substituted back afterwards;
+a conclusion cannot.
 
-‼️ 「先跑不等于先读」原来写在下面噪声底那一条里，读起来像那一个数的豁免。**它是通则**：
-这张图存在的目的是管**读**的顺序，跑的顺序只是它的副产品。一个「等 A 出结论再开 B」的
-默认姿势，代价要按创新的条数乘以每条的墙钟时间算 —— 而它换来的东西，多数时候事后减一下
-就有了。
+‼️ "Running first is not reading first" used to be written inside the noise-floor rule below,
+which read like an exemption for that one number. **It is the general rule**: this graph exists
+to govern the order of **reading**; the order of running is only a by-product. A default posture
+of "wait for A's conclusion before opening B" costs the number of innovations times each one's
+wall clock — and what it buys is, most of the time, a subtraction you could have done afterwards.
 
-**`launch` 边，只有这几种：**
+**`launch` edges are only these:**
 
-| 依赖 | 为什么真的挡开跑 |
+| Dependency | Why it really does block launching |
 |---|---|
-| **前置测量 → 臂** | 规则 2.5 / 2.6：前提份额或 oracle 上限没出来，臂**不许**开 |
-| **父节点 → 子臂** | 单 key delta 要父节点的 ckpt **物理存在** —— 要的是那个 ckpt，不是父节点的裁决 |
-| **定形测量 → 造代码** | 某个测量决定"这东西该接在哪儿"时，不出结果就写不出 flag |
-| **忠实移植的代码 → 自创偏离** | 偏离是在那份代码上改出来的，没那份代码无从改起 |
+| **a predecessor measurement → an arm** | rules 2.5 / 2.6: without the premise share or the oracle ceiling, the arm **may not** open |
+| **a parent → a child arm** | a single-key delta needs the parent's checkpoint to **physically exist** — what is needed is that checkpoint, not the parent's verdict |
+| **a shaping measurement → writing the code** | when a measurement decides "where this thing attaches", the flag cannot be written until it returns |
+| **a faithful port → a self-invented deviation** | the deviation is written on top of that code; without it there is nothing to modify |
 
-‼️ **最后一行原来写的是「忠实移植 → 自创偏离」，理由是「偏离项的 delta 是相对忠实版量的，
-忠实版没跑就没有基线」——那个理由说的是 `reading`，却被当成 `launch` 用了。** 两条臂完全
-可以同时跑，delta 事后减。**这张「真依赖」表里躺过一条错边**，正说明上面那个问句要对每条边
-问一遍，包括看起来最不用问的。
+‼️ **The last row used to read "faithful port → self-invented deviation" with the reason "the
+deviation's delta is measured against the faithful version, so with no faithful run there is no
+baseline" — that reason describes `reading`, and it was being used as `launch`.** The two arms can
+perfectly well run at once, with the delta subtracted afterwards. **There was a wrong edge sitting
+in this "real dependencies" table**, which is exactly why the question above must be asked of
+every edge, including the ones that seem least in need of it.
 
-**`reading` 边：跑得了，读不了。**
+**`reading` edges: it can run, it cannot be read.**
 
-实例：N07（MonoFlex 融合）要的是 N06 的 σ —— 一个值，而且 σ 和融合本来就写在同一份代码里的
-两个 flag —— 图却给它派了 N06 的**裁决**，四个半小时。想并行，此前唯一的办法是把边删掉；
-删掉就连真的那一半也没了：σ 没校准的时候 N07 输了**不知道是谁的错**。
+The case: N07 (MonoFlex fusion) needed N06's σ — one value, and σ and the fusion were already two
+flags in the same source file — and the graph assigned it N06's **verdict**, four and a half
+hours. Until now the only way to parallelise was to delete the edge, and deleting it removed the
+real half too: with σ uncalibrated, an N07 loss says **nothing about whose fault it was**.
 
-所以 `reading` 同时做两件事：臂**立刻**开，而 `close` 时裁决被盖上 `conditional_on: [N06]`。
-‼️ **它不拦裁决。** 拦了只是把同一场等待往后挪一格 —— 变成一堆没人敢裁的 🟪，GPU 小时还照花。
-要防的从来不是「结论下早了」，是**结论脱离它的条件到处走**。上游一落地，`close` 主动点名
-`re_read`，`check` 把它从 `minor` 升到 `major`；**没有任何东西会自动清掉 `conditional_on`**，
-那正是它存在的理由。
+So `reading` does two things at once: the arm opens **immediately**, and at `close` the verdict is
+stamped `conditional_on: [N06]`. ‼️ **It does not block the verdict.** Blocking only shifts the
+same wait one step later — into a pile of 🟪 nobody dares adjudicate, with the GPU hours still
+being spent. What must be prevented was never "a conclusion reached too early"; it is **a
+conclusion travelling apart from its condition**. When the upstream lands, `close` actively names
+`re_read`, and `check` escalates it from `minor` to `major`; **nothing clears `conditional_on`
+automatically**, which is exactly why it exists.
 
-条件没成立怎么办，用户的原话就是判据：**「输了就说这条不成立，再停掉」** —— 一条被条件推翻的
-臂，成本是它自己那份机时；一条为了等条件没开的臂，成本是整轮的墙钟。前者可数，后者不可数。
+What if the condition does not hold — the user's own words are the criterion: **"if it loses, say
+this one does not hold, and stop it."** An arm overturned by its condition costs its own machine
+time; an arm not opened because it was waiting for a condition costs the whole round's wall clock.
+The first is countable; the second is not.
 
-‼️ **三种假依赖 —— 连边都不该有，是最常见的浪费：**
+‼️ **Three fake dependencies — edges that should not exist at all, and the commonest waste:**
 
-1. **「逻辑上相关」不是依赖。** 两条改动都碰几何、都碰 loss，只要 flag 互不相干、
-   父节点各自成立，就能同时跑。相关 ≠ 有序。
-2. **「共用一个测量脚本」不是依赖。** 脚本写一次两处都用，但两个**条目**照样并行。
-   依赖挂在**产出**上，不挂在**工具**上。
-3. ‼️ **噪声底不是任何臂的前置。** 它和主臂**不必同时跑** —— 代码/数据/config 被 run card
-   钉死了，几天后补跑同样有效。噪声底只阻塞**报数的措辞**（`[T1 趋势]` vs 「测到了」），
-   不阻塞任何一条臂开跑。本 repo 曾因为把它当前置而觉得整轮被卡住。
-   ‼️ **这一条不是噪声底的特权，它是上面那个通则的一个实例** —— 之所以还单列，是因为
-   噪声底是最容易被误挂成前置的那一个，不是因为它的道理和别人不同。
+1. **"Logically related" is not a dependency.** Two changes both touching geometry and both
+   touching the loss can run at once, as long as the flags are independent and each parent holds.
+   Related ≠ ordered.
+2. **"Shares a measurement script" is not a dependency.** Write the script once and both use it;
+   the two **entries** still run in parallel. A dependency hangs on an **artifact**, not on a
+   **tool**.
+3. ‼️ **The noise floor is nobody's predecessor.** It does **not** have to run alongside the main
+   arms — the run card pins the code, data and config, so measuring it days later is equally
+   valid. The floor blocks only **the wording of a reported number** (`[T1 trend]` vs "measured"),
+   and blocks no arm from starting. This repo once treated it as a predecessor and believed the
+   whole round was stuck.
+   ‼️ **This is not a privilege of the noise floor; it is an instance of the general rule above** —
+   it is listed separately only because it is the one most often mis-hung as a predecessor, not
+   because its reasoning differs.
 
-‼️ **用户递来一串改动并问「对吧」时，那是画依赖图的时刻，不是点头的时刻。**
-那句「对吧」听起来像在要确认，实际是在提交一个**没被检查过的顺序**，而顺序错了的代价
-要跑完几条臂才显形。动作是固定的：把这串改动重画成依赖图，**逐条边问「它挡的是什么」** ——
-- 套得进上面 `launch` 那四种 → 保留串行，并说明为什么；
-- 「我只要它一个值 / 一份产物 / 一行代码」→ `reading`，**现在就开**，裁决带条件；
-- 套不进任何一种（「都碰同一个机制」「逻辑上相关」「感觉该先做」）→ **连边都不写**。
+‼️ **When a user hands over a list of changes and asks "right?", that is the moment to draw the
+dependency graph, not the moment to nod.** That "right?" sounds like a request for confirmation,
+but it is submitting **an order nobody has checked**, and the cost of a wrong order does not
+surface until several arms have run. The action is fixed: redraw the list as a dependency graph
+and **ask of every edge "what does it block"** —
+- it fits one of the four `launch` shapes above → keep it serial, and say why;
+- "I only need one value / one artifact / one line of code from it" → `reading`, **open it now**,
+  with the verdict conditional;
+- it fits none of them ("they both touch the same mechanism", "logically related", "feels like it
+  should come first") → **do not write the edge at all**.
 
-明说哪几条其实可以并行、哪几条可以换序。直接确认用户给的顺序，等于把一次本可以 0 成本
-做掉的检查推到几条臂之后。‼️ **而默认答案偏向并行**：一条边错标成 `launch`，代价是墙钟，
-而且不显形（队列看起来一切正常，只是慢）；错标成 `reading`，代价是一条臂的机时，而且
-`conditional_on` 会把它喊出来。两种错的可见度差一个量级。
+Say explicitly which ones can actually run in parallel and which can be reordered. Simply
+confirming the user's order pushes a check that costs nothing now into a position several arms
+later. ‼️ **And the default answer leans toward parallelism**: an edge mislabelled `launch` costs
+wall clock and does not surface (the queue looks entirely normal, only slower); mislabelled
+`reading`, it costs one arm's machine time and `conditional_on` shouts about it. The two errors
+differ in visibility by an order of magnitude.
 
-**并行度的硬上限 = 稳定容量，而且超了是全损不是变慢。**
-判据和四种静默失败在 **`references/cluster-ops.md`**，一句话版本：
-「抢占在位时长 < checkpoint 间隔」的臂**产出是结构性的零**，而且会搅动已经拿到位子的臂；
-同组比较的臂**必须同卡型**（换卡就是换 kernel）；**离线批不占 GPU，永远优先**。
+**The hard ceiling on parallelism is stable capacity, and exceeding it is a total loss rather than
+a slowdown.** The criteria and the four silent failures are in **`references/cluster-ops.md`**; in
+one sentence: an arm whose "preemptible residency < checkpoint interval" produces **structurally
+zero**, and it churns the arms that already hold slots; arms compared within one group **must be
+on the same GPU model** (a different card is a different kernel); **offline batches use no GPU and
+always come first**.
 
-**并行引入三个串行时不存在的失败模式：**
+**Parallelism introduces three failure modes that do not exist when running serially:**
 
-1. **进度不齐。** 比较必须锁在**同一个 step/epoch**，不能比"各自最好的" ——
-   尤其别跨 warmup 边界，那里名次会整体重排。
-2. **种子混进 delta。** 并行臂各自一个种子，差里就混着训练随机性，而噪声底还没有 ⇒
-   报数时必须显式写"单种子"。
-3. ‼️ **代码漂移。** 串行时你知道自己什么时候改的代码；并行时"当前代码"这个概念是模糊的。
-   **每条臂开跑那一刻 declare 代码快照哈希**，事后 check 一致 —— 否则几条臂跑的其实不是同一份代码，
-   而这件事不会报错。
+1. **Uneven progress.** Comparisons must be locked to **the same step/epoch**, never "each one's
+   best" — and especially not across a warmup boundary, where the ranking reshuffles wholesale.
+2. **Seeds mixed into the delta.** Parallel arms each carry a seed, so training randomness is
+   inside the difference, and the noise floor is not there yet ⇒ the report must explicitly say
+   "single seed".
+3. ‼️ **Code drift.** Serially, you know when you changed the code; in parallel, "the current
+   code" is an ambiguous notion. **Declare the code snapshot hash at the moment each arm starts**
+   and check consistency afterwards — otherwise several arms were not running the same code, and
+   nothing raises.
 
-‼️ **节点怎么建、ready set 怎么算、回填怎么传播、图自己坏了怎么发现** ——
-全在 **`references/experiment-graph.md`**。那份是操作手册，这里只留判断。
+‼️ **How nodes are created, how the ready set is computed, how a fill propagates, how to discover
+the graph has broken** — all of it is in **`references/experiment-graph.md`**. That one is the
+operating manual; this keeps only the judgement.
 
-### 规则 2.6 —— **能 0 成本量上限的，必须先量上限**
+### Rule 2.6 — **anything whose ceiling is measurable at zero cost must have its ceiling measured first**
 
-一条提案若能在**现有预测/ckpt 上**用纯离线计算问出「**它完美工作能赢多少**」，
-那个 oracle **必须先做**，排臂在后。
+If a proposal can be asked, by pure offline computation **on existing predictions or
+checkpoints**, "how much would it win if it worked perfectly", that oracle **must come first**,
+and the arm queues behind it.
 
-**代价是实测的**：本 repo 花了整整一节论证「先回归前表面再回归深度」，
-之后一个 oracle 就把它钉住了 —— **把 size 修到完美，对 IoU p50 的影响是 −0.000 rig / +0.015 fleet**，
-上限是零。oracle 的成本比一条臂低**三个数量级**，而且不占卡、不排队、不需要噪声底。
+**The cost is measured**: this repo spent an entire section arguing for "regress the near face
+first, then the depth", and one oracle then pinned it — **fixing size to perfect changes IoU p50
+by −0.000 rig / +0.015 fleet**, so the ceiling is zero. An oracle costs **three orders of
+magnitude** less than an arm, occupies no GPU, joins no queue, and needs no noise floor.
 
-‼️ 推论：**队列里「没事干」时的正确动作是把 oracle 往前推，不是去开一条臂。**
-离线批不占 GPU，所以它永远不该被容量挡着。
+‼️ The corollary: **when the queue has "nothing to do", the right move is to pull an oracle
+forward, not to open an arm.** Offline batches use no GPU, so they should never be held up by
+capacity.
 
-| # | 技巧 | 出处 | 针对哪条实测失败（FINDINGS #） | 机理一句话 | **前提** | **前提在本语料的份额** | **预注册指标 + 预测方向** | **护栏** | 改动量 | 排序 |
+| # | Technique | Source | Which measured failure (FINDINGS #) | Mechanism in one line | **Premise** | **Premise's share on this corpus** | **Pre-registered metric + predicted direction** | **Guardrail** | Size of change | Rank |
 |---|---|---|---|---|---|---|---|---|---|---|
 
-规则：
+Rules:
 
-1. **排序按「这条失败占的份额 × 机理可信度 ÷ 改动量」，不按论文新旧。**
-2. **预注册指标不能只是 AP。** 写下这条技巧应该让哪个**失败计数**下降。
-   如果最后 AP 涨了但那个计数没动，机理就是没验上 —— 你只是运气好或者动了别的东西。
-2.5. ‼️ **每条提案必须写下它的「前提」，并当场量出这个前提在「本轮真正要跑的那份语料」上的份额。**
-   前提 = 这条技巧要成立，世界必须是什么样子（例：「一对多把负样本饿死」的前提是
-   `repeat_num × G ≥ nqueries` 经常发生）。**份额是一个纯数据量，不需要模型、不需要 GPU，
-   过一遍 loader 就有。**
-   - 份额 < 10% ⇒ 这条提案**当场降档或直接不排**，不管机理多漂亮。
-   - 份额引自别处（论文、另一个数据集、上一轮的语料）而没在本语料上重量 ⇒ **视为没有前提**。
+1. **Rank by "this failure's share × mechanism plausibility ÷ size of change", not by how recent
+   the paper is.**
+2. **The pre-registered metric may not be AP alone.** Write down which **failure count** this
+   technique should reduce. If AP rises at the end and that count did not move, the mechanism was
+   not confirmed — you got lucky, or you changed something else.
+2.5. ‼️ **Every proposal must state its "premise", and measure that premise's share on THE corpus
+   this round will actually run, then and there.** The premise is what the world must be like for
+   the technique to hold (e.g. "one-to-many starves the negatives" has the premise that
+   `repeat_num × G ≥ nqueries` happens often). **The share is a pure data quantity: no model, no
+   GPU, one pass through the loader.**
+   - Share < 10% ⇒ that proposal is **tiered down or not queued at all**, however elegant the
+     mechanism.
+   - The share quoted from elsewhere (a paper, another dataset, last round's corpus) without being
+     re-measured on this corpus ⇒ **treated as having no premise**.
 
-   **代价是实测的**：本 repo 的 F1（一对多饿死负样本）立项时写「47% 的产线帧超过零点」，
-   而本轮训练/评估用的是另一份语料，实测**只有 4.62%**（G: p50 23 / max 56，零点在 52）。
-   差一个数量级，**五条臂白跑**。而拦住它只需要过一遍 loader 数 G ——
-   这件事在起跑前和起跑后一样便宜，唯一的区别是起跑前做能省下五条臂。
-   ‼️ **测试拦不住这个**：`tests/test_one_to_one.py` 把那个算术钉得完全正确，
-   因为它自己构造 G。**它验的是公式，不是公式的输入分布来自哪个语料。**
-3. **改动量分三档：零架构改动 / 局部 / 结构性。** 同等收益下零改动的优先，
-   而且"零改动"要能说清为什么（同一个头、同一个输出、只换 loss target）。
-   用户的原则是**架构统一优先**：能用一套统一架构表达的，不要为特例加分支。
-   ‼️ **这一列不是独立的成本口径，它是 Stage 3.5 里 V 轴的三个分量之一**
-   （V = 代码可得性 × 改动量 + 数据成本）。别在两处各写一套成本，会打架。
-4. **有依赖关系要写出来。** 例：换一对一之前必须先有质量感知分类 + 去噪 query，
-   否则丢了一对多的收敛速度又没有排序依据。
-5. **允许 `任务驱动` 提案**（输入 B 单独驱动，没有实测失败支撑）。但必须打标签，
-   并写清**缺哪份数据 / 缺哪次测量**才能验证它。它不参与前面的排序，单独排队。
-6. **每条都要有被 `已杀` 的资格** —— 提不出「什么测量结果能杀掉它」的提案，本身就不合格。
-   已经死掉的四条（连复活条件）用 `graph.py status` 读 `killed`，**列提案前先读一遍**，
-   别再提一次。
+   **The cost is measured**: this repo's F1 (one-to-many starving the negatives) was justified with
+   "47% of production frames exceed the zero point", while this round trained and evaluated on a
+   different corpus where the measurement is **only 4.62%** (G: p50 23 / max 56, zero point at 52).
+   An order of magnitude out, and **five arms ran for nothing**. Preventing it needed one pass
+   through the loader counting G — equally cheap before or after starting, the only difference
+   being that doing it beforehand saves five arms.
+   ‼️ **Tests do not catch this**: `tests/test_one_to_one.py` pins that arithmetic entirely
+   correctly, because it constructs G itself. **It verifies the formula, not which corpus the
+   formula's inputs come from.**
+3. **Size of change comes in three grades: no architectural change / local / structural.** At equal
+   benefit the no-change option wins, and "no change" must be explicable (same head, same output,
+   only the loss target swapped). The user's principle is **architectural uniformity first**:
+   whatever can be expressed by one unified architecture should not get a branch for a special
+   case. ‼️ **This column is not an independent cost measure; it is one of the three components of
+   Stage 3.5's V axis** (V = code availability × size of change + data cost). Do not write two cost
+   systems in two places; they will fight.
+4. **Write down dependencies.** Example: quality-aware classification plus denoising queries must
+   land before switching to one-to-one, or you lose one-to-many's convergence speed without gaining
+   a basis for ranking.
+5. **`task-driven` proposals are allowed** (driven by Input B alone, with no measured failure behind
+   them). But they must be labelled, and must state **which data or which measurement is missing**
+   before they can be verified. They do not participate in the ranking above; they queue separately.
+6. **Every row must be eligible to be `killed`** — a proposal that cannot state "what measurement
+   would kill this" is itself unfit. Read the four already dead (with their revival conditions) via
+   `graph.py status`'s `killed` **before listing proposals**, so nobody proposes one again.
 
 ---
 
-## Stage 3.5 — 验证预算：三轴权衡决定「验多狠」
+## Stage 3.5 — verification budget: three axes decide HOW HARD to verify
 
-**不是「验 / 不验」，是「验到几档」。** 每条提案打三个轴（高 / 中 / 低）：
+**It is not "verify / do not verify", it is "verify to which tier".** Score every proposal on three
+axes (high / medium / low):
 
-| 轴 | 问什么 | 怎么估 |
+| Axis | The question | How to estimate |
 |---|---|---|
-| **V 验证成本** | 多少 GPU 小时、多少代码、要不要新数据？ | 已有 flag = 极低；只换 loss target = 低；动 matcher/attention = 中；要标数据 = 高 |
-| **P 先验** | 我本来就 expect 它靠谱吗？ | 机理是否直指某条实测失败 + 是否在多篇/多仓库复现过 + 参考实现里是不是一个 flag |
-| **U 项目价值** | 成了值几分？动的是下游真在用的量吗？ | 用 FINDINGS 里那条失败的**份额**算，不要用论文里的涨幅 |
+| **V, verification cost** | how many GPU hours, how much code, is new data needed? | an existing flag = very low; only a loss target swapped = low; touching the matcher or attention = medium; needing annotation = high |
+| **P, prior** | did I expect this to work in the first place? | does the mechanism point directly at a measured failure + has it been reproduced across papers/repos + is it one flag in the reference implementation |
+| **U, project value** | what is it worth if it works? Does it move a quantity downstream actually uses? | compute from the **share** of that failure in FINDINGS, never from the improvement quoted in a paper |
 
-‼️ **V 轴的主要决定项是「有没有开源代码」，不是「改几行」。** 没代码时，成本里最大的一块不是写码，
-是**你得先自己发明一遍，再用一次训练去发现发明错了**：
+‼️ **The V axis is mostly decided by "is there open-source code", not by "how many lines".** With no
+code, the largest cost is not writing it — it is that **you must first invent it yourself, and then
+spend a training run discovering the invention was wrong**:
 
-| 代码可得性 | V | 说明 |
+| Code availability | V | Notes |
 |---|---|---|
-| 官方实现 + 它自己的 ablation flag | 极低 | 你移植的是一个 flag，不是一个设计 |
-| 官方实现 | 低 | 有逐行对照的靶子 |
-| 只有第三方复现 | 中 | 先核它和论文的数字对不对得上，再决定信不信它 |
-| 只有论文（伪代码齐全） | 高 | **幻觉风险从这一档开始** |
-| 只有论文里的一段散文 | 很高 | 除非 U 极高，否则 T0 |
+| official implementation + its own ablation flag | very low | you are porting a flag, not a design |
+| official implementation | low | there is a line-by-line target |
+| third-party reproduction only | medium | check its numbers against the paper's before deciding whether to trust it |
+| paper only (with complete pseudocode) | high | **the hallucination-risk zone starts here** |
+| only a paragraph of prose in a paper | very high | T0 unless U is extremely high |
 
-| 档 | 什么时候 | 怎么验 | 报数必带标签 |
+| Tier | When | How to verify | Label required on any reported number |
 |---|---|---|---|
-| **T0 不验** | U 低 + V 高 | 不做，进「不做清单」并写明理由 | — |
-| **T1 趋势验** | **P 高**（本来就觉得它成） | 短跑 / 子集，只看趋势 + 预注册的失败计数，**不要求过噪声底** | `[T1 趋势]` |
-| **T2 单点对照** | P 中 + V 低~中 | 今天代码重跑对照，一次一件事，**要求过噪声底** | `[T2 对照]` |
-| **T3 搭车大跑** | V 高但 U 高，**且小 ablation 确实答不了** | 挂到本来就要跑的完整训练上，flag 默认关 + 一个开的分支 | `[T3 大跑]` |
-| **T4 折中近似** | V 高 + P/U 中 | 移植它的**便宜近似**，用来给完整版定价 | `[T4 近似]` |
+| **T0 do not verify** | U low + V high | do not do it; put it on the "not doing" list with a stated reason | — |
+| **T1 trend check** | **P high** (you already expect it to work) | short run / subset, looking only at the trend plus the pre-registered failure count, **no requirement to clear the noise floor** | `[T1 trend]` |
+| **T2 single controlled comparison** | P medium + V low-to-medium | re-run the control on today's code, one thing at a time, **must clear the noise floor** | `[T2 controlled]` |
+| **T3 ride a large run** | V high but U high, **and a small ablation genuinely cannot answer it** | attach to a full training run that was happening anyway: flag defaults off, one branch with it on | `[T3 large run]` |
+| **T4 cheap approximation** | V high + P/U medium | port its **cheap approximation** and use it to price the full version | `[T4 approximation]` |
 
-七条配套规矩：
+Seven accompanying rules:
 
-1. ‼️ **档位要跟数字一起写。** `[T1 趋势]` 的结论下周不许被当成 `[T2 对照]` 引用 ——
-   **软数字被提拔成硬结论**是这条流水线最容易死的地方（本轮那个假噪声底就是这么来的）。
-2. **便宜的检查功率低：它能给你继续的理由，不能给你否掉的理由。** 高 U 提案在 T1 上看着不好要**升档**，
-   不是杀掉；低 U 提案在 T1 上看着不好可以直接搁置。
-3. ‼️ **近似版失败不能证伪原版。** T4 必须写清近似掉了什么，否则你会用一个坏代理杀掉一个好想法。
-4. **T3 不免费：它占掉那次大跑唯一的一个变量位。** 一次大跑只带一个技巧（除非多机并行），
-   所以 T3 的排队顺序本身就是一次决策。
-5. ‼️ **细节指标是降档工具，不只是归因工具。**（用户裁定 2026-08-13）
-   聚合指标（AP/AR）**慢**，而且被收敛速度、阈值、NMS、数据口径一起混淆；
-   细节指标（负样本占比、分数分布、FINDINGS 那条失败的计数）**立刻响应**、直接对着机理。
-   所以**换一个响应快的预注册指标，往往能把一条 T3 大跑降成 T1 短跑** —— 这是省钱的主要手段。
+1. ‼️ **The tier is written with the number.** A `[T1 trend]` conclusion may not be cited next week
+   as a `[T2 controlled]` one — **a soft number being promoted into a hard conclusion** is the
+   easiest way to die on this pipeline (that false noise floor this round came from exactly there).
+2. **A cheap check has low power: it can give you a reason to continue, not a reason to rule
+   something out.** A high-U proposal that looks bad at T1 gets **tiered up**, not killed; a low-U
+   proposal that looks bad at T1 may simply be shelved.
+3. ‼️ **An approximation failing cannot refute the original.** T4 must state what the approximation
+   dropped, or you will kill a good idea with a bad proxy.
+4. **T3 is not free: it uses the one variable slot in that large run.** A large run carries one
+   technique (unless machines are running in parallel), so the ordering of T3s is itself a decision.
+5. ‼️ **A detailed metric is a tier-DOWN tool, not merely an attribution tool.** (User ruling,
+   2026-08-13.) Aggregate metrics (AP/AR) are **slow**, and are confounded together by convergence
+   speed, thresholds, NMS and data convention; detailed metrics (the negative-sample share, the
+   score distribution, the count of that failure in FINDINGS) **respond immediately** and point
+   straight at the mechanism. So **swapping in a fast-responding pre-registered metric often turns a
+   T3 large run into a T1 short run** — the main way to save money.
 
-   实例：一对一/去 NMS 用 AP 验要跑到收敛（贵）；但它要修的硬错误是
-   「`repeat_num 5` × `nqueries 256` → p50 255/256 全是正样本 → 分类器没见过负样本 →
-   objectness 全 0.999」，而**负样本占比和分数分布是短跑立刻能看的**。换了指标，
-   `--repeat_num 2` 的短跑就是公平且够用的验证。
+   Example: verifying one-to-one / NMS-free by AP requires running to convergence (expensive); but
+   the hard error it fixes is "`repeat_num 5` × `nqueries 256` → p50 255/256 are all positives → the
+   classifier never sees a negative → objectness is 0.999 everywhere", and **the negative-sample
+   share and the score distribution are visible immediately in a short run**. With the metric
+   swapped, a `--repeat_num 2` short run is a fair and sufficient verification.
 
-   ‼️ **边界，否则会滑向「细节指标好看就宣布成功」**：
-   **细节指标决定「要不要继续」，聚合指标 + 人眼决定「要不要上线」。**
-   机理验上了 ≠ 交付变好 —— 那正是辩论 ⑤ 那个 2×2 里「忠实但打不中」的格子。
+   ‼️ **The boundary, or this slides into "the detailed metric looks good, declare victory"**:
+   **detailed metrics decide "should we continue"; aggregate metrics plus a person's eye decide
+   "should we ship".** A confirmed mechanism ≠ better delivery — that is exactly the "faithful but
+   off target" cell in debate ⑤'s 2×2.
 
-   ‼️ **短跑有方向性偏倚**：它系统性地**低估减慢收敛的改动**（一对一就是，H-DETR 整篇讲这个），
-   对加速收敛的改动（CDN、去噪 query）则偏向有利。所以排队时，**让短跑先去验它能公平验的那些**；
-   慢收敛的改动要么换一个快响应的指标（见上），要么就得完整跑，别用短跑判它输。
+   ‼️ **Short runs are directionally biased**: they systematically **underestimate changes that slow
+   convergence** (one-to-one is one, and H-DETR is a whole paper about it), while favouring changes
+   that speed it up (CDN, denoising queries). So when queueing, **let short runs verify what they
+   can verify fairly**; a slow-converging change either gets a fast-responding metric (above) or has
+   to run fully — do not judge it lost on a short run.
+6. ‼️ **Default to orthogonal, small local ablations; do not do whole-architecture comparisons.**
+   (User ruling, 2026-08-13.) Verify each change **individually**, **assuming they do not interact**;
+   combinations and cross-validation come last, and whether to do them at all is decided by
+   **analysis**, not by default. A whole-architecture A/B is expensive and confounded — it moves many
+   things at once, and a result from it cannot be attributed. The unit of verification is "one small
+   local ablation", not "one large run".
+7. ‼️ **T1 also needs a pre-registered pass criterion, written before the run.** "The trend looks
+   right" is not a criterion — write it as "at epoch N the pre-registered count drops ≥X% and no
+   guardrail metric regresses". Without it, T1 degenerates into reading pictures, and it is exactly
+   what the decision to promote to T3 rests on.
 
-6. ‼️ **默认正交，小步局部 ablation，别做整架构对比。**（用户裁定 2026-08-13）
-   每条改动**单独**验一次，**假设它们互不干扰**；组合/交叉验证放到最后，
-   而且要由**分析**决定要不要做，不是默认要做。
-   整架构 A/B 又贵又混淆 —— 它同时动了一堆东西，出了结果也归不了因。
-   验证单位是「一次小的局部 ablation」，不是「一次大跑」。
-7. ‼️ **T1 也要预注册通过判据，跑之前写下来。** "趋势对了"不是判据 ——
-   要写成"第 N 个 epoch 时预注册计数下降 ≥X%，且护栏指标没退化"。
-   不写，T1 就退化成看图说话，而升 T3 的决定正是靠它做的。
+### The tier decides which instruments are used (debate needs a budget too)
 
+‼️ **Consistency at the meta level: if I require a verification budget per proposal, debate must
+have one too.** Convening all six debates in one round is 15+ agents, so go by tier:
 
-### 档位决定用哪几把手段（辩论也要定预算）
-
-‼️ **元层面的一致性：我要求给每条提案定验证预算，那辩论自己也得有预算。**
-六处辩论全开一轮是 15+ 个 agent，按档走：
-
-| 档 | 数值判据 | 便宜检查 | 辩论 | 人眼盲评 |
+| Tier | Numeric criteria | Cheap checks | Debate | Human blind review |
 |---|---|---|---|---|
-| **T0** | — | — | ④（确认真的该放弃） | — |
-| **T1** | 预注册计数 + 护栏，**不要求过噪声底** | 单 batch 过拟合 | **⑥** | 只在改了度量/几何表示时 |
-| **T2** | **过噪声底** + 三个同向 | 全套 | ⑥ + ① | 预注册和 AP 反向时 |
-| **T3** | 同 T2 + 护栏 | 全套 | ⑥ + **⑤（大跑前必须走完）** + ① | **必开**（最后一道闸） |
-| **T4** | 只用来定价，**不作结论** | 单 batch 过拟合 | ⑤ 的 C —— 近似有没有把机理近似掉 | — |
+| **T0** | — | — | ④ (confirm it really should be abandoned) | — |
+| **T1** | pre-registered count + guardrail, **no noise-floor requirement** | overfit a single batch | **⑥** | only when the metric or the geometric representation changed |
+| **T2** | **clears the noise floor** + three numbers moving together | the full set | ⑥ + ① | when the pre-registered metric and AP move in opposite directions |
+| **T3** | as T2 plus guardrails | the full set | ⑥ + **⑤ (must complete before the large run)** + ① | **mandatory** (the last gate) |
+| **T4** | pricing only, **never a conclusion** | overfit a single batch | ⑤'s C — did the approximation approximate the mechanism away | — |
 
-三条和档位无关：**⑥ 任何档都必开**（最便宜，且决定后面所有数字的意义）；
-**② 在新写一把尺子时必开**；**③ 只在定档本身有争议时开**。
+Three that are tier-independent: **⑥ is mandatory at every tier** (it is the cheapest, and it
+decides the meaning of every number afterwards); **② is mandatory whenever a new ruler is written**;
+**③ only when the tiering itself is disputed**.
 
-➜ **定档表落在 `stages/exploration/state.json -> tiers`**；格式见 `lifecycle/exploration/state.json` 的 `_comment_tiers`。
-
----
-
-## Stage 4 — 找论文，更要找代码
-
-‼️ **动手前读 `references/porting.md`** —— 怎么搜（三层关键词 · 交叉领域抽掉领域词只留几何性质）、
-证据强度分级（**被顶会用过 ≠ 被单独消融过**，本 repo 在同一个参考仓库上踩到两次）、
-以及**论文正文说 A 而它自己的训练脚本跑 B** 时该信哪个。
-
-1. **先找官方实现**，按 Stage 3.5 的代码可得性表定 V。没有官方代码不只是"麻烦一点"，
-   是把这条提案推进幻觉风险区。
-2. **克隆到 repo 外面**（`~/agent_space/<topic>/ref/` 或 `third_party/reference/`），
-   记下 `repo@sha`，**不要变成依赖**。抄之前看 LICENSE。
-3. **最值钱的发现是参考实现自己的 ablation 开关。** 如果它有 flag，你移植的是一个 flag 而不是一个设计。
-4. **读 config diff 和 loss/matcher，不读散文。论文说 X、代码做 X' 时，信代码。**
-   重点看四处：loss target 怎么构造、matcher、query 怎么初始化、
-   **哪些分支只在 train 存在**（去噪 query 这类推理期不存在）。
-5. 把关键片段和行号记进设计文档，别只留仓库名。
+➜ **The tiering table lands in `stages/exploration/state.json -> tiers`**; the format is in
+`lifecycle/exploration/state.json`'s `_comment_tiers`.
 
 ---
 
-## Stage 4.5 — 接口对照表（动手之前唯一的交付物）
+## Stage 4 — find the paper, and even more the code
 
-‼️ **不许对着「思想」写实现，要对着参考代码的那几行写。** agent 自己发明实现时，
-漏一个条件、把语义拧半圈，都**不会报错**；而**自我纠错的周期 = 一次训练跑**（几小时到几天）。
-所以幻觉要在写代码之前挡住，挡它的东西是**引用义务**，不是事后验证。
+‼️ **Read `references/porting.md` before starting** — how to search (three keyword layers · across
+fields, strip the domain vocabulary and keep the geometric property), grading evidence (**used by a
+top conference ≠ ablated on its own**, which this repo hit twice in the same reference repository),
+and which to believe when **the paper's prose says A while its own training script runs B**.
 
-流程是四步，不是两步：**思想 → 论文 → 代码里的位置 → 逐项对齐接口 → 才动手。**
+1. **Find the official implementation first**, and set V by Stage 3.5's code-availability table. No
+   official code is not merely "a bit more work" — it pushes the proposal into the hallucination-risk
+   zone.
+2. **Clone it outside the repo** (`~/agent_space/<topic>/ref/` or `third_party/reference/`), record
+   `repo@sha`, and **do not turn it into a dependency**. Read the LICENSE before copying.
+3. **The most valuable find is the reference implementation's own ablation switch.** If it has a
+   flag, you are porting a flag rather than a design.
+4. **Read the config diff and the loss/matcher, not the prose. When the paper says X and the code
+   does X', believe the code.** Focus on four places: how the loss target is constructed, the
+   matcher, how queries are initialised, and **which branches exist only in train** (denoising
+   queries and the like, absent at inference).
+5. Record the key excerpts and line numbers in the design document; do not leave only a repo name.
 
-| 概念 | 参考实现叫什么（`repo@sha:file:line`） | 我们这边叫什么 | 语义差异 | **初判** | 缺的怎么办 |
+---
+
+## Stage 4.5 — the interface comparison table (the only deliverable before writing code)
+
+‼️ **Do not write an implementation against an "idea"; write it against those specific lines of the
+reference code.** When an agent invents its own implementation, a missed condition or a half-turned
+semantic **raises nothing** — and **the self-correction cycle is one training run** (hours to days).
+So hallucination has to be blocked before the code is written, and what blocks it is an **obligation
+to cite**, not verification after the fact.
+
+The flow is four steps, not two: **idea → paper → its location in the code → align the interface
+item by item → only then write.**
+
+| Concept | What the reference calls it (`repo@sha:file:line`) | What we call it | Semantic difference | **First judgement** | What to do about what is missing |
 |---|---|---|---|---|---|
 
-**「初判」列填 无关 / 待定 / 致命，默认「待定」。** 这张表填两次：移植前你填一遍（知道哪些差异必须处理），
-移植后辩论 ⑤ 的 A 角色对着 diff 再填一遍 —— **两次不一致的格子就是要盯的地方**。
+**The "first judgement" column takes irrelevant / undecided / fatal, defaulting to "undecided".**
+This table is filled in twice: once by you before porting (so you know which differences must be
+handled), and again by role A of debate ⑤ against the diff after porting — **the cells where the two
+disagree are what to watch.**
 
-- **先定位，再读懂。** 「这个技巧落在哪几个函数里」比「它为什么work」更先要回答；
-  定位不了就说明还没搞清它到底改了什么，此时读论文读到再熟也不能开写。
-- ‼️ **「语义差异」那一列是 bug 的藏身处。** 典型：参考实现的 box 是归一化 cxcywh，
-  我们是 `center_reg × anchor_size + anchor_center`；参考实现的"正样本"= 匈牙利匹配到的，
-  我们的"正样本"还包括 `repeat_num` 复制出来的。**同名不同义比缺失更危险，因为它不报错。**
-- **缺失项要显式决策**：找等价物 / 加最小实现 / **放弃这一部分并写清放弃了什么**。
-  第三种最常见 —— 半个技巧的效果不能算这个技巧的效果，不写下来下一轮就成了"这技巧没用"。
-- 参考实现里**只在 train 存在的分支**单独列一行（去噪 query、辅助头、EMA、warmup 调度），
-  最容易漏的就是这些，因为推理跑通了会给人一种已经移植完的错觉。
+- **Locate before understanding.** "Which functions does this technique live in" must be answered
+  before "why does it work"; failing to locate it means you have not yet established what it actually
+  changes, and no amount of familiarity with the paper licenses writing code at that point.
+- ‼️ **The "semantic difference" column is where the bugs hide.** Typical: the reference's box is
+  normalised cxcywh while ours is `center_reg × anchor_size + anchor_center`; the reference's
+  "positive" means Hungarian-matched, while ours also includes the copies made by `repeat_num`.
+  **Same name, different meaning is more dangerous than absence, because it raises nothing.**
+- **Missing items require an explicit decision**: find an equivalent / add a minimal implementation /
+  **abandon that part and write down what was abandoned**. The third is commonest — half a technique's
+  effect is not that technique's effect, and unwritten it becomes "that technique doesn't work" next
+  round.
+- **Branches that exist only in train in the reference get their own row** (denoising queries,
+  auxiliary heads, EMA, warmup scheduling); these are the easiest to miss, because inference running
+  successfully creates the illusion the port is complete.
 
-## Stage 5 — 移植
+## Stage 5 — the port
 
-- ‼️ **每一处改动都要能指到参考实现的一行**，注释或 commit message 里写
-  `ref: <repo>@<sha>:<file>:<line>`。**指不出来的部分就是你发明的** —— 单独标 `自创`，
-  并**自动升一档验证**（Stage 3.5）：它没有靶子，唯一的检验就是训练结果，而那个周期很长。
-  收尾时机械复核一遍每个 hunk 有没有引用（这是检查，不是辩论）。
-- **一个技巧一个分支，flag 门控，默认关。** 这样 ablation 就是一次 flag 翻转，对照是同一个二进制。
-- ‼️ **最高频的移植 bug 是"配置项加了但没传下去"，而且它永远不报错。**
-  本轮真事：`infer_9dof.py` 加了 `voxel_size` / `thin_cloud` 但两处 dataset 构造都没传，
-  于是用 145k 去重训练的权重被喂了一个占用格少 81% 的随机采样 —— 静默、没有 exception、只是变差。
-  对策：写一个**遍历所有调用点的测试**（AST 过每个构造调用，断言该参数被显式传入），
-  而不是只测函数本身。
-- **验证移植要靠计数，不靠形状。** 形状对不代表对象集合对（去噪 query 有没有真的进 attention mask？
-  正样本数变了没有？）。独立列举，别看 `.shape`。
-- **新增/改名参数要有从旧 checkpoint 的加载路径**（本 repo：`utils/io.py` 的
-  `_RETIRED_PARAM_MARKERS`，要走**映射**而不是豁免）。
-- 改完先跑仓库测试；测试挂了先分清是不是别人在飞的重构，不要顺手改别人的文件。
-- ‼️ **收尾要开一次验收辩论（三方对齐），不是跑完测试就算搬完了。**
-  测试能证明参数传下去了，不能证明「我们把人家那个 trick 真的 get 到了」，
-  也不能证明「这个 trick 本来就对得上我们的需求」。见下面辩论小节 ⑤ 和 `references/debate-roles.md`。
-- **便宜检查里最有用的一个：单 batch 过拟合。** 机理接通的话，一个 batch 应该能压到接近零 loss；
-  压不下去说明梯度没通 / 目标构造错了 —— 几分钟就能问出来，不用等大跑。
+- ‼️ **Every change must point at a line in the reference implementation**, with
+  `ref: <repo>@<sha>:<file>:<line>` in a comment or commit message. **What you cannot point at is
+  what you invented** — label it `original` separately, and **raise its verification tier
+  automatically** (Stage 3.5): it has no target, its only check is the training result, and that
+  cycle is long. At the end, mechanically re-check that every hunk carries a citation (this is a
+  check, not a debate).
+- **One technique, one branch, gated by a flag, defaulting to off.** Then an ablation is one flag
+  flip and the control is the same binary.
+- ‼️ **The most frequent porting bug is "a config item was added but never passed down", and it
+  never raises.** A real case this round: `infer_9dof.py` gained `voxel_size` / `thin_cloud` while
+  neither dataset construction site passed them, so weights trained on 145k deduplicated points were
+  fed a random sample with 81% fewer occupied cells — silent, no exception, just worse. The
+  countermeasure: write a test that **walks every call site** (AST over every construction call,
+  asserting the parameter is explicitly passed), rather than testing the function alone.
+- **Verify a port by counting, not by shapes.** A matching shape does not mean a matching object set
+  (did the denoising queries actually enter the attention mask? did the positive count change?).
+  Enumerate independently; do not read `.shape`.
+- **New or renamed parameters need a load path from old checkpoints** (this repo:
+  `_RETIRED_PARAM_MARKERS` in `utils/io.py`, and it must be a **mapping**, not an exemption).
+- Run the repo's tests after changing; if they fail, first establish whether somebody else's
+  in-flight refactor is responsible, and do not casually edit their files.
+- ‼️ **Wrap up with an acceptance debate (three-way alignment); passing the tests is not "the port is
+  done".** Tests can prove the parameters were passed down; they cannot prove "we actually got their
+  trick", nor "that trick was ever addressed to our requirement". See debate ⑤ below and
+  `references/debate-roles.md`.
+- **The single most useful cheap check: overfit a single batch.** With the mechanism wired up, one
+  batch should reach near-zero loss; failing to means the gradient does not flow or the targets are
+  constructed wrongly — a few minutes to ask, instead of waiting for a large run.
 
-## Stage 6 — 验证 + ablation
+## Stage 6 — verification and ablation
 
-- **对照必须用今天的代码重跑**，不许读昨天日志里的数。
-- **一次只改一件事。** warm start 可以，但要写明是 warm start。
-- **报预注册指标 + AP + 那条失败的计数，三个一起报**，并带上 Stage 3.5 的档位标签。
-  只有三个同向才算机理验上。
-- **判据必须是独立标尺 + 内建对照 + 控制组。** 带筛选步骤的判据会先把该检出的失败筛掉。
-- **选对照样本要显式配对，不要靠日志相邻行。** 本轮 `grep -B2` 挑控制帧，
-  因为日志顺序是 tally → saved → rid，挑到了上一帧，直接报了个假警。
-- **写下没跑什么。** 静默截断（top-N、抽样、不重试）读起来像"全覆盖"。
+- **The control must be re-run on today's code**; reading a number out of yesterday's log is not
+  allowed.
+- **Change one thing at a time.** Warm starting is fine, but say that it is a warm start.
+- **Report the pre-registered metric, AP, and that failure's count — all three together**, with
+  Stage 3.5's tier label. Only three moving the same way counts as the mechanism being confirmed.
+- **The criterion must be an independent ruler + a built-in control + a control group.** A criterion
+  with a filtering step will filter out the very failure it should detect.
+- **Choose control samples by explicit pairing, not by adjacent log lines.** This round `grep -B2`
+  picked control frames, and because the log order is tally → saved → rid it picked the previous
+  frame and raised a false alarm.
+- **Write down what was not run.** Silent truncation (top-N, sampling, no retries) reads as "full
+  coverage".
 
-### ‼️ 实现层的坑修完了不等于设计成立 —— 而设计层的坑，val 上看不见
+### ‼️ Fixing the implementation-layer traps does not make the design sound — and design-layer traps are invisible on val
 
-移植做完、单测全绿之后最容易问出口的是「设计上的坑就没有了对吧」。答案通常是「不」，
-而且两层的代价完全不对称：
+The question that comes most naturally once the port is done and the unit tests are green is "so
+there are no design-level problems left, right?". The answer is usually no, and the two layers' costs
+are completely asymmetric:
 
-| | 谁能抓到 | 什么时候显形 |
+| | What can catch it | When it surfaces |
 |---|---|---|
-| **实现层** | 单测 / 单 batch 过拟合 | 几分钟 |
-| **设计层** | 没有任何离线检查抓得到 | **跑完一轮训练之后** |
+| **Implementation layer** | unit tests / overfitting a single batch | minutes |
+| **Design layer** | no offline check catches it | **after a full training round** |
 
-‼️ **单测只能证明「接线通了」** —— 配置传导对了、mask 算对了、同名的东西没被写成不同义。
-它证不了「这个设计对这个任务成立」。
+‼️ **Unit tests can only prove the wiring is connected** — the configuration propagated, the mask is
+computed right, same-named things were not written with different meanings. They cannot prove "this
+design holds for this task".
 
-最贵的一类是**训练输入和部署输入不是同一个分布**，而它有一句必须讲出来的机制：
-**val 和训练是同一个分布采出来的，所以分布错配在 val 上不会暴露，只在上机时暴露。**
-本 repo 的用例：训练吃的是 SfM+MVS 重建点云（各面都有点、稠密均匀、带重建伪影），
-部署吃的是单视角传感器深度（只有朝相机那面、有空洞、随距离衰减）。对一个按「key 点相对
-query box 八个角的相对位置」编码的检测器，远面那四个角对应的 MLP 在部署时永远收不到有效
-输入 —— 模型学到一个部署时不存在的先验，而 val 一路是绿的。
+The most expensive class is **the training input and the deployment input are not the same
+distribution**, and it has a mechanism that must be stated aloud: **val is sampled from the same
+distribution as training, so a distribution mismatch never shows up on val — only on the machine.**
+This repo's case: training consumed SfM+MVS reconstructed point clouds (points on every face, dense
+and uniform, with reconstruction artifacts), while deployment consumes single-view sensor depth (only
+the camera-facing side, with holes, attenuating with distance). For a detector encoding "a key point's
+position relative to the query box's eight corners", the MLPs for the four far corners never receive
+valid input at deployment — the model learns a prior that does not exist in deployment, and val stays
+green throughout.
 
-**只列风险点、不讲「为什么 val 测不出」的，等于没讲** —— 那句机制才是让人肯在跑完之前
-先去核对输入分布的理由。
+**Listing risks without explaining "why val cannot detect it" is the same as not explaining** — that
+mechanism is the reason anybody agrees to go and check the input distribution before the run finishes.
 
-### ‼️ 「测机理」和「定价」要挂**不同的父节点**，而且只报后者
+### ‼️ "Testing the mechanism" and "pricing it" hang off DIFFERENT parents, and only the latter is reported
 
-同一条改动挂在不同父节点上，delta 差一倍以上是常态 —— **尤其当它和已有的某项打同一个病**。
+The same change hung on different parents commonly differs by more than a factor of two in delta —
+**especially when it treats the same disease as something already present**.
 
-| 目的 | 挂哪个父节点 | 报不报 |
+| Purpose | Which parent | Reported |
 |---|---|---|
-| **测机理** | 机理最清楚显现的那个（该病份额最大的配置） | 内部用，**不对外报** |
-| **定价** | **最终要发的配置** | ‼️ **只报这个** |
+| **Testing the mechanism** | the one where the mechanism shows most clearly (the configuration with the largest share of that disease) | internal use, **not reported outward** |
+| **Pricing** | **the configuration that will actually ship** | ‼️ **report only this** |
 
-**本 repo 的用例**：`--rep_gt` 打的是 F2，而 CDN 已经把 `crossing_frac` 从 0.2600 压到 0.1145。
-挂 `e1`（无 CDN）量到的 delta 比挂 `e3`（有 CDN）大一倍以上，而最终配置大概率含 CDN。
-**拿 e1 上那个大 delta 去宣传一条会和 CDN 一起发的 loss，是「跨源对比要同口径」的又一个面** ——
-两次比较的分母（还剩多少病可治）根本不是同一个。
+**This repo's case**: `--rep_gt` addresses F2, and CDN had already pushed `crossing_frac` from 0.2600
+down to 0.1145. Measured against `e1` (no CDN) the delta was more than twice that measured against
+`e3` (with CDN), and the shipping configuration will probably include CDN. **Promoting a loss that
+will ship alongside CDN using the large delta from e1 is another face of "cross-source comparison
+requires one convention"** — the denominators of the two comparisons (how much disease is left to
+treat) are simply not the same.
 
-这条是 Stage 3 规矩 3「只有相差一个改动的 arm 之间可比」的加细：**相差一个改动还不够，
-那个改动的价值还取决于父节点里已经有什么。**
+This refines Stage 3's rule 3, "only arms differing by one change are comparable": **differing by one
+change is not enough — that change's value also depends on what the parent already contains.**
 
-## Stage 6.5 — 人工视觉验收（这一关不能由 agent 代劳）
+## Stage 6.5 — human visual acceptance (this gate cannot be delegated to an agent)
 
-‼️ **数值验证会循环：判据和被测实现共享同一个假设时，数字会朝错的方向动，而你会相信它。**
-本项目最贵的一次就是这个形状 —— **AABB**：NMS、GIoU、AP 三处都是轴对齐的，
-于是旋转错误在数值上根本不可见，**分数还更高**。同一个错误假设同时坐在模型里和尺子里，
-再多的 ablation 也量不出来，因为两边一起错。
+‼️ **Numeric verification can become circular: when the criterion and the implementation under test
+share an assumption, the numbers move the wrong way and you will believe them.** This project's most
+expensive instance was that shape — **AABB**: NMS, GIoU and AP were all axis-aligned, so rotation
+errors were numerically invisible and **the scores were even higher**. With the same wrong assumption
+sitting inside both the model and the ruler, no amount of ablation can measure it, because both sides
+are wrong together.
 
-出路只有一条：**一把和实现不共享假设的尺子**。图就是这把尺子。而 —— 你说得对 ——
-**大模型对图像 / 视频 / 3D 的理解不可靠，所以这一关必须是人**。
-agent 不许看着渲染截图声称"看着对了"；agent 的活是**把人要看的东西准备到几分钟能扫完**。
+There is only one way out: **a ruler that shares no assumption with the implementation.** The picture
+is that ruler. And — you were right — **large models' understanding of images / video / 3D is
+unreliable, so this gate must be a person.** An agent may not look at a rendered screenshot and
+declare "it looks right"; the agent's job is **to prepare what the person must look at so it can be
+scanned in minutes.**
 
+➜ How to choose frames, the two independent visual channels for blind review (**one channel cannot
+detect its own errors**), the discard rate as a metric, and how a person's judgement becomes a count
+written back to `findings.json`: `references/human-review.md`.
 
-➜ 怎么选帧、盲评的两个独立视觉通道（**一个通道无法检错**）、丢弃率当指标、
-人的判断怎么变成计数写回 `findings.json`：`references/human-review.md`。
+## The experiment record standard (the run card) — the only thing still standing after several rounds
 
-## 实验记录标准（run card）—— 多轮之后唯一还在的东西
+‼️ **If an experiment's conditions live only in a chat log, it is not an experiment. It is an
+anecdote.** Once there are several arms, several rounds, and **several different orderings**, "why is
+this number different from that one" can no longer be answered from memory — and that is precisely
+what debate ① exists to adjudicate. **A debate with nothing to cite produces opinions.**
 
-‼️ **一次实验，条件只活在聊天记录里，那它就不是实验，是轶事。**
-一旦出现多臂、多轮、而且**多种先后次序**，「这个数为什么和那个不一样」就没法凭记忆回答了 ——
-而那恰恰是辩论 ① 要裁的问题。**没有东西可引的辩论，产出的是意见。**
+The rule: **one card per run, written before the run, results appended only afterwards.**
 
-规矩：**每个 run 一张卡，跑之前写，跑完只允许追加结果。**
+Four hard rules (in one-line form; **the full argument, the seven mandatory fields, and the measured
+lessons from the four ways the record layer breaks are in `references/run-card.md` — read it before
+opening an arm**):
 
-四条硬规则（一句话版，**完整论证、七个必记字段、和四种记录层坏法的实测教训在
-`references/run-card.md`，开一条臂之前读那份**）：
+1. ‼️ **The delta must be computed, not described.** `check` diffs two cards' configs and asserts the
+   result equals `declared_delta`. **More than one key of difference is not a controlled experiment**,
+   and no result can be attributed to any one of them.
+2. ‼️ **`parent` is not `warm_start_from`.** The first is "who it is read against", the second is
+   "where the weights came from". **A run with no parent cannot be attributed.**
+3. ‼️ **Comparability fingerprint = hash(data identity + metric script + thresholds), and two cards
+   with different ones may not be compared** — `check` refuses outright. This is the machine-executable
+   form of "change the metric and the old curves are void" and "cross-source comparison requires one
+   convention" — previously remembered, which is to say not enforced.
+4. ‼️ **Store the bytes, not only the hash.** A hash only answers "these two differ"; **only a copy
+   answers "where"**, and six weeks later the second is what you need. Storage cost should not enter
+   this decision; when in doubt, store more.
 
-1. ‼️ **delta 要算出来，不是描述出来。** `check` 把两张卡的 config 做差、断言等于
-   `declared_delta`。**差超过一个 key 就不是受控实验**，任何结果都不能归因到其中任何一个。
-2. ‼️ **`parent` 不是 `warm_start_from`。** 前者是「拿谁读它」，后者是「权重从哪来」。
-   **没有 parent 的 run 无法归因。**
-3. ‼️ **可比性指纹 = hash(数据身份 + 度量脚本 + 门限)，不同的两张卡不许比**，`check` 直接拒。
-   这是「换了度量旧曲线就作废」和「跨源对比要同口径」的机器可执行版 —— 以前靠记得，也就是没有执行。
-4. ‼️ **存字节，不只存哈希。** 哈希只回答「这两次不一样」，**只有副本能回答「哪里不一样」**，
-   而六周后需要的是后者。存储成本不该出现在这个决策里，拿不准就多存。
+‼️ **The record layer breaks on its own, and more insidiously than the experiment does** — four ways,
+none of which raises, and the most expensive sentence among them: **a guard that alarms because of its
+own version drift is a guard people learn to ignore**; while **enumerating the empty set** makes the
+guard report the very conclusion it exists to exclude (`sha256("")` is identical for every run, so
+`check` says "same code"). **A rubber stamp is worse than no stamp, because a stamp gets believed.**
 
-‼️ **记录层自己会坏，而且坏法比实验的坏法更阴** —— 四种全都不报错，其中最贵的一句是：
-**会因自己版本漂移而报警的守卫，是人学会忽略的守卫**；而**枚举出空集**时，
-守卫会报出它专门要排除的那个结论（`sha256("")` 每个 run 都一致，于是 `check` 说 "same code"）。
-**橡皮章比没有章更坏，因为章会被信。**
+‼️ **A completely correct test can give completely wrong confidence** — it verifies the formula, not
+which corpus the formula's inputs come from. The four failure shapes, the countermeasures, and why the
+tests written for these traps also pass vacuously are all in `references/run-card.md`.
 
-‼️ **一个完全正确的测试，可以给出完全错误的信心** —— 它验的是公式，不是公式的输入
-来自哪个语料。四种坏法、对策、以及给这些坑写的测试为什么也会空过，都在
-`references/run-card.md`。
+**Debates must cite run ids.** Keeping only the conclusion and not the strongest rebuttal means nobody
+next round knows what this has already been challenged on.
 
-**辩论要引 run id。** 只留结论不留最强反驳，下一轮没人知道这条已经被质疑过什么。
-## Stage 7 — 落到文档（**update**，不是新写）
+## Stage 7 — land it in the document (**update**, do not write anew)
 
-‼️ **那一章 Stage 3 就已经存在了**（plan 先于实现 —— 用户明确要求过这一点）。
-这一步是把它**更新到当前状态**，不是这时候才动笔：
+‼️ **That chapter already existed as of Stage 3** (plan before implementation — the user asked for this
+explicitly). This step **updates it to the current state**; it is not where the writing starts:
 
-| 这一步往那一章里补 | 那一章本来就有（Stage 3 / 3.5 写的） |
+| What this step adds to that chapter | What the chapter already has (written in Stage 3 / 3.5) |
 |---|---|
-| 每条提案的**结果**和裁决（含 `[T1 趋势]` 之类的档位标签） | 提案表、预注册指标、护栏、前提及份额 |
-| **已杀假设清单**（`killed_by` + `revive_if`，四类不能混） | 排序及其理由、档位 T0–T4 |
-| **还没做的实验**和它们的预期收益、**被什么挡着** | 四态审计表 |
+| each proposal's **result** and verdict (including tier labels such as `[T1 trend]`) | the proposal table, pre-registered metrics, guardrails, premises and shares |
+| the **killed-hypothesis list** (`killed_by` + `revive_if`, the four never interchangeable) | the ranking and its reasoning, tiers T0–T4 |
+| **experiments not yet run**, their expected benefit, and **what is blocking them** | the four-state audit table |
 
-**新开一节 = 这一轮的 plan 没起到作用。** 如果动笔时发现「表里没有格子能放这个结果」，
-那说明 Stage 3 漏了一列，**回去补那一列**，而不是在文档末尾追加一段叙述 ——
-叙述读不出「哪条提案还活着」，表格读得出。
+**Opening a new section = this round's plan did no work.** If you find while writing that "there is no
+cell in the table for this result", Stage 3 missed a column — **go back and add that column**, rather
+than appending a narrative paragraph at the end of the document. A narrative cannot be read for "which
+proposals are still alive"; a table can.
 
-agent 换了 context 就没有记忆，只有写下来的东西下一轮还在；
-而**能被 update 的结构比能被读懂的散文更耐第二轮**。
+An agent has no memory across contexts, and only what was written down is still there next round — and
+**a structure that can be updated survives a second round better than prose that can be understood.**
 
-## Stage 8 — 收口：回写 + 技术债（这条流水线的反馈边）
+## Stage 8 — closing out: writing back, and technical debt (this pipeline's feedback edge)
 
-前面七步是线性的，**一轮结束必须回写，否则下一轮又从零开始**。
+The first seven steps are linear. **A round must write back when it ends, or the next one starts from
+zero.**
 
-‼️ **「这一轮该停了吗」是一个判断，不是一个时间点** —— 判据在
-**`references/explore-or-stop.md`**：停之前必须通过三问（病换了没有 / 还有没有 oracle 上限大于噪声底 /
-有没有「赢了没归因」），以及**六种假的「搜完了」**。默认答案偏向继续，因为"没有提升"最常见的成因
-不是搜完了，是**判据坏了**。
+‼️ **"Should this round stop" is a judgement, not a point in time** — the criteria are in
+**`references/explore-or-stop.md`**: three questions must be passed before stopping (has the disease
+changed / is there still an oracle ceiling above the noise floor / is anything "won but unattributed"),
+plus **six false "the search is finished"**. The default answer leans toward continuing, because the
+commonest cause of "no improvement" is not that the search is finished — it is that **the criterion is
+broken**.
 
-算力侧的收尾在 **`references/cluster-ops.md`** —— ‼️ **别把释放当成收尾动作去执行**：
-实例和孤儿盘由常驻的 `net.miniclaw.gpujanitor` 每 15 分钟自己巡，结果在
-`~/.claude/miniclaw/gpu_janitor.json`（先看 `generated_at` 还在不在动 —— 那是它的存活信号；
-不动了才退回手动，因为**列实例的命令在错的 project 上会静默返回空**）。
-你手上只剩 janitor 在云 API 里看不见的两条：**checkpoint 搬走**、**run card 落盘**。
+The compute-side wrap-up is in **`references/cluster-ops.md`** — ‼️ **do not execute release as a
+wrap-up step**: instances and orphaned disks are swept every 15 minutes by the resident
+`net.miniclaw.gpujanitor`, with results in `~/.claude/miniclaw/gpu_janitor.json` (check whether
+`generated_at` is still moving first — that is its liveness signal; only when it stops do you fall back
+to doing it by hand, because **the command that lists instances silently returns empty on the wrong
+project**). What is left in your hands is only the two things the janitor cannot see in a cloud API:
+**moving the checkpoints off**, and **the run cards landing on disk**.
 
-1. **回写 `findings.json`**：那条失败用**同一个 `measure.script`** 重量一遍，改 `value`，
-   不要新开字段。份额掉到多少写多少 —— 这是唯一能证明"机理验上了"的东西。
-   人的盲评比例也作为一条 `source: "human"` 回写进去。
-2. **更新 P（先验）**：这次成了 → 同族技巧（同一篇论文、同一个思路家族）的 P 上调；
-   忠实移植但没效果 → 同族 P 下调。**P 会学习，它不是查表查来的常数。**
-3. **写 `status: killed` 时必须带 `killed_by` 四类之一**：
-   `份额太小` / `机理不对症（⑤ 的 C 否决）` / `实现忠实但无效` / `阻塞在数据`。
-   四类的复活条件不同，混在一起写等于没写。
-4. ‼️ **`killed` 有失效条件，不是永久墓地**：每条要带一句 `revive_if`
-   ——"什么变了就该重提"。换了度量、换了数据分布、依赖的提案落地了，旧的 kill 就可能不成立。
-   （「换了度量旧曲线就作废」这条规矩对 killed 同样适用。）
+1. **Write back to `findings.json`**: re-measure that failure with **the same `measure.script`** and
+   change `value`; do not add a new field. Whatever the share fell to, write that — it is the only thing
+   that can prove the mechanism was confirmed. The human blind-review ratio is also written back, as a
+   `source: "human"` entry.
+2. **Update P (the priors)**: it worked → raise P for the same family (same paper, same family of idea);
+   ported faithfully with no effect → lower P for the family. **P learns; it is not a constant read out
+   of a table.**
+3. **Writing `status: killed` requires one of the four `killed_by` values**: `share_too_small` /
+   `wrong_mechanism (vetoed by ⑤'s C)` / `faithful_but_inert` / `blocked_on_data`. The four revive
+   differently, and writing them interchangeably is the same as not writing them.
+4. ‼️ **`killed` has an expiry; it is not a permanent grave**: every entry carries a `revive_if` — "what
+   change should bring this back". A changed metric, a changed data distribution, or a dependency
+   landing can all invalidate an old kill. ("Change the metric and the old curves are void" applies to
+   killed entries too.)
 
-### 技术债闸门
+### The technical-debt gate
 
-‼️ **这条流水线结构性地生产屎山**：每个技巧一个 flag、默认关、一个分支 ——
-攒几轮之后死 flag、两套并存的口径、没人测过的 flag 组合就堆起来了。**这是规则的代价，不是意外**，
-所以每轮收口要显式过一遍，值得就叫 `agent-refactor` skill 收拾一次：
+‼️ **This pipeline structurally produces a mess**: one flag per technique, defaulting off, one branch
+each — and after a few rounds the dead flags, the two coexisting conventions, and the never-tested flag
+combinations pile up. **This is the rules' cost, not an accident**, so walk it explicitly at every
+close-out, and when it is worth it call the `agent-refactor` skill to clean up:
 
-- **死 flag**：定档 T0 或 `killed` 的技巧留下的 flag 还在代码里 —— 纯负债，删（走 checkpoint 的
-  retired-param **映射**，不是豁免）。
-- **同一个概念两套口径并存**（两套正样本定义、两套 box 表示）—— ‼️ 这是「同名不同义」和 AABB 类
-  错误的滋生地，优先级最高。
-- **flag 组合爆炸**：n 个 flag 的组合里实际被测过的只有两三条路径，其余是幻觉温床。
-- 散弹式修改（改一处要改三处）、测试变慢变脆。
+- **Dead flags**: flags left behind by techniques tiered T0 or `killed` are pure liability — delete them
+  (through the checkpoint's retired-param **mapping**, not an exemption).
+- **One concept with two coexisting conventions** (two definitions of a positive, two box
+  representations) — ‼️ this is the breeding ground for "same name, different meaning" and AABB-class
+  errors, and it has the highest priority.
+- **Flag-combination explosion**: of the combinations of n flags, only two or three paths were ever
+  tested; the rest are a hallucination incubator.
+- Shotgun changes (change one thing, edit three places), and tests getting slower and more brittle.
 
-两条硬约束：
+Two hard constraints:
 
-- ‼️ **refactor 必须夹在两次实验之间，而且行为不变。** 验收判据就是便宜检查目录里那条：
-  **关掉所有新 flag 后与 refactor 前 bit-exact**。混进一轮实验里做，Stage 6 的对照就废了
-  （违反"一次只改一件事"）。
-- **本轮结论没回写完之前不 refactor**，大跑正在跑的时候也不 —— 否则搭车那次跑的代码和记录对不上号。
+- ‼️ **A refactor must sit BETWEEN two experiments, and must not change behaviour.** The acceptance
+  criterion is the one from the cheap-check catalogue: **with every new flag off, bit-exact with the
+  pre-refactor state.** Mixed into a round of experiments, Stage 6's control is void (it violates "change
+  one thing at a time").
+- **No refactor before this round's conclusions are fully written back**, and none while a large run is
+  in flight — otherwise the code that ran and the record of it do not match.
 
-### 一轮结束的定义
+### The definition of a round ending
 
-**T3 队列只推进一条**（它占掉那个变量位），T1/T2 可以并行几条。
-默认走小的局部 ablation（规矩 5）；**交叉项在所有单项验完之后再决定要不要跑**。
-一轮结束的标志是 **`findings.json` 里那条的 `value` 被重量过**，不是"代码合了"。
+**The T3 queue advances by one** (it occupies that variable slot), while several T1/T2 may run in
+parallel. Default to small local ablations (rule 6); **whether to run the cross terms is decided after
+every individual has been verified.** A round ends when **that `findings.json` entry's `value` has been
+re-measured**, not when "the code was merged".
 
-### ‼️ 然后必调 `/conclude` —— `graph.json` 里没有结论
+### ‼️ Then always call `/conclude` — there are no conclusions in `graph.json`
 
-`graph.json` 记的是**哪条臂赢了**（`verdict: won`、`+1.31`、`killed_by: faithful_but_inert`）。
-那是**结果**，不是结论。一轮跑完真正会被复述的是那句「所以一对一在这个语料上有用 / 没用」，
-而它带着三个 `graph.json` 里根本没有的东西：**它对哪个语料成立、它的档位是几、
-什么测量会推翻它**。这一轮结束卡就地封存，六周后没人再打开；那句话却会被引用，
-而且会被引用到一个从来没测过它的语料上。
+`graph.json` records **which arm won** (`verdict: won`, `+1.31`, `killed_by: faithful_but_inert`). That
+is a **result**, not a conclusion. What actually gets repeated after a round is the sentence "so
+one-to-one does / does not help on this corpus", and it carries three things `graph.json` does not have
+at all: **which corpus it holds for, what tier it is, and what measurement would overturn it**. The
+cards are sealed when the round ends and nobody opens them again six weeks later; that sentence, though,
+will be quoted — and quoted about a corpus it was never measured on.
 
-所以每张 `closed` 的卡收口时问一次：**这条给了我们什么可以被推翻的信念？**
-有就 `conclude.py add` 一条，把该卡和那次 run 当证据挂上去（`--quote` 抄原行，不写概括）。
-没有也行 —— 一条臂赢了不一定产生信念。**别为了填表造结论。**
+So at close-out, ask once per `closed` card: **what refutable belief did this give us?** If there is one,
+`conclude.py add` it, attaching that card and that run as evidence (`--quote` transcribes the line; never
+a summary). If there is none, that is fine — an arm winning does not necessarily produce a belief.
+**Do not manufacture conclusions to fill in a table.**
 
-收完结论,**再跑一次 `/ara build`** —— 这一轮的产出就有了一份别人能读的形状:
-`src` 是输入(代码 + config,在架构搜索里**就是**可复现性本身),
-`evidence` / `logic` / `trace` / `weights` 是输出。**不需要有机器要销毁**;
-`/evacuate` 只是在一台机器快没的时候把同一件事**逼着**做完。
+Once the conclusions are in, **run `/ara build` once more** — and this round's output then has a shape
+somebody else can read: `src` is the input (code + config, which in an architecture search **is**
+reproducibility itself), and `evidence` / `logic` / `trace` / `weights` are the output. **No machine
+needs to be about to be destroyed**; `/evacuate` merely *forces* the same thing to be finished when one
+is.
 
-‼️ 反过来也是这里：**旧结论可能刚刚被这一轮否掉**。`conclude.py check` 会把靠它的那些
-标成 `contested`，那批就是下一轮的候选，而且是**已经有人押过注**的候选。
+‼️ The reverse also lives here: **an old conclusion may have just been refuted by this round.**
+`conclude.py check` marks whatever rested on it `contested`, and that batch is next round's candidate
+list — a candidate list somebody has **already bet on**.
 
 ---
 
-## 退出：这个 skill 的前提必须能被推翻
+## Exit: this skill's own premise must be refutable
 
-‼️ **这条流水线假设「病在架构里」。这个假设本身要能被否掉，否则它会自我延续** ——
-排下一条提案永远比承认"层找错了"容易。出现下面任一，停下来回到数据 / 标注 / 任务定义：
+‼️ **This pipeline assumes the disease is in the architecture. That assumption must itself be refutable,
+or it will perpetuate itself** — queueing another proposal is always easier than admitting you were
+working at the wrong layer. On any of the following, stop and go back to the data / the annotation / the
+task definition:
 
-- **连续两轮**所有提案都是 `killed_by: 实现忠实但无效` —— 搬对了却没用，说明改错了层；
-- 份额最大的那条 FINDINGS，**标签本身就有歧义**（我们这儿 25.3% 的标签在深度上歧义 74–210 mm，
-  而面精度只有 ±12 mm）—— 架构再好压不住标注的方差；
-- 误差量级和**传感器 / 标注复现精度**同阶（去量一下标注重复标两遍的差）；
-- 预注册指标已经饱和（volume IoU p50 0.882、81% > 0.8）—— **换尺子比换架构划算**。
+- **Two consecutive rounds** in which every proposal ends `killed_by: faithful_but_inert` — ported
+  correctly with no effect means the wrong layer was changed;
+- the largest-share FINDINGS entry is one where **the labels themselves are ambiguous** (here, 25.3% of
+  labels are ambiguous by 74–210 mm in depth, while face precision is only ±12 mm) — no architecture
+  suppresses annotation variance;
+- the error magnitude is the same order as **sensor or annotation reproducibility** (go and measure the
+  difference between two annotations of the same thing);
+- the pre-registered metric is already saturated (volume IoU p50 0.882, 81% > 0.8) — **changing the ruler
+  pays better than changing the architecture.**
 
-**"该不该退出"本身值得开一场 ④ 式辩论**，因为默认的惯性一定是继续排提案。
+**"Should we exit" is itself worth a ④-style debate**, because the default inertia is certainly to queue
+another proposal.
 
 ---
 
-## 多 agent 辩论：只在六处起，且必须有裁决规则
+## Multi-agent debate: only in six places, and always with an adjudication rule
 
-辩论最容易退化成两个 agent 互相点头。让它有用的四条前提：
+Debate degenerates most easily into two agents nodding at each other. Four preconditions make it useful:
 
-- ‼️ **先问该不该开：清单上能被一条命令直接回答的问题，去跑那条命令，别开辩论会。**
-  "噪声底量过没有" → 同权重跑两遍；"对照是不是今天的代码" → 看 git sha。
-  **辩论是给证据已用尽或取证很贵的问题用的，不是廉价测量的替代品。**
-- **反对方独立输入，不许先看提出方的结论** —— 否则它只会围着那个结论打补丁，
-  这就是「独立标尺」原则用在 agent 上。
-- **反驳必须落在一张固定清单上**（下面每处各给一份）。"我感觉不太行"不算反驳。
-- **要有裁决规则**：结构性反驳（口径、变量数、自由度、依赖没满足）**不能**用
-  "但论文里涨了 2 个点 / 但我们 AP 涨了" 来回应 —— **分数不是对结构问题的回答**。
-  这条和 `model-first-then-fit` 的 Proponent/Skeptic 裁决规则是同一条，保持一致。
+- ‼️ **Ask first whether to convene: if a question on the checklist can be answered by one command, run
+  the command instead.** "Has the noise floor been measured" → run twice at the same weights; "is the
+  control on today's code" → look at the git sha. **Debate is for questions where the evidence is
+  exhausted or expensive to obtain, not a substitute for a cheap measurement.**
+- **The opposing side gets independent input and may not see the proposer's conclusion first** —
+  otherwise it will only patch holes around that conclusion. This is the "independent ruler" principle
+  applied to agents.
+- **Rebuttals must land on a fixed checklist** (one is given for each of the six below). "I don't think
+  it works" is not a rebuttal.
+- **There must be an adjudication rule**: a structural rebuttal (convention, number of variables, degrees
+  of freedom, unmet dependency) **may not** be answered with "but the paper gained 2 points / but our AP
+  went up" — **a score is not an answer to a structural objection.** This is the same rule as
+  `model-first-then-fit`'s Proponent/Skeptic adjudication; keep them consistent.
 
-六处，按性价比排序（**角色 prompt、每处的反驳清单、盲输入协议、裁决记录格式全在
-`references/debate-roles.md`，起之前读那份**，这里只留「哪处值得起、为什么」）：
+The six, ordered by value for money (**the role prompts, each one's rebuttal checklist, the blind-input
+protocol and the adjudication record format are all in `references/debate-roles.md` — read it before
+convening**; this keeps only "which is worth convening, and why"):
 
-| | 起在哪 | 为什么值 |
+| | Where it is convened | Why it is worth it |
 |---|---|---|
-| **①** | Stage 6 结果解读 | 本轮三次翻车（假噪声底、旧曲线作废、跨源口径）全在它那份清单上，一个专职怀疑者都能拦住 |
-| **②** | 输入 A 的量化脚本红队 | **本轮最严重的错都在测量代码里，不在推理里** —— 攻击尺子比攻击结论更值 |
-| **③** | Stage 3.5 定档 | P 和 U 两轴纯主观，一个人的乐观直接决定钱花在哪 |
-| **④** | Stage 3 提案表 | Proponent + Skeptic；最常命中的一条是「这技巧其实已经在代码里」 |
-| **⑤** | Stage 5 移植验收 | **测试只能验「接线通没通」，验不了「这处差异要不要紧」** —— 源码不会告诉你哪个是哪个 |
-| **⑥** | 写下预注册指标的那一刻 | ② 问「尺子实现对不对」，⑥ 问**「这把尺子该不该是这个形状」**。AABB 那次脚本算得完全正确、算的东西错了，② 的清单一条都拦不住 |
+| **①** | Stage 6 result interpretation | all three of this round's crashes (the false noise floor, the voided old curves, the cross-source convention) are on its checklist, and one dedicated skeptic would have stopped every one |
+| **②** | red-teaming Input A's quantification script | **this round's worst errors were in the measurement code, not in the inference** — attacking the ruler is worth more than attacking the conclusion |
+| **③** | Stage 3.5 tiering | the P and U axes are purely subjective, and one person's optimism decides directly where the money goes |
+| **④** | Stage 3's proposal table | Proponent + Skeptic; the most frequent hit is "this technique is already in the code" |
+| **⑤** | Stage 5 port acceptance | **tests can only verify that the wiring connects, never whether a given difference matters** — the source code will not tell you which is which |
+| **⑥** | the moment the pre-registered metric is written down | ② asks "is the ruler implemented correctly", ⑥ asks **"should the ruler have this shape at all"**. In the AABB case the script computed entirely correctly and computed the wrong thing; not one item on ②'s checklist would have stopped it |
 
-三条从这六处里提出来、必须留在正文的判断：
+Three judgements extracted from those six that must stay in this document:
 
-- ‼️ **⑤ 的 2×2 里，「忠实但打不中我们的病」= 提案错了，不是实现错了。**
-  这格最贵 —— 人会本能地去调实现，一调好几周。验收必须在**打开 flag、开大跑之前**做完，
-  否则白占 T3 那唯一的变量位。（另外三格见 `references/debate-roles.md`）
-- ‼️ **预注册至少要两个指标：一个「应该动」的 + 一个「不该动」的护栏指标。**
-  只有一个的时候，你分不清「真的变好」和「把误差搬到了别处」。
-- ‼️ **⑥ 之外那四条查表就能答，别开会**（前提第 1 条）：**噪声底量过没有**（没量过的
-  不能当预注册指标）、**离饱和多远**（volume IoU p50 已经 0.882 —— 再涨没有分辨力了）、
-  **量程里有多少是人为常数造出来的**（60 mm face-slab 的量程一部分就是那个 60 mm）、
-  **方向和单位**（`worse: up/down`、毫米还是比例）。
+- ‼️ **In ⑤'s 2×2, "faithful but does not hit our disease" = the proposal is wrong, not the
+  implementation.** That cell is the most expensive — the instinct is to go and tune the implementation,
+  which takes weeks. Acceptance must be complete **before turning the flag on and before any large run**,
+  or it wastes T3's one variable slot. (The other three cells are in `references/debate-roles.md`.)
+- ‼️ **Pre-register at least two metrics: one that SHOULD move, plus a guardrail that should NOT.** With
+  only one, you cannot distinguish "genuinely better" from "the error was moved somewhere else".
+- ‼️ **The four outside ⑥ are answered from a table; do not convene** (precondition 1): **has the noise
+  floor been measured** (one that has not may not be a pre-registered metric), **how far from
+  saturation** (volume IoU p50 is already 0.882 — further gains have no resolution), **how much of the
+  range is manufactured by artificial constants** (part of the 60 mm face-slab's range IS that 60 mm),
+  and **direction and units** (`worse: up/down`, millimetres or a ratio).
 
-**不要在这些地方起辩论**：Stage 1 四态审计（那是查代码，要的是**独立盲复审**而不是辩论 ——
-我把三条已存在的技巧写成过 ❌）、Stage 2（跑 flag）、Stage 4（找代码，要的是**多路并行搜索**：
-按论文名 / 按算子名 / 按 config flag 名 / 按 issue 讨论）。
+**Do not convene a debate here**: Stage 1's four-state audit (that is reading code, and what it needs is
+an **independent blind re-review**, not a debate — I wrote three existing techniques as ❌ once), Stage 2
+(running flags), Stage 4 (finding code, where what is needed is a **parallel multi-route search**: by
+paper name / by operator name / by config flag name / by issue discussion).
 
-### 裁决
+### Adjudication
 
-**裁决由主 agent 做，不由辩论方做。** 默认判决**按被辩对象分两种，不要搞混**：
+**The main agent adjudicates, not the debating sides.** The default verdict **splits by what is under
+debate; do not conflate them**:
 
-| 被辩的是 | 未被回答的结构性反驳 → | 为什么 |
+| What is under debate | An unanswered structural rebuttal → | Why |
 |---|---|---|
-| **结论 / 数字**（"这个改动有效"） | **判不成立** | 假阳性（相信一个不存在的改进，再在它上面盖楼）比多验一轮贵得多 |
-| **提案 / 要不要试** | **降档或补一次测量**，不是杀掉 | 便宜检查功率低（Stage 3.5 规矩 2）。唯一例外：反驳是"这技巧已经在代码里"——那是事实性错误，直接出表 |
-| **实现 / 搬对了没有** | **不许开大跑**，先做那个便宜检查 | 「待定」没结掉就开跑，等于用几小时到几天去问一个几分钟能问出来的问题 |
+| **a conclusion / a number** ("this change works") | **does not hold** | a false positive (believing in an improvement that does not exist, then building on it) is far more expensive than one more round of verification |
+| **a proposal / whether to try it** | **tier it down or add one measurement**, not kill it | cheap checks have low power (Stage 3.5 rule 2). The one exception: the rebuttal is "this technique is already in the code" — that is a factual error, and it leaves the table |
+| **an implementation / was it ported correctly** | **no large run**; do that cheap check first | starting a run with an "undecided" unresolved spends hours to days asking a question answerable in minutes |
 
-**默认串行。** 起 agent 要说明起了几个、各是什么角色、裁决结果是什么。
-**不写裁决过程的辩论等于没辩** —— 只留结论不留最强反驳，下一轮没人知道这条已经被质疑过什么。
+**Serial by default.** When starting agents, state how many, in what roles, and what the adjudication
+was. **A debate whose adjudication is not written down did not happen** — keeping only the conclusion
+and not the strongest rebuttal means nobody next round knows what this has already been challenged on.
 
-➜ 六处的**角色 prompt、反驳清单、盲输入协议、六行裁决记录格式**：
-`references/debate-roles.md`（可直接抄，subagent 拿不到对话上下文，prompt 必须自带原始材料）。
+➜ The six roles' **prompts, rebuttal checklists, blind-input protocol and six-line adjudication record
+format**: `references/debate-roles.md` (copy them directly; a subagent cannot see the conversation, so
+the prompt must carry the raw material itself).
 
 ---
 
-## 这个 skill 自己的翻车记录
+## This skill's own crash record
 
-- 报了一个假的噪声底（0.06），据此写了 "+0.30" 的结论 → 撤回。**先量两次。**
-- 把 GT 的"最沿视线的轴号"拿去索引预测的 `size`，而 27.7% 的匹配对根本不同意那是哪根轴
-  （rot6d 框有多个等价坐标系）→ 把一个只是换了标号的正确框算成 100 mm 深度误差。
-  **不要把一个物体的标号约定跨界用到另一个物体上。**
-- 提了 P0-b「输出两个面」，自己撤回：16 个输出表达 9 个自由度的信息，7 个冗余。
-  **数一下输出的自由度对不对得上信息量。**
-- 声称 `--corner_vis_weights` 能解耦深度 —— 错，那些类别是**传感器可见性**，不是几何前后面。
-  **读清楚一个字段到底在标什么，再拿它当开关。**
-- 用备份 `diff -q` 验证恢复 —— 恒真，等于没验。**恢复之后跑那个文件的测试。**
+- Reported a false noise floor (0.06) and wrote a "+0.30" conclusion on it → retracted. **Measure twice
+  first.**
+- Took the GT's "axis most along the line of sight" and used it to index the prediction's `size`, while
+  27.7% of matched pairs do not even agree which axis that is (a rot6d box has several equivalent
+  coordinate frames) → scored a correct box that merely used different labelling as a 100 mm depth error.
+  **Never carry one object's labelling convention across to another object.**
+- Proposed P0-b "output two faces" and withdrew it myself: 16 outputs expressing 9 degrees of freedom of
+  information, 7 redundant. **Count whether the output's degrees of freedom match the information.**
+- Claimed `--corner_vis_weights` could decouple depth — wrong: those categories are **sensor
+  visibility**, not geometric near/far faces. **Read what a field actually labels before using it as a
+  switch.**
+- Verified a restore with `diff -q` against the backup — trivially true, i.e. no verification at all.
+  **After restoring, run that file's tests.**
 
-## ‼️ 正文里的数字全部会过期
+## ‼️ Every number in this document expires
 
-`0.25` 噪声底、`0.882` IoU、`154 W`、`25.3%` …… 这些是**当时那个配置下的测量值，不是规矩**。
-规矩是「先量」，不是这些数。**换了权重 / 取帧 / 度量，它们同时作废**（Stage 0）。
+The `0.25` noise floor, `0.882` IoU, `154 W`, `25.3%` … these are **measurements under that
+configuration at that time, not rules**. The rule is "measure first", not these numbers. **Change the
+weights, the frame sampling or the metric and they are all void at once** (Stage 0).
 
-➜ 集中在 `stages/exploration/state.json`（常数表 + 当前提案档位 + **已杀清单带复活条件**），
-每条都注明了「量的时候」。**引用前先核那一列还成不成立，或者直接重量。**
+➜ They are collected in `stages/exploration/state.json` (the constants table + current proposal tiers +
+**the killed list with revival conditions**), each annotated with when it was measured. **Before citing
+one, check that column still holds — or just re-measure.**
 
-## ‼️ 这个 skill 现在要求了两件还不存在的工具
+## ‼️ This skill currently requires two tools that do not exist
 
-写清楚，免得下一轮的 agent 以为它们有：
+Written down so the next round's agent does not assume they do:
 
-1. **双通道盲评渲染器**（Stage 6.5 要求）：同一帧新旧两版、颜色 + 线型两个通道每帧独立重随机、
-   左右位置也随机、映射表存盘不给人看、外加一个核对脚本（两个通道一致才计入，
-   并报丢弃率）。现有的 `inference/rrd_9dof.py` 的配色**已经有语义含义**，不能直接复用。
-2. **配对自举 + 逐指标噪声底的统一度量约定**。源项目 2026-08-13 用 `scripts/measure_prereg.py`
-   做掉了：固定输出 `{"id","value","unit","n","worse"}` + 逐帧数组，`--diff` 做配对自举，
-   并**默认拒绝跨口径比较**。‼️ **MLClaw 这边没有对应物** —— `list_runs.py --comparable` 比的是
-   `mode` + `scope`，不含**度量脚本本身**，所以换了度量脚本的两个 run 在 MLClaw 眼里仍然可比。
-   `config.json -> fingerprint` 是给这条留的位置，**填了也还没有东西在核它**。
+1. **A two-channel blind-review renderer** (required by Stage 6.5): both versions of the same frame,
+   with colour and line style as two channels re-randomised independently per frame, position randomised
+   too, the mapping stored and never shown, plus a reconciliation script (count only when both channels
+   agree, and report the discard rate). The existing `inference/rrd_9dof.py`'s palette **already carries
+   semantic meaning** and cannot be reused directly.
+2. **A unified measurement convention with paired bootstrap and per-metric noise floors.** The source
+   project did this on 2026-08-13 with `scripts/measure_prereg.py`: a fixed
+   `{"id","value","unit","n","worse"}` output plus per-frame arrays, `--diff` for a paired bootstrap, and
+   **cross-convention comparison refused by default**. ‼️ **MLClaw has no counterpart** —
+   `list_runs.py --comparable` compares `mode` + `scope` and does not include **the metric script
+   itself**, so two runs whose metric script differs still look comparable to MLClaw.
+   `config.json -> fingerprint` is the slot reserved for this, and **filling it in still leaves nothing
+   checking it.**
 
-第 1 件仍然欠着，**不做 Stage 6.5 就只是纸面规矩**。
+The first is still outstanding, and **without it Stage 6.5 is only a rule on paper.**
 
-## 表格模板在哪
+## Where the table templates are
 
-正文里的表就是模板，直接抄：**四态审计表**（Stage 1）、**提案表**（Stage 3）、
-**三轴 + 档位 + 手段矩阵**（Stage 3.5）、**接口对照表**（Stage 4.5）、**默认判决表**（裁决）。
+The tables in this document are the templates; copy them directly: the **four-state audit table**
+(Stage 1), the **proposal table** (Stage 3), the **three axes + tiers + instrument matrix** (Stage 3.5),
+the **interface comparison table** (Stage 4.5), and the **default verdict table** (Adjudication).
 
-两份 reference：
+Two references:
 
-- `references/debate-roles.md` —— 六处辩论的**角色 prompt、反驳清单、盲输入协议、裁决记录格式**；
-- `stages/exploration/state.json` —— **会过期的东西全在这儿**：常数表、当前提案档位、已杀清单带复活条件。`graph.py check` 会报出引用了过期常数的每一张卡。
+- `references/debate-roles.md` — the six debates' **role prompts, rebuttal checklists, blind-input
+  protocol and adjudication record format**;
+- `stages/exploration/state.json` — **everything that expires is here**: the constants table, current
+  proposal tiers, and the killed list with revival conditions. `graph.py check` reports every card citing
+  a stale constant.
 
-两个落点，别混：
+Two destinations; do not mix them:
 
-- **`findings.json`** 在 `stages/exploration/` 下（它要被脚本重跑和 diff）；
-- **其余全部写进 `config.json -> design_doc` 指的那份文档**，不另开文件 —— 提案和现状分开放，
-  两周后就没人对得上号了。机器读的那半在 `graph.json`，由 `graph.py` 独占写入。
+- **`findings.json`** lives under `stages/exploration/` (it has to be re-run and diffed by scripts);
+- **everything else goes into the document `config.json -> design_doc` points at**, with no separate
+  file — keeping proposals and current state apart means nobody can reconcile them two weeks later. The
+  machine-readable half is `graph.json`, written exclusively by `graph.py`.
