@@ -1,268 +1,322 @@
-# 实验图：节点 schema · 状态机 · 四个操作 · 不变量
+# The experiment graph: node schema · state machine · four operations · invariants
 
-`SKILL.md` Stage 3 的 ablation 章是**一张图**，不是一列清单。这份文件是操作它的手册：
-怎么建节点、怎么取节点、怎么回填、以及**怎么发现这张图自己坏了**。
+`SKILL.md` Stage 3's ablation chapter is **a graph**, not a list. This document is the manual
+for operating it: how to create nodes, how to take nodes, how to fill results back, and **how to
+discover that the graph itself has broken**.
 
-判断性的东西（哪些依赖是假的、并行度为什么有硬上限）留在 `SKILL.md`；这里只写**怎么做**。
+The judgement calls (which dependencies are fake, why parallelism has a hard ceiling) stay in
+`SKILL.md`; this file is only **how to do it**.
 
-‼️ **这张图存活在 `stages/exploration/graph.json` 里**，不是存活在 agent 的上下文里。
-换了 context 就没有记忆，所以**每个操作都必须落到文件** —— 而在 MLClaw 里"落到文件"
-有执行者了：
+‼️ **This graph lives in `stages/exploration/graph.json`**, not in the agent's context. A new
+context has no memory, so **every operation must land in the file** — and in MLClaw "landing in
+the file" has an executor:
 
 ```bash
 python <mlclaw_root>/scripts/explore/graph.py <verb> --project <PROJECT>
 #   add   set   ready   fill   close   check   status
 ```
 
-下面四节里的 **ADD / TAKE / FILL / CLOSE 对应 `add`+`set` / `ready` / `fill` / `close`**，
-§4 的不变量对应 `check`。原版这份文件里那句「定期扫，坏了要报不要自己修」在 markdown 上
-没有执行者 —— `check` 就是它，而且它**报，不修**：一张会自我修复的图会掩盖"有东西写进了
-非法状态"这件事，而这里每一种非法状态读起来都像正常的。
+The **ADD / TAKE / FILL / CLOSE** of the four sections below correspond to `add`+`set` /
+`ready` / `fill` / `close`, and §4's invariants correspond to `check`. In the original version
+of this document, the sentence "scan periodically; report breakage rather than repairing it"
+had no executor in markdown — `check` is that executor, and it **reports without repairing**: a
+graph that repairs itself would conceal the fact that *something wrote an illegal state*, and
+every illegal state here reads as a normal one.
 
-‼️ **`check` 有 critical 时 exit 1。按 CLAUDE.md「Script Integration」，那是脚本工作了、
-答案是不行 —— 不是脚本坏了，不要回退到手工绕过。**
+‼️ **`check` exits 1 when there is a critical finding. Per CLAUDE.md "Script Integration" that
+means the script worked and the answer is no — it is not a broken script, so do not fall back
+and work around it by hand.**
 
 ---
 
-## 1. 节点 schema
+## 1. Node schema
 
-每个节点是一张卡。**缺任一字段的节点不许进入 `就绪`**。
+Every node is a card. **A node missing any field may not enter `ready`.**
 
-| 字段 | 说明 | 缺了会怎样 |
+| Field | Meaning | What breaks without it |
 |---|---|---|
-| `id` | 队列号，**稳定不复用**（杀掉的号不回收） | 交叉引用会指错 |
-| `条目` | 一句话说清改什么 | — |
-| `类型` | `测量` / `移植` / `自创` / `任务驱动` | ‼️ `自创` 要自动升一档验证（Stage 5）；四类的复活条件不同 |
-| `前提` | 这条要成立，世界必须是什么样 | 规则 2.5 的抓手没有了 |
-| `前提份额` | **在本轮真正要跑的语料上**实测 | ‼️ 引自别处 = 视为没有前提 |
-| `主判据 + 预测方向` | 一个，且不能只是 AP | 机理无法验上（规矩 2） |
-| `护栏` | 至少一个，防 Goodhart | 退化不可见 |
-| `父节点` | 单 key delta 的挂载点 | delta 不可归因 |
-| `依赖` | `[id, ...]`，每条边说清**它挡的是什么**：`"N06"`（挡开跑）或 `{"id":"N06","blocks":"reading"}`（只挡读数） | **无法算 ready set**。‼️ 而只写 id 不写 kind 的那版，算出来的 ready set 是**对的但太小** —— 见 TAKE |
-| `conditional_on` | `close` 自己填：裁决落下时还没结案的 `reading` 上游 | 一个有条件的结论会当成无条件的传出去 |
-| `oracle 上限` | 能 0 成本量就必须填（规则 2.6） | 可能在跑一条上限为零的臂 |
-| `杀死条件` | 什么结果算它死了 | 提不出杀死条件的提案本身不合格（规矩 6） |
-| `run id` | 进入 `在跑` 时写，含代码快照哈希 | 事后无法确认几条臂跑的是同一份代码 |
-| **对面那一头** | 那次 run 的 `run.json -> verifies` 要指回这张卡，并写 `falsified_if` | ‼️ **单向指针读起来和绑定一模一样**，直到有人去跟。`check` 两头都核 |
+| `id` | queue number, **stable and never reused** (a killed number is not recycled) | cross-references point at the wrong thing |
+| `title` | one sentence saying what changes | — |
+| `kind` | `measurement` / `port` / `original` / `task-driven` | ‼️ `original` automatically raises the verification tier (Stage 5); the four kinds revive differently |
+| `premise` | what the world must be like for this to hold | rule 2.5 loses its handle |
+| `premise_share` | measured **on the corpus this round will actually run** | ‼️ quoted from elsewhere = treated as having no premise |
+| `primary criterion + predicted direction` | exactly one, and it may not be AP alone | the mechanism cannot be confirmed (rule 2) |
+| `guardrail` | at least one, against Goodhart | degradation is invisible |
+| `parent` | the mount point for a single-key delta | the delta cannot be attributed |
+| `depends_on` | `[id, ...]`, and every edge states **what it blocks**: `"N06"` (blocks launching) or `{"id":"N06","blocks":"reading"}` (blocks only the reading) | **the ready set cannot be computed**. ‼️ And the version that writes an id without a kind computes a ready set that is **correct but too small** — see TAKE |
+| `conditional_on` | filled by `close` itself: the `reading` upstreams still unsettled when the verdict landed | a conditional conclusion propagates as an unconditional one |
+| `oracle ceiling` | mandatory whenever it can be measured at zero cost (rule 2.6) | you may be running an arm whose ceiling is zero |
+| `kill_condition` | what result counts as this being dead | a proposal that cannot state a kill condition is itself unfit (rule 6) |
+| `run id` | written on entering `running`, including the code snapshot hash | afterwards there is no way to confirm several arms ran the same code |
+| **the other end** | that run's `run.json -> verifies` must point back at this card and carry `falsified_if` | ‼️ **a one-way pointer reads exactly like a binding**, until somebody follows it. `check` verifies both ends |
 
 ---
 
-## 2. 状态机
+## 2. State machine
 
 ```
-⬜ 待补卡 ──补齐 schema──→ 🟨 待前置 ──launch 依赖全部 已裁决/已杀──→ 🟩 就绪
-                                                                   │
-                                                        declare run card
-                                                                   ↓
-  ❌ 已杀 ←──killed_by + revive_if──┐                          🔵 在跑
-                                    │                              │
-  ✅ 已裁决 ←──裁决──────────── 🟪 已回填 ←──结果写回卡上────────┘
+⬜ draft ──schema completed──→ 🟨 blocked ──all launch deps closed/killed──→ 🟩 ready
+                                                                              │
+                                                                   declare run card
+                                                                              ↓
+  ❌ killed ←──killed_by + revive_if──┐                                  🔵 running
+                                      │                                       │
+  ✅ closed ←──verdict───────── 🟪 filled ←──results written to the card──────┘
 ```
 
-| 颜色 | 状态 | 含义 |
+| Colour | State | Meaning |
 |---|---|---|
-| ⬜ | `待补卡` | 只有一句话想法 |
-| 🟨 | `待前置` | 卡完整，依赖未满足 |
-| 🟩 | `就绪` | **可以开跑** |
-| 🔵 | `在跑` | run card 已 declare |
-| 🟪 | `已回填` | 结果在卡上，**裁决还没下** |
-| ✅ | `已裁决` | 结论明确（赢 / 输 / 降档），可以当别人的依赖。‼️ 带 `conditional_on` 的 ✅ 是**有条件的已裁决**，引用时必须连条件一起引 |
-| ❌ | `已杀` | 带 `killed_by` + `revive_if`，**也可以当别人的依赖**（"这条不用等了"） |
+| ⬜ | `draft` | a one-line idea and nothing else |
+| 🟨 | `blocked` | card complete, dependencies unmet |
+| 🟩 | `ready` | **may open an arm** |
+| 🔵 | `running` | the run card is declared |
+| 🟪 | `filled` | results on the card, **verdict not yet reached** |
+| ✅ | `closed` | conclusion reached (won / lost / downgraded); may be another card's dependency. ‼️ A ✅ carrying `conditional_on` is a **conditional** closure, and citing it means citing the condition with it |
+| ❌ | `killed` | with `killed_by` + `revive_if`, and **may also be a dependency** ("stop waiting on this one") |
 
-‼️ **`已回填` 和 `已裁决` 必须分开**，因为「有结果」不等于「有结论」：一条臂的意义常常要等另一条
-臂才成立。本 repo 的实例：`e1` 的机理判据按字面**通过了**（负样本真的补回来了），但裁决是
-**「机理验上了，而那个机理不值钱」** —— 这个裁决要等 F1 的份额测量才下得来。
-把 🟪 直接当 ✅ 用，就会把一个待解释的数当成结论传播下去。
+‼️ **`filled` and `closed` must stay apart**, because *having a result is not having a
+conclusion*: an arm's meaning often depends on another arm. This repo's instance: `e1`'s
+mechanism criterion **passed literally** (the negatives really did come back), while the verdict
+was **"the mechanism checked out and that mechanism is worthless"** — and that verdict could not
+be reached until F1's share had been measured. Using 🟪 as if it were ✅ propagates a number
+awaiting explanation as though it were a conclusion.
 
-**非法转移**（发现即报，不要自行修复）：
-- 跳过 🟨 直接 🟩：有人绕过了前提闸门；
-- 🔵 但 **launch** 依赖里有非 ✅/❌ 的节点：闸门被绕过（`reading` 依赖没结案是正常的，
-  那正是它的用途）；
-- ✅ 但没有 `run id`：结论没有出处；
-- ❌ 但没有 `revive_if`：四类死法的复活条件不同，混着写等于没写。
+**Illegal transitions** (report on sight; do not repair them yourself):
+- 🟨 skipped, straight to 🟩: somebody bypassed the premise gate;
+- 🔵 while a **launch** dependency is neither ✅ nor ❌: the gate was bypassed (an unsettled
+  `reading` dependency is normal — that is exactly what it is for);
+- ✅ with no `run id`: a conclusion with no provenance;
+- ❌ with no `revive_if`: the four kinds of death revive differently, and writing them
+  interchangeably is the same as not writing them.
 
 ---
 
-## 3. 四个操作
+## 3. The four operations
 
-### ADD —— 新建节点  ·  `graph.py add` 然后 `graph.py set`
+### ADD — create a node  ·  `graph.py add` then `graph.py set`
 
-用户扔进来的通常是**一句话**（"SKU 之间的 cross attention 有没有做？"）。agent 的职责是补成卡：
+What a user throws in is usually **one sentence** ("has anyone done cross attention between
+SKUs?"). The agent's job is to complete it into a card:
 
-1. **先审自己的代码**（Stage 1）—— ‼️ 最常见的结果是「它已经在仓库里，是个默认关的 flag」。
-   本 repo 两次踩到：一对一（`--repeat_num`）、query 内容来源（`--q_content`）。
-   **没审代码就去查论文，等于去移植一个已经有的东西。**
-2. 填 `前提` 和 `前提份额` —— 份额是**纯数据量**，通常过一遍 loader 就有，不要跳过。
-3. 填 `oracle 上限` —— 能 0 成本量的必须先量（规则 2.6）。
-4. 定 `父节点`：**测机理**和**定价**可能挂不同的父节点，两个都写，报数只报后者。
-5. 定 `依赖`，插进图。
+1. **Audit your own code first** (Stage 1) — ‼️ the most common outcome is "it is already in the
+   repo, behind a flag that defaults to off". This repo hit it twice: one-to-one
+   (`--repeat_num`) and query content source (`--q_content`).
+   **Going to the literature without auditing the code is going to port something you already
+   have.**
+2. Fill `premise` and `premise_share` — the share is **pure data measurement**, usually one pass
+   over the loader; do not skip it.
+3. Fill `oracle ceiling` — anything measurable at zero cost must be measured first (rule 2.6).
+4. Choose `parent`: **testing the mechanism** and **pricing it** may hang off different parents.
+   Write both, and report only the latter.
+5. Choose `depends_on` and insert it into the graph.
 
-新节点默认 ⬜，补齐后转 🟨 或 🟩。**不要在补卡阶段就开跑。**
+A new node defaults to ⬜, and becomes 🟨 or 🟩 once complete. **Do not start a run during the
+card-completion stage.**
 
-### TAKE —— 取出 ready set  ·  `graph.py ready`
+### TAKE — take the ready set  ·  `graph.py ready`
 
 ```
-ready = { n | n 的卡填全 且 premise_share 在本 corpus 上
-              且 n 的 **launch 依赖** 全部 ∈ {✅, ❌} }        ← reading 边不参与
+ready = { n | n's card is complete and premise_share is on this corpus
+              and all of n's **launch** dependencies ∈ {✅, ❌} }     ← reading edges do not participate
 ```
 
-### ‼️ 一条边说的是它挡什么
+### ‼️ An edge states what it blocks
 
-原来 `依赖` 是一列裸 id，而一个裸 id 只能表达一件事：**等**。于是每一条真依赖都自动
-变成了串行 —— 包括那些根本不是关于顺序的。踩到的实例：N07（融合）要的是 N06 的 **σ**，
-一个值，两个 flag 写在同一份代码里；图给它派的是 N06 的**裁决**，四个半小时。当时能做的
-只有把边删掉，而删掉就把真的那一半也删了：σ 没校准时 N07 输了不知道是谁的错。
+`depends_on` used to be a list of bare ids, and a bare id can express only one thing: **wait**.
+So every real dependency automatically became serial — including the ones that were never about
+ordering. The case we hit: N07 (fusion) needed N06's **σ**, one value, two flags written in the
+same source file; the graph assigned it N06's **verdict**, four and a half hours. All that could
+be done at the time was to delete the edge, and deleting it removed the real half too: with σ
+uncalibrated, an N07 loss says nothing about whose fault it was.
 
-| `blocks` | 挡 `ready` | 挡 `close` | 什么时候用 |
+| `blocks` | Blocks `ready` | Blocks `close` | When to use |
 |---|---|---|---|
-| `launch`（裸 id 的默认） | ✅ | ✅ | 前提份额没测 · 父 ckpt 不存在 · 代码写不出来 |
-| `reading` | ❌ | ❌ | **归因**：跑得了，结果单独读不出来 |
+| `launch` (the default for a bare id) | ✅ | ✅ | premise share unmeasured · the parent checkpoint does not exist · the code cannot be written |
+| `reading` | ❌ | ❌ | **attribution**: it can run, but the result cannot be read on its own |
 
-**判据：我要的是它的结论，还是只要它一个值 / 一份产物 / 一行代码？** 只有前者是 `launch`。
-‼️ **只要一个参数的那不是依赖，是参数。**
+**The test: do I need its conclusion, or only one value / one artifact / one line of code from
+it?** Only the former is `launch`.
+‼️ **Needing one parameter is not a dependency. It is a parameter.**
 
-‼️ **裸 id 仍然是 `launch`，这是故意的。** 反过来默认会把已经写好的每一张图静默解锁；
-提醒放在 `ready` 里 —— 每一条 `blocked` 都带一个 `ask` 字段，在这条边真正开始花钱的那一刻
-问「你要的是裁决还是一个值」。‼️ 两种错标的可见度差一个量级：错成 `launch` 代价是墙钟且
-**不显形**（队列看起来一切正常，只是慢），错成 `reading` 代价是一条臂的机时且
-`conditional_on` 会把它喊出来。**所以默认答案偏向并行。**
+‼️ **A bare id still means `launch`, and that is deliberate.** The other default would silently
+unlock every graph already written. The prompt lives in `ready` instead — every `blocked` entry
+carries an `ask` field, asked at the moment that edge actually starts costing money: "do you
+need the verdict, or a value?" ‼️ The two mislabellings differ in visibility by an order of
+magnitude: mislabelling as `launch` costs wall clock and **is invisible** (the queue looks
+entirely normal, only slower), while mislabelling as `reading` costs one arm's machine time and
+`conditional_on` shouts about it. **So the default answer leans toward parallelism.**
 
-‼️ `_cycle` 只走 `launch` 边。**两张卡互相 `reading` 是合法的** —— 「两条一起跑，一起裁决」
-就长这个样子 —— 走全部边会把这个新写法最健康的用法报成必须打断的环。
+‼️ `_cycle` walks `launch` edges only. **Two cards `reading` each other is legal** — "run both
+together, adjudicate together" looks exactly like that — and walking every edge would report
+this new form's healthiest use as a cycle that must be broken.
 
-‼️ **⬜🟨🟩 是算出来的，不是存出来的**（`graph.py -> _derive_state`）。原来这行写成
-`n.状态 == 🟩`，读起来像先有个存好的 🟩 再筛依赖 —— 但 🟩 会因为**别的卡**结案而出现，
-所以任何存下来的副本写完那一刻就可能过期。`status` 读标签、`ready` 现算，同一批卡就给出了
-相反的答案（`blocked: 3` / `ready: [N01,N02,N03]`），而 `status` 是人看的那个。
-现在两个动词走同一个函数。存进 `state` 字段的值只是给外部读者的方便，**不作为判据**。
+‼️ **⬜🟨🟩 are computed, never stored** (`graph.py -> _derive_state`). That line used to read
+`n.state == 🟩`, which reads as if a stored 🟩 existed first and dependencies were filtered
+after — but 🟩 appears because **some other card** closed, so any stored copy may be stale the
+moment it is written. `status` read the label while `ready` computed live, and the same set of
+cards produced opposite answers (`blocked: 3` / `ready: [N01,N02,N03]`) — with `status` being
+the one a person looks at. Both verbs now go through one function. The value stored in `state`
+is a convenience for outside readers and **is not a criterion**.
 
-🔵🟪✅❌ 反过来 —— 那是**做过的动作**，算不出来，记录本身就是声明。
-其中 🔵 认的是 `run_id` 而不是标签：**卡上有 run_id、还没有 result，就算在跑**，
-哪怕忘了 `set state=running`。漏设标签正是会被开第二条臂的那个形状。
+🔵🟪✅❌ are the other way round — those are **actions taken**, they cannot be computed, and the
+record itself is the declaration. Among them 🔵 is recognised by `run_id` rather than by the
+label: **a card with a run_id and no result yet counts as running**, even if somebody forgot
+`set state=running`. A missing label is precisely the shape that gets a second arm opened.
 
-然后按容量筛：
+Then filter by capacity:
 
-1. **离线节点（0 GPU）优先且不受容量限制** —— 它们永远在 ready set 里，全部并行开。
-2. GPU 节点：`并行度 ≤ 稳定容量`。‼️ 超出的部分不是"慢一点"是**结构性零产出**，
-   而且会搅动已经拿到位子的臂（`SKILL.md` 那节写了为什么）。
-   ‼️ **`ready` 不做容量筛选，它只算依赖。** 容量是 `pool.py` 的，一层之上 ——
-   `<mlclaw_root>/references/fleet.md`。两件事分开是对的：依赖是图的性质，容量是这一刻的性质。
-3. 同一组要相互比较的臂 **必须同卡型**，要换整组一起换。
+1. **Offline nodes (0 GPU) come first and are not capacity-limited** — they are always in the
+   ready set, and all of them open in parallel.
+2. GPU nodes: `parallelism ≤ stable capacity`. ‼️ The excess is not "a bit slower", it is
+   **structurally zero output**, and it churns the arms that already hold slots (`SKILL.md`'s
+   section says why).
+   ‼️ **`ready` does no capacity filtering; it computes dependencies only.** Capacity belongs to
+   `pool.py`, one layer up — `<mlclaw_root>/references/fleet.md`. Keeping the two apart is
+   correct: a dependency is a property of the graph, capacity is a property of this moment.
+3. Arms to be compared against each other **must be on the same GPU model**; to change it,
+   change the whole group.
 
-‼️ **ready set 为空但队列非空 = 死锁**。两种原因，处理方式不同：
-- **循环依赖** → 图写错了，找出环打断；
-- **全部卡在同一个前置上** → 那个前置就是当前唯一该做的事，**把它提到最前**，
-  不要因为"没事干"去开一条不在 ready set 里的臂。
+‼️ **An empty ready set with a non-empty queue = deadlock.** Two causes, handled differently:
+- **A dependency cycle** → the graph is written wrongly; find the cycle and break it;
+- **Everything blocked on one predecessor** → that predecessor is the only thing worth doing
+  right now. **Move it to the front**, and do not open an arm outside the ready set because
+  there is "nothing to do".
 
-### FILL —— 回填  ·  `graph.py fill`  ‼️ 这不是写一个格子，是一次**图的传播**
+### FILL — write results back  ·  `graph.py fill`  ‼️ This is not filling in a cell; it is a **propagation through the graph**
 
-`graph.py fill` 把结果写回卡上（🔵 → 🟪），并返回一份 `must_review`：依赖这张卡的、
-正文里引它的、源自这个 run 的常数。‼️ **那是候选清单，不是判决** —— 脚本能枚举引用，
-判断前提是不是真的作废了是你的。拿着那份清单扫一遍，问三个问题：
+`graph.py fill` writes the result onto the card (🔵 → 🟪) and returns a `must_review` list:
+whatever depends on this card, whatever cites it in prose, and the constants that came from this
+run. ‼️ **That is a candidate list, not a verdict** — the script can enumerate references, but
+judging whether a premise really is void is yours. Walk the list and ask three questions:
 
-| 问题 | 本 repo 的实例 |
+| Question | Instance in this repo |
 |---|---|
-| 有没有别的节点的**前提**被这个结果推翻了？ | F1 的份额实测 4.62%（预测 47%）⇒ e1/e1b/e1c/e2/e6 **五条臂的前提同时失效** |
-| 有没有别的节点的**排序理由**被推翻了？ | H100 实测能写 checkpoint ⇒ 「三条臂在当前容量下排不进去」作废，变成「贵 2.3× 但排得进去」 |
-| 有没有**常数**被推翻了？ | 那就更新 `stages/exploration/state.json -> constants`（连同 `measured_at`），写清"本次更新推翻了哪个地基常数" —— `graph.py check` 会报出引用了过期常数的每一张卡 |
+| Has any other node's **premise** been overturned by this result? | F1's share measured at 4.62% (predicted 47%) ⇒ the premises of **five arms — e1/e1b/e1c/e2/e6 — failed at once** |
+| Has any other node's **ordering rationale** been overturned? | H100 measurably can write checkpoints ⇒ "three arms do not fit under current capacity" is void, and becomes "2.3× more expensive but it fits" |
+| Has a **constant** been overturned? | Then update `stages/exploration/state.json -> constants` (along with `measured_at`), stating which foundational constant this update overturned — `graph.py check` reports every card citing a stale constant |
 
-**不做传播的回填是这条流水线最贵的失败**：它让已经失效的前提继续挂在队列上，
-后面的人照着跑。跑完才发现前提早就没了。
+**A fill with no propagation is the most expensive failure on this pipeline**: it leaves already-
+void premises hanging in the queue, and the next person runs against them. Only after the run
+does anyone discover the premise had been gone all along.
 
-‼️ 这也是为什么 `fill` 只枚举、不判决：一个替你决定哪些前提作废的动词是在猜，
-而一个什么都不返回的动词就是 markdown 版本本身。
+‼️ This is also why `fill` enumerates rather than decides: a verb that decides for you which
+premises are void is guessing, and a verb that returns nothing is the markdown version itself.
 
-### CLOSE —— 裁决  ·  `graph.py close`
+### CLOSE — adjudicate  ·  `graph.py close`
 
-🟪 → ✅ 或 ❌。裁决要写清是**哪一类**，四类的 `revive_if` 完全不同：
+🟪 → ✅ or ❌. The verdict must state **which kind**, because the four have completely different
+`revive_if`:
 
-| `killed_by` | 含义 | `revive_if` 的形状 |
+| `killed_by` | Meaning | Shape of `revive_if` |
 |---|---|---|
-| `份额太小` | 病存在但太少 | 换语料 / 换工况后重提 |
-| `实现忠实但无效` | 搬对了，没用 | 换了口径 / 换了上游 |
-| `机理不对症` | 提案本身错了 | 直接量到效果（**不必等代理条件成立**） |
-| `实现不忠实` | **不是死，是回去修** | — |
+| `share_too_small` | the fault is real but rare | re-propose on a new corpus or operating condition |
+| `faithful_but_inert` | ported correctly, changed nothing | a changed convention or a changed upstream |
+| `wrong_mechanism` | the proposal itself was wrong | measure the effect DIRECTLY (**no need to wait for the proxy condition**) |
+| `unfaithful_port` | **not a death — go back and fix it** | — |
 
-‼️ **两条硬规矩**：
+‼️ **Two hard rules:**
 
-1. **提案类的反驳只能降档或补测量，不能杀掉**（`debate-roles.md` 的裁决表）。
-   唯一例外是「这技巧已经在代码里」这种事实性错误。
-2. ‼️ **不许用另一个语料的数去杀一个提案。** 这和「用另一个语料的数去立项」是同一个错误的两面 ——
-   规则 2.5 判它「视为没有前提」，那么它同样不能当裁决依据。
-   本 repo 犯过：拿 DINO 在 COCO 上的 +0.5 去杀 `--q_content`，当天撤回。
+1. **A rebuttal of a proposal may only lower its tier or demand more measurement; it may not
+   kill it** (the adjudication table in `debate-roles.md`). The one exception is a factual error
+   such as "this technique is already in the code".
+2. ‼️ **Never kill a proposal with a number measured on a different corpus.** This is the other
+   face of "using another corpus's number to justify one" — rule 2.5 treats that as having no
+   premise, so it equally cannot serve as grounds for a verdict. This repo did it once: DINO's
+   +0.5 on COCO used to kill `--q_content`, withdrawn the same day.
 
-`revive_if` 写的是**代理条件**。‼️ **直接量到效果时不必等代理条件成立** ——
-本 repo 的 CDN 复活就是这样：原来写的两条 revive_if 一条都没满足，复活它的是直接测量。
+`revive_if` states a **proxy condition**. ‼️ **When the effect can be measured directly, there is
+no need to wait for the proxy condition** — this repo's CDN revival went exactly that way:
+neither of the two `revive_if` conditions originally written was ever met, and what revived it
+was a direct measurement.
 
-#### ‼️ `conditional_on` —— 裁决跑在它的地基前面时
+#### ‼️ `conditional_on` — when a verdict runs ahead of its foundation
 
-`reading` 上游还没结案就下裁决，`close` **不拒**，它盖章：把那些上游写进
-`conditional_on`，并在输出里说这条结论"不带条件不许引用"。
+If a `reading` upstream is still unsettled when a verdict is issued, `close` **does not refuse**.
+It stamps: those upstreams are written into `conditional_on`, and the output states that this
+conclusion "may not be cited without its condition".
 
-**为什么不拒。** 拒了只是把同一场等待往右挪一格 —— 变成一堆没人敢裁的 🟪，GPU 小时还照花，
-而 §4 里「🟪 堆积 = 有一堆结果没人解释」正是那个状态的名字。要防的从来不是「结论下早了」，
-是**结论脱离它的条件到处走**，那是 CLAUDE.md「Never silently」里再读一遍状态那一条。
+**Why it does not refuse.** Refusing only shifts the same wait one column to the right — into a
+pile of 🟪 nobody dares adjudicate, with the GPU hours still being spent, and §4's "🟪 piling up
+= a pile of results nobody has explained" is the name of that state. What must be prevented was
+never "a conclusion reached too early"; it is **a conclusion travelling apart from its
+condition**, which is CLAUDE.md's "Never silently" rule about re-reading a status.
 
-**闭环是三步，没有一步是自动的：**
+**Closing the loop is three steps, none of them automatic:**
 
-1. `close` 下游 → 卡上写 `conditional_on: [N06]`，`check` 报 `verdict_is_conditional`（minor）；
-2. `close` 上游 → 输出里 `re_read: [N07]`，主动点名谁的裁决挂在它身上；
-3. 条件落地而没人复核 → `check` 升到 `condition_resolved_unreviewed`（major）。
+1. `close` the downstream → the card gets `conditional_on: [N06]`, and `check` reports
+   `verdict_is_conditional` (minor);
+2. `close` the upstream → the output carries `re_read: [N07]`, naming whose verdict hangs on it;
+3. the condition lands and nobody re-reviews → `check` escalates to
+   `condition_resolved_unreviewed` (major).
 
-‼️ **没有任何东西会自动清掉 `conditional_on`** —— 清它是人复核之后的一次
-`set --set conditional_on=[]`。一个会自己清的字段等于没有这个字段。
+‼️ **Nothing clears `conditional_on` automatically** — clearing it is a
+`set --set conditional_on=[]` performed by a person after review. A field that clears itself is
+the same as not having the field.
 
-条件真的不成立怎么办：**说这条不成立，停掉。** 一条被条件推翻的臂，成本是它自己那份机时；
-一条为了等条件而没开的臂，成本是整轮的墙钟 —— 前者可数，后者不可数。
-
----
-
-## 3.5 DISPUTE / RESOLVE —— 两条记录打架时  ·  `graph.py dispute` / `resolve`
-
-原版这份文件没有这一节，因为它假定裁决总是**顺序发生**的：一张卡回填、裁决、下一张。
-真实情况里，N05 的结果会推翻 N01 三周前已裁决的结论 —— 而此前能做的只有两件事，
-**两件都毁记录**：改掉 N01（下一轮要读的正是它），或者装没看见。
-
-借自 ARA（arXiv:2604.24658）的 Contradiction trigger，规则就是机制本身：
-
-1. **两边都不许改。** N01 的 `verdict` 原样留着 —— 一条被推翻的结论和一条从没有过的
-   结论，对下一轮是完全不同的信息。
-2. 两边各加一个 `disputed_by: [Dxx]`，`disputes[]` 里落一条同时指向两者的记录。
-3. **停。** 裁决是人的活。`check` 把它报成 `major`；只有当**有别的卡依赖那张争议卡**时
-   才升到 `critical`（那条臂会站在争议地基上）。报成 major 是刻意的：一对无关的争议不该
-   拦住整张图，否则 `check` 就变成大家绕开的东西。
-
-‼️ **低档位的卡不许反驳高档位的卡，`dispute` 直接拒。**
-这是 `SKILL.md` Stage 3.5 规则 2 用在冲突上：便宜的检查功率低，它能给你继续的理由，
-不能给你否掉的理由。**短跑和对照跑之间看起来的"矛盾"，绝大多数根本不是分歧，是不可比** ——
-把不可比当分歧裁，正是一个好结果被一次廉价探针扔掉的路径。T4 近似谁都不能反驳。
-
-裁决三种：`upheld`（挑战者对 —— 输的那张**保留裁决**并加上 `superseded_by`，标记而非改写）·
-`rejected`（挑战者错，输的那张一个字不动）· `not_comparable`（它们从来就没冲突）。
-`--note` 必填：结论本身不说明**为什么**，而"为什么"是下一轮唯一能复核的部分。
+What if the condition really does not hold: **say so and stop the arm.** An arm overturned by
+its condition costs its own machine time; an arm not opened because it was waiting for a
+condition costs the whole round's wall clock — the first is countable and the second is not.
 
 ---
 
-## 4. 图的不变量（定期扫，坏了要报不要自己修）
+## 3.5 DISPUTE / RESOLVE — when two records disagree  ·  `graph.py dispute` / `resolve`
 
-`SKILL.md` 有一节写「记录层自己会坏，而且坏法比实验的坏法更阴」。图也一样：
+The original version of this document had no such section, because it assumed verdicts always
+happen **in order**: one card filled, adjudicated, next card. In reality N05's result overturns a
+conclusion N01 closed three weeks ago — and until now there were exactly two things that could be
+done, **both of which destroy the record**: rewrite N01 (the very thing the next round has to
+read), or pretend not to have seen it.
 
-| 不变量 | 坏了说明 |
+Borrowed from ARA's (arXiv:2604.24658) Contradiction trigger, where the rule *is* the mechanism:
+
+1. **Neither side may be edited.** N01's `verdict` stays exactly as it was — a conclusion that
+   was overturned and a conclusion that never existed are completely different information for
+   the next round.
+2. Both sides gain a `disputed_by: [Dxx]`, and one record pointing at both lands in `disputes[]`.
+3. **Stop.** Adjudicating is a person's job. `check` reports it as `major`, escalating to
+   `critical` only when **another card depends on the disputed one** (that arm would be standing
+   on disputed ground). Reporting it as major is deliberate: one unrelated dispute should not
+   block the whole graph, or `check` becomes the thing everybody routes around.
+
+‼️ **A lower-tier card may not contradict a higher-tier one, and `dispute` refuses outright.**
+This is `SKILL.md` Stage 3.5 rule 2 applied to conflicts: a cheap check has low power — it can
+give you a reason to continue, not a reason to rule something out. **Most apparent
+"contradictions" between a short run and a controlled one are not disagreements at all, they are
+incomparable** — and adjudicating incomparability as disagreement is exactly how a good result
+gets thrown away by a cheap probe. A T4 approximation may contradict nothing.
+
+Three resolutions: `upheld` (the challenger is right — the losing card **keeps its verdict** and
+gains a `superseded_by`, marked rather than rewritten) · `rejected` (the challenger is wrong, and
+the losing card is untouched by a single character) · `not_comparable` (they never conflicted).
+`--note` is mandatory: the resolution itself does not say **why**, and the why is the only part
+the next round can re-examine.
+
+---
+
+## 4. The graph's invariants (scan periodically; report breakage rather than repairing it)
+
+`SKILL.md` has a section on "the record layer breaks on its own, and more insidiously than the
+experiment does". The graph is the same:
+
+| Invariant | What its breaking means |
 |---|---|
-| 每个 ✅/❌ 都有 `run id` 或测量出处 | 有结论没出处 |
-| 每个 🔵 的 **launch** 依赖全是 ✅/❌ | 闸门被绕过。‼️ `reading` 依赖没结案**不算**，那是它的正常用法 |
-| ‼️ **每条边的 `blocks` 读得出来** | MLClaw 加的。读不出来的边按 `launch` 拦，于是症状是一张永远不就绪的卡**加上一个说不出来的理由**。`set` 直接拒，`check` 兜底报 major |
-| ‼️ **每个带 `conditional_on` 的 ✅/❌，条件要么还开着（minor：引用时必须带上），要么已经落地且有人复核过（落地没复核 = major）** | MLClaw 加的。这是「先跑不等于先读」的记账那一头：并行买到的时间，代价是有一批结论暂时站在还没结案的东西上。**没有任何东西会自己清 `conditional_on`** —— 那正是它存在的理由 |
-| 每个 ❌ 都有 `revive_if` 且标了四类之一 | 复活条件写了等于没写 |
-| 没有两个 🔵 是「同一父节点 + 同一 delta」 | 重复劳动，或有人忘了另一条在跑。‼️ 认的是 `run_id` 不是标签 —— 原来按 `state == running` 遍历，**恰好漏掉唯一真会重复开臂的那个形状**：run_id 设了、标签忘了翻 |
-| 每个 🟩 的 schema 完整 | 会开出一条无法判定的臂 |
-| ‼️ **每个 🟪 都有人负责把它推到 ✅** | 🟪 堆积 = 有一堆结果没人解释，而队列还在往前跑 |
-| ‼️ 所有引用的**常数**在 `state.json` 里还成立 | 那份文件开头就写着「换了权重/取帧/度量，这整份文件作废」。`check` 比对 `measured_at` 和 `corpus.declared_at` |
-| ‼️ **每张卡的 `premise_share.measured_on` 等于本图的 `corpus`** | MLClaw 加的。引自别处的份额按**没有前提**处理 —— 这是本文件 CLOSE 那条「不许用另一个语料的数去杀一个提案」的另一面，立项侧 |
-| ‼️ **每个结果带档位** | MLClaw 加的。没档位的数会被提拔成硬结论，那正是一个假噪声底的来路 |
-| **没有噪声底时，没有 T2/T3 结果** | MLClaw 加的。没有底，「没有显著提升」是**不可判定**，不是否定 |
-| ‼️ **噪声底本身**：`measured_on` 等于本图 corpus · `runs` 至少两条且 `mode`/`scope` 一致 · `measured_at` 不早于 corpus 声明 | MLClaw 加的。这三个字段**原来一个读者都没有**（而 `_comment_runs` 写着 check 会去读 run.json）。于是 `_share_scope` 会因为一个外来份额**杀掉一张卡**，而一个外来的**底**却被静默接受，继续管着全轮所有结果的措辞 —— 底是更贵的那一侧。‼️ 出了范围/过期的底按**没测**处理（它自己的 `retires_on` 就写着 `dataset_snapshot`），T2/T3 全部掉回 `[T1 趋势]`；而**读不到 run 记录**是第三种事实，报 major、不当作作废 |
+| Every ✅/❌ has a `run id` or a measurement provenance | a conclusion with no provenance |
+| Every 🔵's **launch** dependencies are all ✅/❌ | the gate was bypassed. ‼️ An unsettled `reading` dependency **does not count** — that is its normal use |
+| ‼️ **Every edge's `blocks` is readable** | MLClaw's addition. An unreadable edge is blocked as `launch`, so the symptom is a card that is never ready **plus a reason nobody can state**. `set` refuses outright, and `check` reports major as a backstop |
+| ‼️ **Every ✅/❌ carrying `conditional_on` has its condition either still open (minor: cite it with the condition) or landed and reviewed by somebody (landed and unreviewed = major)** | MLClaw's addition. This is the bookkeeping end of "running first is not reading first": the time parallelism bought is paid for by a batch of conclusions temporarily standing on something unsettled. **Nothing clears `conditional_on` by itself** — which is exactly why it exists |
+| Every ❌ has a `revive_if` and is tagged with one of the four kinds | a revival condition written this way is the same as none |
+| No two 🔵 share "same parent + same delta" | duplicated work, or somebody forgot another one is running. ‼️ Recognised by `run_id`, not the label — iterating on `state == running` used to **miss precisely the one shape that genuinely opens a duplicate arm**: run_id set, label never flipped |
+| Every 🟩 has a complete schema | it would open an arm that cannot be adjudicated |
+| ‼️ **Every 🟪 has somebody responsible for pushing it to ✅** | 🟪 piling up = a pile of results nobody has explained, while the queue keeps running |
+| ‼️ Every cited **constant** still holds in `state.json` | that file opens by saying "change the weights, the frame sampling or the metric and this entire file is void". `check` compares `measured_at` against `corpus.declared_at` |
+| ‼️ **Every card's `premise_share.measured_on` equals this graph's `corpus`** | MLClaw's addition. A share quoted from elsewhere is treated as **having no premise** — the other face of CLOSE's "never kill a proposal with another corpus's number", on the justification side |
+| ‼️ **Every result carries a tier** | MLClaw's addition. A number with no tier gets promoted into a hard conclusion, which is exactly where a false noise floor comes from |
+| **With no noise floor, there are no T2/T3 results** | MLClaw's addition. With no floor, "no significant improvement" is **undecidable**, not negative |
+| ‼️ **When the floor is `external`, there are no T3 results** | MLClaw's addition. An external floor supports T2 — not supporting that would be a door opening onto a wall; it does not support T3, because T3 is the last gate before a large run and the tier at which blind human review is mandatory. A soft number being promoted into a hard conclusion is the whole reason the tier ladder exists |
+| ‼️ **The noise floor itself**: `measured_on` equals this graph's corpus · with `origin: mlclaw`, `runs` has at least two entries with matching `mode`/`scope` · with `origin: external`, `unchecked` is mandatory · `measured_at` is no earlier than the corpus declaration | MLClaw's addition. These fields **had no reader at all** (while `_comment_runs` claimed check would read run.json). So `_share_scope` would **kill a card** over an out-of-corpus share while an out-of-corpus **floor** was silently accepted and went on governing the wording of every result in the round — and the floor is the more expensive side. ‼️ An out-of-scope or expired floor is treated as **not measured** (its own `retires_on` says `dataset_snapshot`), and every T2/T3 falls back to `[T1 trend]` |
+| ‼️ **The floor has four states, not "pass / fail"**: `verified` / `claim` / `unverifiable` / `not_measured` | MLClaw's addition, and the four states were forced by a real gap: `runs` used to be the only door, and somebody taking over an existing project **has no** MLClaw run to cite (the machine was released, the checkpoint is on a stopped disk, that pipeline never wrote run.json at all) — while `SKILL.md -> where you come in` says in its own heading that *users essentially never start from scratch*. The measured ranking of the three ways to write it was **inverted**: writing the number honestly with `runs: []` → two criticals, `check` refuses outright; pretending there is none → critical; **inventing two unresolvable ids → one major, and the floor takes effect as normal**. The record layer was paying a bonus to the least honest route. `origin: external` is now that front door (`claim`, the same word `conclude.py` gives an external reference), and **being unable to read a run record** remains a third fact (major, not void — "Never report data you could not look at"), except that it **no longer gets further than the front door**: both support T2 and neither supports T3 |
 
-这几条要**每轮重查**，不是一次性检查：`state.json` 里的数带着 `measured_at` 那一列，
-就是为了让这次扫描能做。全部由 `graph.py check` 执行 —— 对应的契约在
-`contracts/contract_explore.py`，每个 check class 的 docstring 引的就是本文件的小节号。
+These must be **re-checked every round**, not once: the `measured_at` column beside the numbers
+in `state.json` exists precisely so this scan can be done. All of it is executed by
+`graph.py check` — the corresponding contracts are in `contracts/contract_explore.py`, and each
+check class's docstring cites the section number in this file.
