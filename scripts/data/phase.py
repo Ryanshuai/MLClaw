@@ -39,7 +39,7 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__))), "shared"))
 from _records import (age_days, broke, emit, parse_ts, read_json, refuse)  # noqa: E402
-from _dataset_paths import dataset_dir, latest_census  # noqa: E402
+from _dataset_paths import CENSUS_PREFIX, dataset_dir, latest_census  # noqa: E402
 from _vocab import HANDOFF_TERMINAL as TERMINAL_HANDOFF  # noqa: E402
 
 # The line, in order. `retire` is present but is never RETURNED as a position:
@@ -495,7 +495,7 @@ def census_ids(ddir):
     if not os.path.isdir(cdir):
         return []
     return sorted(f[:-5] for f in os.listdir(cdir)
-                  if f.startswith("census_") and f.endswith(".json"))
+                  if f.startswith(CENSUS_PREFIX) and f.endswith(".json"))
 
 
 def cmd_history(a):

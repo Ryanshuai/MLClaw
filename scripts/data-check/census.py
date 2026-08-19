@@ -83,7 +83,8 @@ from datetime import datetime, timezone
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__))), "shared"))
 from _records import (atomic_write_json, now_utc, read_json)  # noqa: E402
-from _dataset_paths import DEFAULT_MIN_SOURCE_COPIES, dataset_dir, latest_census_path  # noqa: E402
+from _dataset_paths import (CENSUS_PREFIX, DEFAULT_MIN_SOURCE_COPIES, dataset_dir,  # noqa: E402
+                            latest_census_path)
 
 # A label goes into a shell variable list as `label:marker`, and into a comma
 # separated field on the way back. Either character would silently corrupt the
@@ -434,7 +435,7 @@ def cmd_scan(a) -> None:
 
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     census = {
-        "census_id": f"census_{stamp}",
+        "census_id": f"{CENSUS_PREFIX}{stamp}",
         "dataset": cfg.get("dataset_id") or a.dataset,
         "project": os.path.expanduser(a.project),
         "scanned_at": now_utc(),

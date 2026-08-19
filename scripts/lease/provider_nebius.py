@@ -435,7 +435,7 @@ def v_up(args):
     project_id, project_name = project_in(cfg, region)
     subnet = subnet_in(cfg, project_id)
     expires = int(time.time()) + args.ttl_s
-    name = label_safe(f"mlclaw-{args.run or 'run'}-{int(time.time())}").lower()[:63]
+    name = label_safe(f"{TAG_PREFIX}{args.run or 'run'}-{int(time.time())}").lower()[:63]
 
     netif = json.dumps([{"name": "eth0", "subnet_id": subnet,
                          "ip_address": {}, "public_ip_address": {}}])
