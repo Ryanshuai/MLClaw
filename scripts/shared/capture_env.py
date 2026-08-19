@@ -28,7 +28,8 @@ import os
 import sys
 import platform
 
-from _records import broke  # same directory; noqa: E402
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _records import broke  # noqa: E402
 
 DEFAULT_ML_PACKAGES = [
     "numpy", "pandas", "scipy", "scikit-learn", "pillow", "matplotlib",

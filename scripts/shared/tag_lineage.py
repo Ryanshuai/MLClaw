@@ -25,21 +25,39 @@ import os
 import sys
 from glob import glob
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _records import atomic_write_json, broke, refuse  # noqa: E402
+
 PIPELINE_TAGS = {"production", "staging", "validated", "baseline", "deprecated"}
 
 
 def load_all_runs(project_root):
-    """Load all run.json files, keyed by stage/run_id."""
-    runs = {}
+    """-> (runs keyed by stage/run_id, [paths that could not be read]).
+
+    A run.json this cannot read is NOT the same as one that is not there, and
+    the difference decides whether a propagation was complete. Dropping it
+    silently would tag the reachable half of a lineage and report success;
+    raising would abandon a tag that is correct for everything else. So it is
+    carried out and the caller says so (CLAUDE.md: *never report data you could
+    not look at*).
+    """
+    runs, unreadable = {}, []
     pattern = os.path.join(project_root, "stages", "*", "runs", "*", "run.json")
-    for path in glob(pattern):
-        with open(path, encoding="utf-8") as f:
-            run = json.load(f)
+    for path in sorted(glob(pattern)):
+        try:
+            with open(path, encoding="utf-8") as f:
+                run = json.load(f)
+        except (OSError, ValueError):
+            unreadable.append(path)
+            continue
+        if not isinstance(run, dict):
+            unreadable.append(path)
+            continue
         stage = run.get("stage", "")
         run_id = run.get("run_id", "")
         full_id = f"{stage}/{run_id}"
         runs[full_id] = {"data": run, "path": path}
-    return runs
+    return runs, unreadable
 
 
 def get_ancestors(runs, target_id):
@@ -55,8 +73,13 @@ def get_ancestors(runs, target_id):
         visited.add(current)
 
         if current in runs:
-            parents = runs[current]["data"].get("lineage", {}).get("parents", [])
+            parents = (runs[current]["data"].get("lineage") or {}).get("parents") or []
             for p in parents:
+                if not isinstance(p, dict) or not p.get("stage") or not p.get("run_id"):
+                    # A parent entry that names no run cannot be walked. It is
+                    # recorded lineage that points nowhere, and crashing on it
+                    # would make one malformed edge un-taggable for the whole DAG.
+                    continue
                 parent_id = f"{p['stage']}/{p['run_id']}"
                 ancestors.append(parent_id)
                 queue.append(parent_id)
@@ -75,26 +98,42 @@ def add_tag(run_data, tag, tag_type="local_tags"):
 
 
 def save_run(path, run_data):
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(run_data, f, indent=2)
+    """Atomic, and via the one writer.
+
+    This rewrites `run.json` -- the record every conclusion, every baseline
+    delta and every reproduction verdict is read back from. A direct `open(w)`
+    truncates it before the new bytes land, so a crash here destroys a run
+    record to add a string to a list. It also wrote `ensure_ascii=True`, which
+    re-escaped every non-ASCII field in a record that was written literally.
+    """
+    atomic_write_json(path, run_data)
+
+
+USAGE = ("python tag_lineage.py <project_root> <stage/run_id> <tag>. "
+         "Pipeline tags (auto-propagate): %s. Any other tag is local."
+         % ", ".join(sorted(PIPELINE_TAGS)))
 
 
 def main():
+    # CLAUDE.md "Script Integration": usage is 2 (the script broke, the caller
+    # fixes the call), a run that is not there is 1 (it worked, the answer is
+    # no). They shared exit 1, so "you typed it wrong" and "that run does not
+    # exist" were the same answer.
     if len(sys.argv) < 4:
-        print("Usage: python tag_lineage.py <project_root> <stage/run_id> <tag>")
-        print(f"Pipeline tags (auto-propagate): {', '.join(sorted(PIPELINE_TAGS))}")
-        print("Any other tag is local (no propagation)")
-        sys.exit(1)
+        broke("three arguments are required", fix=USAGE)
 
     project_root = sys.argv[1]
     target_id = sys.argv[2]
     tag = sys.argv[3]
 
-    runs = load_all_runs(project_root)
+    runs, unreadable = load_all_runs(project_root)
 
     if target_id not in runs:
-        print(json.dumps({"error": f"Run not found: {target_id}"}))
-        sys.exit(1)
+        refuse(f"run not found: {target_id}",
+               unreadable=unreadable,
+               fix=("check `stage/run_id`. If run.json files are listed under "
+                    "`unreadable`, the run may exist and simply not be readable — "
+                    "which is a different fact." if unreadable else USAGE))
 
     is_pipeline = tag in PIPELINE_TAGS
     tagged = []
@@ -119,9 +158,15 @@ def main():
         "type": "pipeline" if is_pipeline else "local",
         "propagated": is_pipeline,
         "tagged_runs": tagged,
+        # A propagation that could not read part of the DAG reached an unknown
+        # subset of it. Saying so is the difference between a tag and a claim.
+        "unreadable": unreadable,
+        "complete": not unreadable,
     }
-    json.dump(result, sys.stdout, indent=2)
+    json.dump(result, sys.stdout, indent=2, ensure_ascii=False)
+    print()
+    return 1 if unreadable else 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
