@@ -337,6 +337,15 @@ def _run_json(project, target_stage, run_id):
 # `compare_baseline.py -> _external_side`); the floor was the one place without one.
 FLOOR_ORIGINS = ("mlclaw", "external")
 
+# What each state buys, in words, because the one-screen summary is where the
+# sentence gets quoted off and a state name alone does not say what it permits.
+FLOOR_GATES = {
+    "verified": "T2 and T3",
+    "claim": "T2 -- never a T3",
+    "unverifiable": "T2 -- never a T3",
+    "not_measured": "nothing -- every result is [T1 trend] at best",
+}
+
 
 def _floor_status(void, unchecked):
     """NOT MEASURED outranks could-not-look, which outranks confirmed."""
@@ -1599,6 +1608,7 @@ def cmd_status(a):
     p = _paths(a.project, a.session)
     graph = _load(p["graph"], "graph")
     baseline = read_json(p["baseline"], required=False) or {}
+    cfg = read_json(p["config"], required=False) or {}
     nodes = graph.get("nodes", [])
     # ‼️ Derived, because this is the one-screen summary a PERSON reads, and read
     # off the stored label it used to report `blocked: 3` about three cards that
@@ -1614,9 +1624,22 @@ def cmd_status(a):
     # Reported rather than repaired, so a hand-edited graph is visible too.
     drift = [{"id": n["id"], "stored": n.get("state"), "derived": derived[n["id"]]}
              for n in nodes if n.get("state") != derived[n["id"]]]
+    _target = cfg.get("target_stage") or "training"
+    _, _floor_state = _floor(baseline, corpus, a.project,
+                             ["evaluation"] + ([_target] if _target != "evaluation" else []))
     emit({
         "corpus": graph.get("corpus"),
-        "noise_floor": baseline.get("value"),
+        # ‼️ Never a bare number here. This is the one-screen summary a PERSON
+        # reads and the screen the sentence gets quoted off, and a floor that is
+        # a `claim` printed as `0.25` is indistinguishable from one this project
+        # measured -- which is the whole failure the four states exist to stop.
+        # CLAUDE.md: the qualifier travels with the number, in every file and
+        # every sentence, and this file is one of them.
+        "noise_floor": {"value": baseline.get("value"),
+                        "origin": baseline.get("origin") or "mlclaw",
+                        "status": _floor_state,
+                        "gates": FLOOR_GATES.get(_floor_state),
+                        "unchecked": baseline.get("unchecked")},
         "counts": counts,
         "state_drift": drift,
         "killed": [{"id": n["id"], "killed_by": n.get("killed_by"),

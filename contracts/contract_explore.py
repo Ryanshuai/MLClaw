@@ -1586,5 +1586,30 @@ class AFloorMeasuredBeforeMLClawMustBeWritable(GraphCase):
         self.assertIn("t3_on_an_unverified_floor", f,
                       "invented ids must not buy a tier the honest door cannot")
 
+    def test_status_never_prints_the_floor_as_a_bare_number(self):
+        """‼️ `status` is the one-screen summary a person reads and the screen the
+        sentence gets quoted off. A `claim` floor printed as `0.25` is
+        indistinguishable there from one this project measured -- the same
+        promotion the tier ladder exists to stop, one layer out. CLAUDE.md: the
+        qualifier travels with the number, in every file and every sentence."""
+        self._external()
+        rc, out, _ = self.g("status")
+        self.assertEqual(rc, 0)
+        floor = out["noise_floor"]
+        self.assertEqual(floor["value"], 2.93)
+        self.assertEqual(floor["origin"], "external")
+        self.assertEqual(floor["status"], "claim")
+        self.assertIn("never a T3", floor["gates"])
+        self.assertEqual(floor["unchecked"], self.WHY)
+
+    def test_status_says_measured_when_it_was_measured(self):
+        self._floor(runs=["run_a", "run_b"])
+        for rid in ("run_a", "run_b"):
+            self.write_json(os.path.join("stages", "evaluation", "runs", rid,
+                                         "run.json"), dict(self.RUN))
+        rc, out, _ = self.g("status")
+        self.assertEqual(out["noise_floor"]["status"], "verified")
+        self.assertEqual(out["noise_floor"]["origin"], "mlclaw")
+
 if __name__ == "__main__":
     unittest.main()
