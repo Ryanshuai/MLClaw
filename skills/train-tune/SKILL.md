@@ -229,9 +229,9 @@ loop:
      - choose runtime_params overrides (within fixed / avoid / priors,
        and only over axes with param_injection.overridable = true)
      - write hypothesis text starting with [<tag>]
-  4. LAUNCH
+  4. LAUNCH — fill every free slot; do not form a batch
      - if a fleet is open: pool.py heartbeat --session <dir>     ← FIRST, before launching
-     - for each trial this iter:
+     - while in_flight < max_concurrent and no stop condition has tripped:
          - if a fleet is open: pool.py acquire --session <dir> --run <run_id>
                                → slot + reach; pass reach to /train-run as the target host
          - invoke /train-run as sub-skill with:
@@ -239,22 +239,53 @@ loop:
              - hypothesis = "<text>" (will be written to new run.json)
              - runtime_params overrides
          - new run inherits lineage.session = <self_session_id>
-     - if max_concurrent > 1: launch up to that many in parallel (sync_batch)
-  5. WAIT
-     - block until all launched trials in this iter complete
+         - ‼️ go back through 2-3 for EACH launch, against everything known so far.
+           Forming N hypotheses up front throws away the very thing that makes this
+           search adaptive: the second one is better for having seen the first result.
+  5. HARVEST — wait for ANY trial, never for all of them
+     - block until the FIRST in-flight trial finishes, or a slot stops answering
      - if a fleet is open: pool.py status --session <dir> --probe
        → a slot that no longer answers took its trial down with it
-     - for each finished trial:
+     - for THAT trial only:
          - pool.py release --session <dir> --slot <slot> --outcome ok|preempted|crashed
          - outcome `ok`        → read the trial's outcome as evidence, as below
            outcome `preempted` → NOT EVIDENCE. Re-queue the same hypothesis; do not
                                  record it as refuted (see Hard Rule 4)
-     - read each trial's outcome (agent fills run.json.outcome based on metric vs hypothesis)
+         - agent fills run.json.outcome based on metric vs hypothesis
   6. UPDATE state.json
      - increment iteration
-     - update best_run, best_metric if any trial beat them
-  7. goto 1
+     - update best_run, best_metric if that trial beat them
+  7. goto 1 — with the other trials still running
 ```
+
+### ‼️ Why this is a pipeline and not a batch
+
+This loop used to read *"launch up to max_concurrent in parallel (sync_batch)"* then
+*"block until **all** launched trials in this iter complete"*. A barrier — and with four
+slots and one trial running 3× the others, three of them sit idle for two thirds of every
+round. Step 2 was already written for the other shape (*"some may have completed since last
+iter"*), which cannot happen to this session's own trials while step 5 waits for all of them.
+
+**The dependency is real and it is not a barrier.** The next hypothesis genuinely depends on
+prior results — that is what makes this adaptive rather than a grid. But it depends on the
+results that *exist*, not on *all* of them. A trial finishing is the whole event: it frees a
+slot and it adds evidence, and the next hypothesis should be formed from everything known at
+that moment. Waiting for its three siblings adds nothing to the hypothesis and costs the
+slot. Same rule as `/explore`'s edges one layer down — a dependency that carries a value does
+not have to carry a wait (`skills/explore/references/experiment-graph.md` → TAKE).
+
+**`max_concurrent` stays 1 by default, and that is not this defect.** That default is about
+MONEY — every extra slot is another machine billing, which is `/lease` and `fleet.md`'s to
+authorise, never something a search widens on its own. The barrier was about WALL CLOCK: it
+stalled slots the user had already paid for. Fixing the second does not touch the first.
+
+‼️ **One barrier survives, and it is the drain.** When a stop condition trips, stop
+launching but **do not close the fleet while trials are in flight** — `pool.py close` tears
+the machines down, and a box destroyed under a running trial is both a lost trial and the
+case CLAUDE.md calls out as *"Never release a machine you did not evacuate"*. So: stop
+launching → let the in-flight trials finish → harvest each as in step 5 → *then* Step 6.
+Under the old barrier this could not arise, which is exactly why it has to be written down
+now. `no_signal` is computed over `completed_trials` at close, so it is still whole.
 
 **The heartbeat is step 4's first line and not an optional flourish.** A fleet's TTLs are
 sized in hours and a search runs overnight; the loop is the only thing that knows the
@@ -319,7 +350,14 @@ Do not invent a tiebreaker. Do not silently pick `trials[0]`. The whole point is
 
 `no_signal` overrides both `budget_exhausted` and `converged`: if the values check trips, status is `no_signal` regardless of how the loop ended.
 
-## Step 6: Close the fleet, then render
+## Step 6: Drain, close the fleet, then render
+
+**Drain first.** A stop condition stops LAUNCHING; it does not stop the trials already
+running. Let every in-flight trial finish and harvest it as in Step 4.5 before anything
+below — `close` tears the machines down, and destroying a box under a running trial loses
+the trial and is the case CLAUDE.md names *"Never release a machine you did not evacuate"*.
+If the user wants to stop without waiting, that is a decision, and the trials being
+abandoned get named in the summary rather than vanishing.
 
 **Release before rendering, and release on every exit path** — `converged`,
 `budget_exhausted`, `no_signal`, a crash, or the user stopping the search. A report is
