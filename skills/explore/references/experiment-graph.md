@@ -112,6 +112,14 @@ place both of them must pass through to take work, instead of in prose one of th
 read. A `claim` creates nothing on disk — it prints the command, exactly as every other verb here
 executes nothing.
 
+‼️ **One limit that is not the same sentence: `graph.json` is written atomically but is not
+locked.** Two `claim` calls landing in the same instant are a read-modify-write race, and the
+second write wins — the first claim is simply gone, with no torn file and nothing raised. In
+practice claims are minutes apart, which is why this is recorded rather than solved; what would
+solve it is an `O_EXCL` lock around the read-modify-write, and it has not been written. **Do not
+read "the claim succeeded" as "the claim is exclusive" under real concurrency** — re-read the
+card after claiming if two agents genuinely started together.
+
 ‼️ **Exit 1 and not exit 2, and the difference is the whole point.** CLAUDE.md's fallback rule
 says exit 2 means the script broke and the skill does the same work **by hand** — which for a
 refusal means opening the arm anyway. A safety check whose refusal routes into the fallback rule
