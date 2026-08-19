@@ -197,8 +197,9 @@ def render(project, root, counts, byte_totals, repro, concs, title, extra=None):
           f"**{repro.get('verdict', 'unknown')}**", "",
           repro.get("reason", "not assessed"), ""]
     if repro.get("verdict") != "yes":
-        L += ["> ‼️ 这不是拒绝，是标签。丢字节比标签不准更坏，所以东西照留，",
-              "> 但这一行必须跟着它走 —— 和普查记 `complete: false` 是同一条规矩。", ""]
+        L += ["> ‼️ This is a label, not a refusal. Losing the bytes is worse than an",
+              "> imprecise label, so everything is kept — but this line travels with it,",
+              "> the same rule as a census recording `complete: false`.", ""]
 
     L += ["## Layers", "", "| layer | files | bytes | what it is |", "|---|---|---|---|"]
     for c in CLASSES:
@@ -206,11 +207,12 @@ def render(project, root, counts, byte_totals, repro, concs, title, extra=None):
             L.append(f"| `{c}/` | {counts[c]} | {byte_totals[c]:,} | {LAYER_BLURB[c]} |")
     L.append("")
     if not counts.get("src"):
-        L += ["‼️ **没有 `src/` 层。** 权重和数字、却没有任何重建它们的办法，那是**备份**，",
-              "不是工件 —— 而且从它身上读不出一次 ablation 里两条臂到底差在哪。", ""]
+        L += ["‼️ **No `src/` layer.** Weights and numbers with no way to regenerate them",
+              "is a BACKUP, not an artifact — and an ablation read off one cannot say what",
+              "differed between its two arms.", ""]
     if not counts.get("logic"):
-        L += ["‼️ **没有 `logic/` 层。** 这一轮跑完了但没人写下相信了什么 —— "
-              "`/conclude` 是写它的地方。", ""]
+        L += ["‼️ **No `logic/` layer.** The round ran and nobody wrote down what it is "
+              "now believed to have shown — `/conclude` is where that goes.", ""]
 
     if concs:
         L += ["## Conclusions — `logic/`", "",
@@ -220,9 +222,10 @@ def render(project, root, counts, byte_totals, repro, concs, title, extra=None):
             L.append(f"| {c.get('id')} | {c.get('status') or '—'} | "
                      f"{c.get('tier') or '—'} | `{sc.get('corpus')}` | "
                      f"{c.get('statement')} |")
-        L += ["", "‼️ `status` 和 `tier` 是 `conclude.py check` 算出来的，"
-              "**在这份工件被写下的那一刻为真**。证据变动之后它们不会自己更新 —— "
-              "`ara.py check` 会报出漂移，重新引用之前先跑一次。", ""]
+        L += ["", "‼️ `status` and `tier` are computed by `conclude.py check` and were "
+              "**true at the moment this artifact was written**. They do not update "
+              "themselves when the evidence moves — `ara.py check` reports the drift, so "
+              "run it before citing these again.", ""]
     return L
 
 

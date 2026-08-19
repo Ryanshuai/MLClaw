@@ -121,13 +121,13 @@ class TheLayersAreARAsPlusTheOneItDoesNotHave(AraCase):
                                                  "logic", "conclusions.json")))
 
     def test_the_index_never_contradicts_the_directory_beside_it(self):
-        """The counts must include what was copied in. Reporting 「no logic
-        layer」 on a bundle holding `logic/conclusions.json` is worse than either
+        """The counts must include what was copied in. Reporting "no logic
+        layer" on a bundle holding `logic/conclusions.json` is worse than either
         answer alone — it teaches the reader that the index is decoration."""
         out = self.build()
         self.assertEqual(out["layers"]["logic"], 1)
         self.assertNotIn("no `logic` layer", json.dumps(out))
-        self.assertNotIn("没有 `logic/` 层", self.md())
+        self.assertNotIn("No `logic/` layer", self.md())
 
     def test_an_unrecognised_file_is_kept_and_named(self):
         self.write(os.path.join(self.RUN, "notes_from_the_intern.txt"), "read me")
@@ -137,8 +137,8 @@ class TheLayersAreARAsPlusTheOneItDoesNotHave(AraCase):
 
 
 class AnArtifactWithoutItsInputIsABackup(AraCase):
-    """The user's framing, and it is the right one: 「代码 + config 实际上等于
-    可复现」. In an architecture search the CODE IS THE VARIABLE, so `src/` is not
+    """The user's framing, and it is the right one: "code + config is effectively
+    what reproducibility means". In an architecture search the CODE IS THE VARIABLE, so `src/` is not
     context around the result — it is the reproducibility claim.
 
     Weights and numbers with no way to regenerate them is a backup. An ablation
