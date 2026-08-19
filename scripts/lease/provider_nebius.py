@@ -39,9 +39,9 @@ import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from _common import (TAG_PREFIX, add_shape_args, die, emit, fan_out,  # noqa: E402
-                     load_resources, parse_arch, resources_from_workspace_root,
-                     sweep_result)
+from _common import (SSH_OPTS, TAG_PREFIX, add_shape_args, die, emit,  # noqa: E402
+                     fan_out, load_resources, parse_arch,
+                     resources_from_workspace_root, sweep_result)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 TABLE = os.path.join(HERE, "machines_nebius.json")
@@ -50,8 +50,6 @@ CALL_TIMEOUT = 120
 UP_POLL_TIMEOUT = 900   # 15 min. A create that has not become reachable by then is not
                         # slow, it is the silent STARTING->STOPPED placement failure.
 UP_POLL_EVERY = 15
-SSH_OPTS = ["-o", "StrictHostKeyChecking=accept-new", "-o", "UserKnownHostsFile=/dev/null",
-            "-o", "LogLevel=ERROR", "-o", "ConnectTimeout=8", "-o", "BatchMode=yes"]
 
 POOLS = ("on_demand", "preemptible")
 

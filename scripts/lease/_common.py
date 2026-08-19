@@ -18,6 +18,13 @@ DEFAULT_TTL_S = 14400  # 4h. L2 policy — adapters require --ttl-s, they don't 
 TAG_PREFIX = "mlclaw-"
 SSH_UNREACHABLE = 255  # ssh's own "could not connect", distinct from a remote non-zero exit
 
+# How every adapter opens an ssh connection. One copy for the same reason TTL is
+# one copy: both providers had this list byte-identically, and the two ends of a
+# connection disagreeing about `ConnectTimeout` or `BatchMode` does not raise —
+# it hangs, or it prompts on a box nobody is watching.
+SSH_OPTS = ["-o", "StrictHostKeyChecking=accept-new", "-o", "UserKnownHostsFile=/dev/null",
+            "-o", "LogLevel=ERROR", "-o", "ConnectTimeout=8", "-o", "BatchMode=yes"]
+
 ERROR_CLASSES = ("no_capacity", "quota", "permission", "credential_expired", "transient")
 
 

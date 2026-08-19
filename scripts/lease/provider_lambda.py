@@ -62,8 +62,9 @@ import urllib.error
 import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from _common import (TAG_PREFIX, add_shape_args, die, emit, load_resources,  # noqa: E402
-                     parse_arch, resources_from_workspace_root, sweep_result)
+from _common import (SSH_OPTS, TAG_PREFIX, add_shape_args, die, emit,  # noqa: E402
+                     load_resources, parse_arch, resources_from_workspace_root,
+                     sweep_result)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 TABLE = os.path.join(HERE, "machines_lambda.json")
@@ -72,8 +73,6 @@ DEFAULT_API = "https://cloud.lambda.ai/api/v1"
 CALL_TIMEOUT = 60
 UP_POLL_TIMEOUT = 900   # a create not reachable by then is not slow; see `await_reachable`
 UP_POLL_EVERY = 15
-SSH_OPTS = ["-o", "StrictHostKeyChecking=accept-new", "-o", "UserKnownHostsFile=/dev/null",
-            "-o", "LogLevel=ERROR", "-o", "ConnectTimeout=8", "-o", "BatchMode=yes"]
 
 MT_RE = re.compile(r"^(?P<region>[a-z0-9-]+):(?P<itype>[A-Za-z0-9_.-]+)$")
 
