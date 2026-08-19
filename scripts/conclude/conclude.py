@@ -4,8 +4,8 @@
 MLClaw records what HAPPENED in exhaustive detail: a run record, a graph card, a
 census, an audit. Nothing recorded what is BELIEVED -- and the belief is the only
 thing anybody repeats six weeks later, out loud, with none of the three
-qualifiers that made it true. 「多帧融合我们试过了，没用」 is a sentence about a
-corpus, a tier and a noise floor, none of which survive the sentence.
+qualifiers that made it true. "We tried multi-frame fusion, it didn't help" is a
+sentence about a corpus, a tier and a noise floor, none of which survive it.
 
 Borrowed from ARA (arXiv:2604.24658) `logic/claims.md`. Three things are taken:
 
@@ -676,11 +676,13 @@ def cmd_render(a):
     res = assess(a.project, rec)
     MARK = {"supported": "✅", "contested": "⚖️", "refuted": "❌",
             "unverifiable": "❓", "superseded": "📦"}
-    L = [f"# 结论 — {rec.get('project') or a.project}", ""]
-    L += ["> 每条结论都带 **status** 和 **tier**。`tier` 是其证据里**最弱**的那一档，",
-          "> 不是最强的那一档。`unverifiable` 不是弱一点的 `supported`，是「现在没人能查」——",
-          "> 与 `refuted` 无关。", "",
-          f"渲染于 {now_utc()}。计算得出，非手写；`conclude.py check` 是同一套判定。", ""]
+    L = [f"# Conclusions — {rec.get('project') or a.project}", ""]
+    L += ["> Every conclusion carries a **status** and a **tier**. The `tier` is the",
+          "> **weakest** of its evidence, not the strongest. `unverifiable` is not a",
+          "> weaker `supported` -- it means nobody can check any more, which has",
+          "> nothing to do with `refuted`.", "",
+          f"Rendered {now_utc()}. Computed, never hand-written; `conclude.py check` "
+          "applies the same judgement.", ""]
 
     counts = {}
     for cid in res:
@@ -715,11 +717,11 @@ def cmd_render(a):
                      f"{e.get('tier') or '—'} | {r} | {e.get('quote')} |")
         L.append("")
         if (c.get("interpretation") or "").strip():
-            L += ["### Interpretation — 论证，**未测量**", "",
+            L += ["### Interpretation — argued, **not measured**", "",
                   c["interpretation"], ""]
         bad = [d for s, d in a_.get("findings", []) if s == "critical"]
         if bad:
-            L += ["### ‼️ check 未通过", ""] + [f"- {d}" for d in bad] + [""]
+            L += ["### ‼️ check did not pass", ""] + [f"- {d}" for d in bad] + [""]
 
     out = a.out or os.path.join(a.project, "knowledge", "conclusions.md")
     os.makedirs(os.path.dirname(out), exist_ok=True)

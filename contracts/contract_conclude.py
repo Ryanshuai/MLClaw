@@ -52,8 +52,8 @@ class ConcludeCase(TempDirCase):
                 return c
         raise AssertionError(f"no conclusion {cid}")
 
-    def add(self, statement="一对一匹配在这个语料上有效",
-            falsified_if="重测时 AP50 差值落回噪声地板 0.42 以内", **over):
+    def add(self, statement="one-to-one matching works on this corpus",
+            falsified_if="a re-measure puts the AP50 delta back inside the 0.42 noise floor", **over):
         args = ["add", "--statement", statement, "--falsified-if", falsified_if,
                 "--corpus", CORPUS, "--mode", "production", "--metric", "AP50",
                 "--provenance", "user"]
@@ -190,16 +190,16 @@ class ARefutedPremiseContestsItsDependentsRatherThanErasingThem(ConcludeCase):
     """
 
     def _chain(self):
-        a = self.add(statement="一对一匹配有效")
+        a = self.add(statement="one-to-one matching works")
         self.evidence(a, tier="T2")
-        b = self.add(statement="瓶颈在后处理", depends_on=a)
+        b = self.add(statement="the bottleneck is post-processing", depends_on=a)
         self.evidence(b, kind="node", ref=NODE, quote="verdict: won", tier="T2")
         return a, b
 
     def test_refuting_the_premise_contests_the_dependent(self):
         a, b = self._chain()
         rc, out, err = self.c("refute", "--id", a, "--by", RUN,
-                              "--quote", "AP50 = 84.0", "--note", "重测不复现")
+                              "--quote", "AP50 = 84.0", "--note", "does not reproduce on a re-measure")
         self.assertEqual(rc, 0, f"refute failed: {out or err}")
         self.assertEqual(self.status_of(b), "contested")
 
@@ -217,7 +217,7 @@ class ARefutedPremiseContestsItsDependentsRatherThanErasingThem(ConcludeCase):
 
     def test_propagation_reaches_the_whole_chain(self):
         a, b = self._chain()
-        c3 = self.add(statement="所以下一轮不换 backbone", depends_on=b)
+        c3 = self.add(statement="so the next round does not swap the backbone", depends_on=b)
         self.evidence(c3, kind="node", ref=NODE, quote="verdict: won", tier="T2")
         self.c("refute", "--id", a, "--by", RUN, "--quote", "AP50 = 84.0")
         self.assertEqual(self.status_of(c3), "contested")
@@ -236,7 +236,7 @@ class AConclusionWithNoFalsifierIsNotAdmitted(ConcludeCase):
     hypothesis nothing can refute is a wish」.
 
     The tautology case is the one worth checking, because it is worse than the
-    empty field: 「如果最后发现没用」 looks filled, passes every measurement, and
+    empty field: "if it turns out not to help" looks filled, passes every measurement, and
     is met by nothing.
     """
 
@@ -254,13 +254,13 @@ class AConclusionWithNoFalsifierIsNotAdmitted(ConcludeCase):
         self.assertIn("preference", blob)
 
     def test_a_tautology_naming_neither_number_nor_metric_is_flagged(self):
-        cid = self.add(falsified_if="如果后来发现这个办法其实不行")
+        cid = self.add(falsified_if="if it later turns out this approach does not work")
         self.evidence(cid)
         blob = " ".join(f["detail"] for f in self.findings(cid))
         self.assertIn("cannot execute", blob)
 
     def test_naming_the_scope_metric_is_enough(self):
-        cid = self.add(falsified_if="换更大 backbone 后 AP50 反超")
+        cid = self.add(falsified_if="a larger backbone overtakes it on AP50")
         self.evidence(cid)
         blob = " ".join(f["detail"] for f in self.findings(cid))
         self.assertNotIn("cannot execute", blob)
@@ -276,25 +276,25 @@ class ANumberInTheBeliefCarriesTheLineItCameFrom(ConcludeCase):
     """
 
     def test_a_number_absent_from_every_quote_is_critical(self):
-        cid = self.add(statement="AP50 从 84.16 抬到 92.15")
+        cid = self.add(statement="AP50 goes from 84.16 to 92.15")
         self.evidence(cid, quote="AP50 = 92.15")     # 84.16 is nowhere
         blob = " ".join(f["detail"] for f in self.findings(cid, "critical"))
         self.assertIn("84.16", blob)
 
     def test_a_number_present_in_a_quote_passes(self):
-        cid = self.add(statement="AP50 从 84.16 抬到 92.15")
+        cid = self.add(statement="AP50 goes from 84.16 to 92.15")
         self.evidence(cid, quote="at_held 84.16 -> at_own 92.15")
         self.assertEqual(self.findings(cid, "critical"), [])
 
     def test_the_percentage_form_of_the_same_number_matches(self):
         """Records keep the fraction, logs print the percentage — the shared
         `digits()` helper exists so 0.0462 and \"4.62%\" are one number."""
-        cid = self.add(statement="这类帧占 4.62")
+        cid = self.add(statement="frames like this are 4.62 percent of the corpus")
         self.evidence(cid, quote="G>=52 frames: 254/5495 (4.62%)")
         self.assertEqual(self.findings(cid, "critical"), [])
 
     def test_an_ungrounded_number_in_the_interpretation_is_caught_too(self):
-        cid = self.add(interpretation="大概能再吃到 3.5 个点")
+        cid = self.add(interpretation="probably another 3.5 points on top")
         self.evidence(cid)
         blob = " ".join(f["detail"] for f in self.findings(cid, "critical"))
         self.assertIn("3.5", blob)
@@ -322,28 +322,28 @@ class TheGroundingCheckDoesNotFloodOnIdentifiers(ConcludeCase):
     """
 
     def test_a_metric_name_is_not_a_measurement(self):
-        cid = self.add(statement="AP50 上有效")
+        cid = self.add(statement="it works on AP50")
         self.evidence(cid, quote="won")
         self.assertEqual(self.findings(cid, "critical"), [])
 
     def test_a_snapshot_id_is_not_a_measurement(self):
-        cid = self.add(statement="在 datasets/boxes@260731 上有效")
+        cid = self.add(statement="it works on datasets/boxes@260731")
         self.evidence(cid, quote="won")
         self.assertEqual(self.findings(cid, "critical"), [])
 
     def test_a_run_id_is_not_a_measurement(self):
-        cid = self.add(statement="见 run_20260712_141530")
+        cid = self.add(statement="see run_20260712_141530")
         self.evidence(cid, quote="won")
         self.assertEqual(self.findings(cid, "critical"), [])
 
     def test_a_date_is_not_a_measurement(self):
-        cid = self.add(statement="2026-08-14 那轮的结果")
+        cid = self.add(statement="the result from the 2026-08-14 round")
         self.evidence(cid, quote="won")
         self.assertEqual(self.findings(cid, "critical"), [])
 
     def test_a_real_measurement_is_still_caught(self):
         """The anti-flood rule must not be the reason a number goes ungrounded."""
-        cid = self.add(statement="AP50 达到 92.15")
+        cid = self.add(statement="AP50 reaches 92.15")
         self.evidence(cid, quote="won")
         blob = " ".join(f["detail"] for f in self.findings(cid, "critical"))
         self.assertIn("92.15", blob)
@@ -456,7 +456,7 @@ class EvidenceNobodyHereConfirmedIsAClaim(ConcludeCase):
         self.assertEqual(out["resolves"], "claim")
 
     def test_a_conclusion_resting_only_on_external_refs_is_flagged(self):
-        cid = self.add(statement="一对一匹配普遍有效")
+        cid = self.add(statement="one-to-one matching works in general")
         self.evidence(cid, kind="external", ref="arXiv:2304.08069",
                       quote="one-to-one matching removes NMS", tier="T0")
         blob = " ".join(f["detail"] for f in self.findings(cid, "critical"))
@@ -476,7 +476,7 @@ class AConclusionIsAboutACorpus(ConcludeCase):
     stand for this corpus. A fault's share is a property of the corpus, not of
     the fault.」
 
-    One level up from the share. 「多帧融合没用」 is a sentence about a corpus that
+    One level up from the share. "Multi-frame fusion does not help" is a sentence about a corpus that
     does not name it, which is what makes it unanswerable six weeks later — and
     what makes it get repeated on a corpus where it was never measured.
     """
@@ -519,7 +519,7 @@ class SettledConclusionsAreNotRewritten(ConcludeCase):
         self.evidence(cid)
         self.c("refute", "--id", cid, "--by", RUN, "--quote", "AP50 = 84")
         rc, out, err = self.c("set", "--id", cid, "--field", "statement",
-                              "--value", "其实一直没用")
+                              "--value", "it never actually helped")
         self.assertEqual(rc, 1, f"expected a refusal, got {rc}: {out or err}")
 
     def test_a_refuted_conclusion_cannot_take_new_evidence(self):
@@ -531,9 +531,9 @@ class SettledConclusionsAreNotRewritten(ConcludeCase):
         self.assertEqual(rc, 1)
 
     def test_superseding_keeps_the_old_belief(self):
-        old = self.add(statement="一对一匹配有效")
+        old = self.add(statement="one-to-one matching works")
         self.evidence(old)
-        new = self.add(statement="一对一匹配只在密集场景有效")
+        new = self.add(statement="one-to-one matching works only in dense scenes")
         self.evidence(new)
         rc, out, err = self.c("supersede", "--id", old, "--by", new, "--note", "n")
         self.assertEqual(rc, 0, f"supersede failed: {out or err}")
@@ -635,12 +635,12 @@ class TheArtifactSaysWhatTheRecordSays(ConcludeCase):
         """ARA's separation is the borrowing. Printing the argument inside the
         statement is how a conclusion comes to read as if its mechanism had been
         measured."""
-        cid = self.add(interpretation="推测是 NMS 抑制了密集场景的真阳性")
+        cid = self.add(interpretation="probably NMS suppressing true positives in dense scenes")
         self.evidence(cid)
         sec = self._section(cid)
         self.assertIn("Interpretation", sec)
-        self.assertIn("未测量", sec)
-        self.assertIn("推测是 NMS", sec)
+        self.assertIn("not measured", sec)
+        self.assertIn("probably NMS", sec)
 
     def test_the_artifact_shows_which_evidence_no_longer_resolves(self):
         cid = self.add()

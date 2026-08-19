@@ -12,100 +12,118 @@ description: >
   record) or which arm won (that is /explore's graph).
 ---
 
-# /conclude — 结论层
+# /conclude — the belief layer
 
-一个 run 记录是**发生了什么**。一张 graph 卡是**哪条臂赢了**。都没有记**现在相信什么** ——
-而六周之后被人复述的，只有后者，而且复述时那三个限定词一个都不剩：
+A run record says **what happened**. A graph card says **which arm won**. Neither records
+**what is now believed** — and six weeks later, the belief is the only one anybody repeats,
+with not one of its three qualifiers left attached:
 
-> 「多帧融合我们试过了，没用。」
+> "We tried multi-frame fusion. It didn't help."
 
-这句话是关于**某个语料**、**某个档位**、**某个噪声地板**的。三样都不在句子里，所以它既没法被
-反驳，也没法被应用——而它会被应用，在一个从来没测过它的语料上。
+That sentence is about **a particular corpus**, **a particular tier**, and **a particular
+noise floor**. None of the three is in it, so it can be neither refuted nor applied — and it
+*will* be applied, to a corpus it was never measured on.
 
-结构借自 ARA（arXiv:2604.24658）的 `logic/claims.md`。拿了三样：
+The structure is borrowed from ARA (arXiv:2604.24658) `logic/claims.md`. Three things taken:
 
-1. **`Evidence basis` 和 `Interpretation` 是两栏，不是一栏。** 合成一栏，结论读起来就像机制被
-   测过了，下一轮于是照着一个没人测过的机制去设计。
-2. **`Falsification criteria` 是必填。** 没有反证条件的信念是偏好，`check` 拒收。
-3. **结论依赖结论。** 所以否掉一条必须**推动**其它条，而不是只改自己。
+1. **`Evidence basis` and `Interpretation` are two columns, not one.** Merged into one, a
+   conclusion reads as if the mechanism had been measured, and the next round is designed
+   around a mechanism nobody ever tested.
+2. **`Falsification criteria` is mandatory.** A belief with no falsifier is a preference, and
+   `check` refuses it.
+3. **Conclusions depend on conclusions.** So refuting one must *move* the others rather than
+   only editing itself.
 
-没拿它的**词**：MLClaw 里 `claim` 已经是反义词——`/ask-human` 和 `/discover` 用它表示
-「有人这么说，但没有东西证实」。用 claim 称呼有证据的那个对象，正好在差别最要命的地方撞车。
+What was **not** taken is its word: in MLClaw `claim` already means the opposite —
+`/ask-human` and `/discover` use it for "somebody said so, and nothing confirmed it". Calling
+the evidenced object a claim would collide exactly where the distinction matters most.
 
-**加了一个 ARA 没有的状态：`unverifiable`。** ARA 的状态假设证据待在原地。MLClaw 会退役数据集、
-删检查点、丢快照，所以真正会发生的那个状态是「**现在没人能查了**」。它不是弱一点的
-`supported`，更不是 `refuted` —— 和 `census.py` 分开 `gone` / `unreachable`、`/repro` 单列一档
-是同一条纪律。
+**One state was added that ARA does not have: `unverifiable`.** ARA's states assume the
+evidence stays put. MLClaw retires datasets, deletes checkpoints and loses snapshots, so the
+state that actually occurs is "**nobody can check any more**". It is not a weaker `supported`,
+and it is certainly not `refuted` — the same discipline as `census.py` separating `gone` from
+`unreachable`, and `/repro` giving it its own tier.
 
-## 记录在哪
+## Where the record lives
 
-`{project}/knowledge/conclusions.json`（记录）+ `knowledge/conclusions.md`（渲染的工件）。
-项目级，不在 `stages/` 下面：一条结论比产生它的那次 exploration 活得久，而且可能来自 eval、
-tune 或 audit。
+`{project}/knowledge/conclusions.json` (the record) + `knowledge/conclusions.md` (the rendered
+artifact). Project-level, not under `stages/`: a conclusion outlives the exploration that
+produced it, and it may equally have come from an eval, a tune or an audit.
 
-脚本 `<mlclaw_root>/scripts/conclude/conclude.py`，九个动词：
-`new | add | evidence | set | refute | supersede | check | status | render`。
+The script is `<mlclaw_root>/scripts/conclude/conclude.py`, with nine verbs:
+`new | add | evidence | set | refute | supersede | check | status | render`.
 
-## ‼️ `status` 和 `tier` 是算出来的，不是写的
+## ‼️ `status` and `tier` are computed, never written
 
-`set --field status` 会**拒绝**（退 1）。这不是洁癖：一条置信度活得比它的证据长，在 JSON 里
-和证据完好的那条**一模一样**，而这正是这个文件存在的唯一理由。
+`set --field status` **refuses** (exit 1). This is not fastidiousness: a confidence that
+outlived its evidence looks **identical in JSON** to one whose evidence is intact, and that is
+the entire reason this file exists.
 
-- **`tier` 取证据里最弱的那一档**，不是最强的。一条结论靠一个 T3 臂加一个 T1 探针，它是
-  **T1 结论**。取最强就是 CLAUDE.md 里「软数字变硬数字」那条机制，往上一层。
-- **`status` 由 `check` 从「现在能不能打开」算出来**，并**报告**存的值和算的值不一致 ——
-  报告，不修。修了就把「结论活得比证据长」这个唯一证据抹掉了，同时把报告变绿。
+- **`tier` takes the WEAKEST tier among the evidence**, not the strongest. A conclusion resting
+  on one T3 arm and one T1 probe is a **T1 conclusion**. Taking the strongest is CLAUDE.md's
+  "a soft number becomes a hard one" mechanism, one level up.
+- **`status` is computed by `check` from what currently resolves**, and it **reports** any
+  disagreement between the stored value and the computed one — reports, never repairs.
+  Repairing erases the only evidence that a conclusion outlived its evidence, and turns the
+  report green while doing it.
 
-## 流程
+## The flow
 
-一次五步，别拆成五个问题问人。
+Five steps in one pass. Do not turn them into five questions asked of a person.
 
-1. **`add`** —— 一句话说清相信什么，加上 `--falsified-if` 和 `--corpus`。
-   反证条件必须**点到一个数或者 scope 里那个指标名**；「如果后来发现不行」是同义反复，
-   它比空着更坏，因为它看起来填了，而且任何测量都满足不了它。
-2. **`evidence`** —— 每条证据一个 `--ref` 和一句 `--quote`。**quote 是抄下来的那一行，不是概括**：
-   光有路径不算接地，抄下来的行才是「这个源当时被打开过」的证据。`check` 会核对 statement 里
-   每个数字是否出现在某条 quote 里。
-3. **`--interpretation`** —— 在证据之上**论证**的、没测过的那部分。ARA 自己的例子把
-   「the authors argue (but do not formally prove)」放在这一栏。别塞回 statement。
-4. **`check`** —— 关键 finding 退 1。
-5. **`render`** —— 出工件。
+1. **`add`** — one sentence saying what is believed, plus `--falsified-if` and `--corpus`.
+   The falsifier must **name a number or the metric named in the scope**; "if it later turns
+   out not to work" is a tautology, and it is worse than leaving the field empty, because it
+   looks filled and no measurement can ever satisfy it.
+2. **`evidence`** — one `--ref` and one `--quote` per piece. **The quote is the transcribed
+   line, not a summary**: a path alone is not grounding, and the transcribed line is the
+   evidence that this source was actually opened. `check` verifies that every number in the
+   statement appears in some quote.
+3. **`--interpretation`** — the part that is *argued* on top of the evidence and was not
+   measured. ARA's own example puts "the authors argue (but do not formally prove)" in this
+   column. Do not push it back into the statement.
+4. **`check`** — a critical finding exits 1.
+5. **`render`** — produce the artifact.
 
-## 判决表
+## The verdict table
 
-| 情况 | 状态 | 谁能改 |
+| Situation | Status | Who can move it |
 |---|---|---|
-| 证据都打得开，依赖也不弱 | `supported` | —— |
-| 有争议 / 依赖被否或存疑 | `contested` | 有人去看 |
-| 反证条件被一次**记录在案的测量**满足 | `refuted` | `refute --by <打得开的 ref>` |
-| 有证据 ref **打不开了** | `unverifiable` | 修证据，或者接受它就是查不了 |
-| 被更准的一条取代 | `superseded` | `supersede --by K0N` |
+| Every piece of evidence resolves, and no dependency is weak | `supported` | — |
+| Disputed, or a dependency is refuted or in doubt | `contested` | somebody has to look |
+| The falsifier was satisfied by a **recorded measurement** | `refuted` | `refute --by <a ref that resolves>` |
+| An evidence ref **no longer resolves** | `unverifiable` | fix the evidence, or accept that it cannot be checked |
+| Replaced by something more precise | `superseded` | `supersede --by K0N` |
 
-**否掉一条不会删掉靠它的那些**，只会把它们变 `contested`。删了就把「当初为什么launch 那一批
-run」的唯一记录抹了；留在 `supported` 则让一条被否的前提继续被引用。`contested` 是「得有人去
-看一眼」那一格。
+**Refuting one conclusion does not delete the ones resting on it** — it moves them to
+`contested`. Deleting them erases the only record of why that batch of runs was launched;
+leaving them `supported` lets a refuted premise go on being cited. `contested` is the
+"somebody needs to take a look" cell.
 
-**`refute` 的 `--by` 必须打得开。** 一个打不开的反证是「意见推翻记录」——CLAUDE.md
-「Never let somebody's word become a checked fact」正是这条。
+**`refute --by` must resolve.** A falsification that cannot be opened is opinion overturning
+record — which is exactly CLAUDE.md's *"Never let somebody's word become a checked fact"*.
 
-## 什么时候会突然多出一堆 `unverifiable`
+## When a pile of `unverifiable` suddenly appears
 
-`/data-retire apply` 之后、删 run 之后、快照没了之后。跑 `conclude.py check` 就知道**哪几条**
-刚刚变成没人能查的。引用了带 `data_retired` 戳的快照时，这里**只报，不裁**——
-`/repro` 的 `survivors_of_retirement` 已经会做「删除时间 vs 普查时间」那个 join，
-同一个判断写两遍只会有一遍被修。
+After `/data-retire apply`, after a run is deleted, after a snapshot is gone. Run
+`conclude.py check` to find out **which ones** just became uncheckable. When a snapshot
+stamped `data_retired` is cited, this **reports and does not adjudicate** — `/repro`'s
+`survivors_of_retirement` already performs the deletion-time vs census-time join, and the same
+judgement written twice means only one copy ever gets fixed.
 
-## 被别的 skill 怎么调
+## How other skills call it
 
-- **`/explore` 收尾必调**：一轮架构搜索的产出就是若干条结论，落在 `graph.json` 里的是
-  「哪条臂赢了」，不是「所以现在相信什么」。
-- `/train-tune-report`、`/eval-report`、`/data-audit` 之后可选。
-- **有人引用旧结论时**（「那个不是早否掉了吗」）：先 `status`，别凭记忆答。
+- **`/explore` always calls it on the way out**: what an architecture search produces is a set
+  of conclusions. What lands in `graph.json` is "which arm won", not "so what is now believed".
+- Optional after `/train-tune-report`, `/eval-report` and `/data-audit`.
+- **Whenever somebody quotes an old conclusion** ("wasn't that ruled out ages ago?"): run
+  `status` first, never answer from memory.
 
-## 三条不做的事
+## Three things it does not do
 
-- **不执行任何东西。** 结论由已经存在的 run 支撑；这里一个 GPU 都不碰。
-- **不替人下结论。** `provenance` 分 `user` / `ai-suggested` / `ai-executed` / `user-revised`，
-  且**永不自动升级**——和 `graph.py` 同一条规矩。全是 `ai-suggested` 的一屏结论，是没人要过的
-  一屏结论，`check` 会这么说。
-- **不修记录。** `check` 只报。
+- **It executes nothing.** Conclusions rest on runs that already exist; this touches no GPU.
+- **It does not conclude on the user's behalf.** `provenance` distinguishes `user` /
+  `ai-suggested` / `ai-executed` / `user-revised`, and **never auto-upgrades** — the same rule
+  as `graph.py`. A screen of conclusions that are all `ai-suggested` is a screen of conclusions
+  nobody asked for, and `check` says so.
+- **It does not repair the record.** `check` only reports.
