@@ -26,7 +26,7 @@ whole first trap in "Scope completeness" is exactly this failure.
   provider_nebius.py up --machine-type T --ttl-s N [--tag ...] [--run ...] [--project ...]
   provider_nebius.py addr|state|down <instance_id>
   provider_nebius.py renew <instance_id> --ttl-s N
-  provider_nebius.py sweep [--tag-prefix mlclaw-]
+  provider_nebius.py sweep [--tag-prefix <prefix>]
   provider_nebius.py history [--tag-prefix P] [--instance-id ID] [--window-s N]
 """
 

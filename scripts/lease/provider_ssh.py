@@ -19,7 +19,7 @@ Usage
                      [--run RUN_ID] [--project NAME]
   provider_ssh.py addr|state|down INSTANCE_ID
   provider_ssh.py renew INSTANCE_ID --ttl-s N
-  provider_ssh.py sweep [--tag-prefix mlclaw-]
+  provider_ssh.py sweep [--tag-prefix <prefix>]
 """
 
 import argparse

@@ -47,11 +47,10 @@ LEASE = os.path.join(HERE, "..", "lease", "lease.py")
 # here is simply not passed on, so the search rents a machine that does not meet the
 # constraint and nothing anywhere says so.
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), "lease"))
-from _common import SHAPE_FLAGS, add_shape_args, shape_flags  # noqa: E402
+from _common import DEFAULT_TTL_S, SHAPE_FLAGS, add_shape_args, shape_flags  # noqa: E402
 sys.path.insert(0, HERE)
 from _records import atomic_write_json  # noqa: E402
 
-DEFAULT_TTL_S = 14400          # matches L2's default; renewed by `heartbeat`
 PROBE_TIMEOUT = 10
 
 def emit(obj):

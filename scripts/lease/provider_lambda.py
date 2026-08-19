@@ -46,7 +46,7 @@ next trap found on either side is fixed for both.
   provider_lambda.py up --machine-type T --ttl-s N [--tag ...] [--run ...] [--project ...]
   provider_lambda.py addr|state|down <instance_id>
   provider_lambda.py renew <instance_id> --ttl-s N
-  provider_lambda.py sweep [--tag-prefix mlclaw-]
+  provider_lambda.py sweep [--tag-prefix <prefix>]
   provider_lambda.py history [--tag-prefix P] [--instance-id ID] [--window-s N]
 """
 
@@ -628,10 +628,11 @@ def v_sweep(args):
 def v_history(args):
     """`supported: false`, and it is the honest whole answer.
 
-    Lambda exposes no audit or lifecycle log. So on this provider "did that box get
-    released?" cannot be answered from the provider at all — and the failure the contract
-    guards against is answering it anyway from `sweep`'s silence, which is equally
-    consistent with a terminated box and a renamed one that is still billing.
+    The reason is in the payload below, said once, where the operator reading the
+    output is the one who needs it. What is NOT in the payload is the failure the
+    contract guards against: answering "did that box get released?" anyway, from
+    `sweep`'s silence — which is equally consistent with a terminated box and a
+    renamed one that is still billing.
 
     What is left is `leases.json`, which L2 merges alongside these events and which is a
     record of what MLClaw did rather than of what happened. That gap is the reason
