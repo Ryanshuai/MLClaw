@@ -63,6 +63,16 @@ OPEN_STATES = ("held", "requesting")
 # Drops out of here once /resources writes `compute.ssh` when it discovers servers.
 SELF_REGISTERING = {"ssh": "servers"}
 
+# Same shape as the line above -- an adapter fact L2 owns. `ssh` is owned hardware:
+# every row it returns is `price_hr: 0` by construction, so it cannot hold the thing
+# `reap --billing-only` exists to find. Excluding it is not a tidy-up. Sweeping it
+# means ssh'ing every registered server, and the automatic call site (CLAUDE.md ->
+# "On Conversation Start") runs before the user has said anything -- four ssh
+# timeouts is not a greeting, which is the same reason `census.py scan` is not run
+# there either. ‼️ A held ssh claim is still a real problem; it is not a MONEY
+# problem, and the unfiltered `reap` is what answers for it.
+NON_BILLING = {"ssh"}
+
 
 def iso(epoch):
     return datetime.fromtimestamp(epoch, timezone.utc).isoformat(timespec="seconds")
@@ -102,6 +112,22 @@ def providers(res_path):
         if any(not k.startswith("_") for k in (res.get(block) or {})):
             registered.add(name)
     return [p for p in installed if p in registered]
+
+
+def compute_without_adapter(res_path):
+    """Declared in `compute` but naming no installed adapter -> nothing will sweep it.
+
+    `providers()` INTERSECTS, so a mistyped key (`nebius_prod` for `nebius`) does not
+    error -- it disappears, and the caller keeps believing the provider is registered.
+    That was survivable while `reap` was something a person typed. It is not now that it
+    runs unattended at conversation start, where the disappearance reads as "nothing is
+    billing" every session, forever, about an account that is.
+    """
+    installed = {fn[len("provider_"):-len(".py")] for fn in os.listdir(HERE)
+                 if fn.startswith("provider_") and fn.endswith(".py")}
+    res = load_resources(res_path)
+    return sorted(k for k in (res.get("compute") or {})
+                  if not k.startswith("_") and k not in installed)
 
 
 def call(provider, res_path, verb, *extra):
@@ -560,7 +586,10 @@ def v_reap(args):
     res = args.res
     ledger = read_ledger(res)
     open_tags = {r.get("tag") for r in open_rows(ledger)}
-    rows, errors, scope, stored = collect(providers(res), res, "sweep",
+    names = providers(res)
+    skipped = sorted(n for n in names if n in NON_BILLING) if args.billing_only else []
+    names = [n for n in names if n not in skipped]
+    rows, errors, scope, stored = collect(names, res, "sweep",
                                           "--tag-prefix", args.tag_prefix)
 
     orphans = []
@@ -580,6 +609,14 @@ def v_reap(args):
     # no forgotten boxes" from "nobody looked" -- state it before quoting the count.
     emit({"orphans": orphans,
           "orphan_storage": orphan_storage,
+          # Named, never silent. `complete` stays the answer to "did every provider we
+          # swept answer"; this is the different fact that we chose not to sweep one, so
+          # `orphans: []` here means "nothing RENTED is orphaned", not "nothing is held".
+          "skipped_non_billing": skipped or None,
+          # A provider you think you registered and nothing sweeps. Reported beside the
+          # count rather than folded into it: this is not an unreached corner, it is a
+          # corner nobody named correctly, and only the resources file can fix it.
+          "compute_without_adapter": compute_without_adapter(res) or None,
           "complete": scope["complete"],
           "orphans_is_lower_bound": not scope["complete"],
           "scope": scope,
@@ -679,6 +716,10 @@ def main():
 
     p = sub.add_parser("reap"); p.set_defaults(fn=v_reap)
     p.add_argument("--tag-prefix", default=TAG_PREFIX)
+    p.add_argument("--billing-only", action="store_true",
+                   help="sweep only providers that can bill (skip owned hardware). For "
+                        "the automatic conversation-start check, where the justification "
+                        "for going to the network is money accruing right now.")
 
     h = sub.add_parser("history"); h.set_defaults(fn=v_history)
     h.add_argument("--tag-prefix", default=TAG_PREFIX)

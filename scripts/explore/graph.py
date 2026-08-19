@@ -161,7 +161,29 @@ REQUIRED_BY_KIND = {
 # a run PRODUCED (cite what reports it). MLClaw already draws this line one level
 # up as `workload` versus `scope`; it is the same distinction, and citing a
 # measured outcome to the config meant to produce it is the same error there.
-SOURCE_KINDS = ("input", "result")
+#
+# `[derived]` is the third, and it exists because the two above could not express
+# the noise floor -- the one number the whole round rests on. A floor is a SPREAD
+# between two repeat measurements, so no log anywhere prints it: every honest
+# citation of its endpoints failed the digit check below, and the cheapest way to
+# pass was to invent `{"quote": "31.09 - 28.16 = 2.93"}` -- which is precisely the
+# fabrication the check exists to catch. A record layer whose only passing path is
+# the forbidden one has taught its reader to fake the field.
+#
+# So a derived value names the COMPUTATION as a source of its own:
+#   {"ref": "stages/exploration/scripts/seed_floor.py",
+#    "command": "python stages/exploration/scripts/seed_floor.py",
+#    "quote": "<its stdout, which contains the number>", "kind": "derived"}
+# beside the endpoints it consumed, cited `result` as usual.
+#
+# ‼️ `derived` is NOT a way out of the digit check -- it MOVES it. The derived
+# source must still quote the value (a ruler that does not print its answer is
+# not a source), and it must carry `command`, because the only thing separating a
+# derivation from a number typed from memory is that somebody else can RE-RUN it.
+# What `derived` relaxes is the demand that the ENDPOINTS quote the value too:
+# citing both logs used to cost two criticals, so the more honest record scored
+# worse than the thinner one.
+SOURCE_KINDS = ("input", "result", "derived")
 
 
 def _grounding(label, obj):
@@ -188,19 +210,32 @@ def _grounding(label, obj):
         return [("critical", f"{label}: a number with no source. Write `pending` if you "
                              f"cannot open one -- a bare value is indistinguishable from "
                              f"one recalled and back-cited")]
+    # Which sources must ATTEST the value. Default: all of them. With a `derived`
+    # source present, the derivation attests and the endpoints are its inputs --
+    # they are cited so the computation can be re-checked, not so they can each
+    # independently contain an answer that only the computation produces.
+    has_derived = any(s.get("kind") == "derived" for s in srcs)
     for i, s in enumerate(srcs):
         tag = f"{label}.sources[{i}]"
+        kind = s.get("kind")
         if not s.get("ref"):
             out.append(("critical", f"{tag}: no ref"))
-        if s.get("kind") not in SOURCE_KINDS:
-            out.append(("major", f"{tag}: kind must be `input` (a value you set) or "
-                                 f"`result` (a value a run produced)"))
+        if kind not in SOURCE_KINDS:
+            out.append(("major", f"{tag}: kind must be `input` (a value you set), "
+                                 f"`result` (a value a run produced) or `derived` "
+                                 f"(a value a stated computation produced)"))
+        if kind == "derived" and not s.get("command"):
+            out.append(("critical",
+                        f"{tag}: a `derived` source needs the «command» that produced "
+                        f"the quote. A derivation nobody can re-run is a number typed "
+                        f"from memory with a script path beside it"))
         q = s.get("quote")
         if not q:
             out.append(("critical", f"{tag}: no «quote». A bare path is not grounding -- "
                                     f"the transcribed line is the evidence the source "
                                     f"was open"))
-        elif isinstance(v, (int, float)) and not isinstance(v, bool):
+        elif ((kind == "derived" or not has_derived)
+                and isinstance(v, (int, float)) and not isinstance(v, bool)):
             if _digits(v) not in "".join(c for c in q if c.isdigit()):
                 out.append(("critical",
                             f"{tag}: the quote does not contain {v!r}. Either the source "

@@ -61,7 +61,7 @@ class SweepScope(unittest.TestCase):
         self.ssh.remote_info = lambda entry, want_ram=False: (
             {"now": 0, "gpus": [], "claims": {}, "ram_gb": None}
             if entry["host"] in reachable else None)
-        args = types.SimpleNamespace(res="unused", tag_prefix="mlclaw-")
+        args = types.SimpleNamespace(res="unused", tag_prefix="mlclaw-", billing_only=False)
         return capture(self.ssh.v_sweep, args)
 
     def test_unreachable_host_is_not_zero_claims(self):
@@ -174,7 +174,7 @@ class ReapSaysWhetherItLooked(TempDirCase):
             [], {} if scope_complete else {"p": {"error": "transient"}},
             {"complete": scope_complete, "checked": [], "unreached":
              [] if scope_complete else [{"provider": "p", "why": "timeout"}]}, [])
-        args = types.SimpleNamespace(res=self.res, tag_prefix="mlclaw-")
+        args = types.SimpleNamespace(res=self.res, tag_prefix="mlclaw-", billing_only=False)
         return capture(self.lease.v_reap, args)
 
     def test_empty_orphans_off_a_partial_sweep_says_lower_bound(self):
@@ -643,7 +643,7 @@ class StorageIsTheSecondMeter(TempDirCase):
             {}, {"complete": True, "checked": [], "unreached": []},
             [{"storage_id": "d1", "attached_to": None, "tag": "", "price_hr": None}])
         out = capture(self.lease.v_reap,
-                      types.SimpleNamespace(res=self.res, tag_prefix="mlclaw-"))
+                      types.SimpleNamespace(res=self.res, tag_prefix="mlclaw-", billing_only=False))
         self.assertEqual(len(out["orphan_storage"]), 1,
                          "an unattached volume is a finding, not a footnote")
         self.assertEqual(out["compute_usd_per_hr"], 3.0)
@@ -1212,6 +1212,62 @@ class TheOnlyLambdaRentalPathRefusesAnImmortalBox(unittest.TestCase):
                if r["machine_type"]][0]
         self.assertEqual(row["price_hr"], 0.75)
         self.assertEqual(row["price_status"], "verified")
+
+
+class ReapIsWiredAndScopedToWhatBills(unittest.TestCase):
+    """CLAUDE.md -> "On Conversation Start", and fleet.md -> "The two questions, and
+    why one list cannot answer both".
+
+    `reap` is the only conversation-start check that leaves the machine, and the only
+    one whose local record is untrustworthy by construction: the session that opened the
+    fleet is the one that died. What earns it the network call is money accruing right
+    now -- and what keeps that from becoming step 4's rejected `census.py scan` is
+    `--billing-only`. Without the flag `provider_ssh` self-registers off `servers` and
+    the automatic check ssh's every owned box before the user has said a word.
+    """
+
+    RES = os.path.join(REPO_ROOT, "scripts", "lease", "lease.py")
+
+    def _reap(self, compute, servers=None, *flags):
+        with tempfile.TemporaryDirectory() as d:
+            res = os.path.join(d, "resources.json")
+            with open(res, "w", encoding="utf-8") as fh:
+                json.dump({"compute": compute, "servers": servers or {}}, fh)
+            rc, out, err = run_script(os.path.join("lease", "lease.py"),
+                                      "--resources", res, "reap", *flags)
+            self.assertIsInstance(out, dict, f"reap did not emit JSON: {out!r} {err}")
+            return out
+
+    def test_billing_only_skips_owned_hardware_and_says_that_it_did(self):
+        """Silently narrowing the sweep would make `orphans: []` mean less than it reads."""
+        out = self._reap({}, {"box": {"host": "h"}}, "--billing-only")
+        self.assertEqual(out["skipped_non_billing"], ["ssh"])
+        self.assertEqual(out["orphans"], [])
+
+    def test_without_the_flag_owned_hardware_is_in_scope(self):
+        """The unfiltered verb still answers "any forgotten boxes" -- a held ssh claim
+        is a real problem, just not a money one. Asserted on the declared scope rather
+        than by letting the check ssh anywhere."""
+        mod = load_script(os.path.join("lease", "lease.py"))
+        self.assertIn("ssh", mod.NON_BILLING)
+        self.assertNotIn("nebius", mod.NON_BILLING)
+        self.assertNotIn("lambda", mod.NON_BILLING)
+
+    def test_a_compute_key_with_no_adapter_is_named_not_dropped(self):
+        """`providers()` intersects, so a typo disappears and the caller keeps believing
+        the provider is registered. Unattended, that reads as "nothing is billing" every
+        session, forever, about an account that is."""
+        out = self._reap({"nebius_prod": {}, "_comment": "x"}, None, "--billing-only")
+        self.assertEqual(out["compute_without_adapter"], ["nebius_prod"],
+                         "a mistyped compute key must be named, never silently dropped")
+
+    def test_claude_md_still_calls_it_with_the_flag(self):
+        """The wiring is the contract; it regressed to prose once already."""
+        with open(os.path.join(REPO_ROOT, "CLAUDE.md"), encoding="utf-8") as fh:
+            claude = fh.read()
+        self.assertIn("reap --billing-only", claude,
+                      "conversation-start step 5 must call reap, and with the flag")
+        self.assertNotIn("still not wired", claude)
 
 
 if __name__ == "__main__":
