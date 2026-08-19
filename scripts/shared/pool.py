@@ -40,11 +40,17 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 LEASE = os.path.join(HERE, "..", "lease", "lease.py")
 
+# The machine shape is L2's vocabulary and L2 is its author: `_common.SHAPE_ARGS` is
+# the argparse table a new dimension gets added to. This layer had a third copy of it
+# -- the tuple, the re-serializer, and the four `add_argument` calls -- and the drift
+# is silent in the direction that costs money: a dimension added to the table and not
+# here is simply not passed on, so the search rents a machine that does not meet the
+# constraint and nothing anywhere says so.
+sys.path.insert(0, os.path.join(os.path.dirname(HERE), "lease"))
+from _common import SHAPE_FLAGS, add_shape_args, shape_flags  # noqa: E402
+
 DEFAULT_TTL_S = 14400          # matches L2's default; renewed by `heartbeat`
 PROBE_TIMEOUT = 10
-
-SHAPE = ("gpu_count", "gpu_memory_gb", "arch_min", "host_ram_gb")
-
 
 def emit(obj):
     print(json.dumps(obj, indent=2, ensure_ascii=False))
@@ -77,15 +83,6 @@ def lease(*args, timeout=960):
     except json.JSONDecodeError:
         return False, {"error": "transient", "detail": out[:300] or proc.stderr[-300:]}
     return proc.returncode == 0, payload
-
-
-def shape_flags(args):
-    out = []
-    for name in SHAPE:
-        val = getattr(args, name, None)
-        if val not in (None, 0):
-            out += [f"--{name.replace('_', '-')}", str(val)]
-    return out
 
 
 # --- record ---------------------------------------------------------------------
@@ -263,7 +260,7 @@ def v_open(args):
 
     pool = (read_pool(session) if args.reopen and os.path.exists(pool_path(session))
             else {"session": os.path.abspath(session), "opened_at": int(time.time()),
-                  "closed_at": None, "shape": {k: getattr(args, k, None) for k in SHAPE},
+                  "closed_at": None, "shape": {k: getattr(args, k) for k in SHAPE_FLAGS},
                   "allow_preemptible": args.allow_preemptible, "slots": [], "plan": None})
     pool["plan"] = plan
     pool["ttl_s"] = args.ttl_s
@@ -557,10 +554,7 @@ def main():
     sub = ap.add_subparsers(dest="verb", required=True)
 
     def shape(parser):
-        parser.add_argument("--gpu-count", type=int, default=1)
-        parser.add_argument("--gpu-memory-gb", type=float, default=0)
-        parser.add_argument("--arch-min")
-        parser.add_argument("--host-ram-gb", type=float)
+        add_shape_args(parser)
         parser.add_argument("--allow-preemptible", action="store_true",
                             help="include interruptible capacity — usually right for a "
                                  "search, see fleet.md")
