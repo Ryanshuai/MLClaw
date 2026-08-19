@@ -110,11 +110,13 @@ Follow `<mlclaw_root>/references/run-mechanics.md` "Run Skill Internal Dependenc
    ```bash
    python <mlclaw_root>/scripts/shared/create_run.py <stage_dir> <mlclaw_root>/lifecycle/run.json
    python <mlclaw_root>/scripts/shared/code_snapshot.py <code_dir> <RUN_DIR>   # merge into run.json -> code
-   python <mlclaw_root>/scripts/shared/capture_env.py <RUN_DIR>
-   python <mlclaw_root>/scripts/shared/check_deps.py  <code_dir> <RUN_DIR>
+   python <mlclaw_root>/scripts/shared/capture_env.py                       # → stdout; merge into run.json -> env
+   python <mlclaw_root>/scripts/shared/check_deps.py  <config.json> <RUN_DIR>
    ```
 
    `create_run.py` is not a convenience here. `run_id` has one-second resolution, and a `/train-tune` session with `max_concurrent > 1` launches trials in the same second — hand-rolled `mkdir -p` lets two runs share a directory and the second `run.json` write destroys the first run's record. The script allocates a free id and says so. It also writes `created_at` as UTC-with-offset, which is what makes `list_runs.py`'s ordering correct across machines.
+
+   **The last two take no run directory** — `capture_env.py` takes a package list or nothing and prints to stdout, `check_deps.py` takes the stage's `config.json` first. Both refuse the run-dir shape rather than accepting it, and the reason each refusal exists is `<mlclaw_root>/references/run-mechanics.md` "Env + deps (Step 2 detail)".
 
    **Code snapshot** — see `<mlclaw_root>/references/run-mechanics.md` "Code snapshot (Step 2 detail)". Read `reproducible` in its output before continuing; false means the snapshot cannot rebuild this tree.
 

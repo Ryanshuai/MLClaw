@@ -130,6 +130,32 @@ Mechanism (index handling, size threshold, field breakdown) lives in the script'
 
 The same call applies to all run skills (`/train-run`, `/eval-run`, `/infer-run`, `/refactor-run`) — no per-skill variant.
 
+### Env + deps (Step 2 detail)
+
+Two more helpers run in Step 2, and **neither takes a run directory** — which is
+exactly what made the mistake they now refuse survive for as long as it did. They sit
+next to `code_snapshot.py <code_dir> <RUN_DIR>` in the same code block, and
+`/train-run` Step 2 spelled both of them as if they shared its shape.
+
+```bash
+python <mlclaw_root>/scripts/shared/capture_env.py                     # → stdout; merge into run.json -> env
+python <mlclaw_root>/scripts/shared/check_deps.py <config.json> <RUN_DIR>
+```
+
+- **`capture_env.py` takes a comma-separated PACKAGE LIST or nothing at all**, and writes
+  to stdout like `code_snapshot.py`. Given a path it used to record that path as the one
+  package it looked for, leaving every ML version unrecorded — and `/repro`'s env axis
+  then returns `unverifiable`, the same answer it gives for a run that predates env
+  capture. A run whose environment was silently not captured and one that never had it
+  are indistinguishable to every reader downstream. It now refuses a path-shaped
+  argument (exit 2).
+- **`check_deps.py`'s first argument is the stage's `config.json`**, not the code
+  directory; the second may be `run.json`, an `env.json`, or the run directory holding
+  one. It read `required_packages` from a directory handle and died with a traceback
+  whose exit code was **1** — the code reserved for *the script worked and the answer is
+  no*, so a usage error read as "the dependencies are bad". Usage is now 2, with the
+  right call named in `fix`.
+
 ### Launch contract (Step 3 detail)
 
 Three rules, uniform across all run skills:

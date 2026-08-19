@@ -1,7 +1,26 @@
-"""Compare required packages (from config.json) against installed (from env snapshot)."""
+"""Compare required packages (from config.json) against installed (from env snapshot).
+
+Usage:
+    python check_deps.py <config.json> <run.json | env.json | RUN_DIR>
+
+BOTH ARGUMENTS ARE FILES, and the first one is the STAGE's `config.json` -- not
+the code directory. `/train-run` Step 2 documented this as
+`check_deps.py <code_dir> <RUN_DIR>` beside `code_snapshot.py <code_dir>
+<RUN_DIR>`, which does take exactly that pair. `open(<code_dir>)` then raises
+`IsADirectoryError`, and the traceback exits 1 -- the code CLAUDE.md "Script
+Integration" reserves for *the script worked and the answer is no*. A usage
+error therefore read as "the dependency check ran and the dependencies are
+bad", which is the one misreading this script must not produce. Usage is 2.
+
+A run DIRECTORY is accepted for the second argument, because that is what the
+caller plainly meant and `run.json` is unambiguous inside it.
+"""
 import json
+import os
 import re
 import sys
+
+from _records import broke  # same directory; noqa: E402
 
 
 def parse_constraint(constraint):
@@ -31,7 +50,11 @@ def check_version(installed, constraint):
     try:
         inst = version_tuple(installed)
         req = version_tuple(required)
-    except Exception:
+    except (AttributeError, TypeError):
+        # A recorded version that is not a string -- the constraint is
+        # unanswerable, which the caller renders as "can't verify". `Exception`
+        # here also swallowed genuine bugs in version_tuple, and `version_tuple`
+        # catches its own ValueError, so nothing else was ever being caught.
         return None
 
     if op == ">=":
@@ -51,16 +74,38 @@ def check_version(installed, constraint):
     return None
 
 
+USAGE = ("python check_deps.py <config.json> <run.json | env.json | RUN_DIR>. "
+         "The first argument is the stage's config.json, NOT the code directory.")
+
+
+def load_json(path, what, dir_means=None):
+    """Exit 2 on anything that is not a readable JSON file. Usage is not a refusal.
+
+    `dir_means` names the file to read when `path` is a directory. Only the env
+    record has one -- a directory in the config slot is the documented mistake
+    and must say so rather than being resolved into a plausible-looking miss.
+    """
+    if os.path.isdir(path):
+        if not dir_means:
+            broke(f"{what} is a directory, not a JSON file: {path}", fix=USAGE)
+        path = os.path.join(path, dir_means)
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    except IsADirectoryError:
+        broke(f"{what} is a directory, not a JSON file: {path}", fix=USAGE)
+    except FileNotFoundError:
+        broke(f"{what} not found: {path}", fix=USAGE)
+    except (OSError, ValueError) as exc:
+        broke(f"{what} is not readable JSON: {path}: {exc}", fix=USAGE)
+
+
 def main():
     if len(sys.argv) < 3:
-        print("Usage: python check_deps.py <config_json_path> <env_json_or_run_json_path>")
-        sys.exit(1)
+        broke("two arguments are required", fix=USAGE)
 
-    with open(sys.argv[1]) as f:
-        config = json.load(f)
-
-    with open(sys.argv[2]) as f:
-        data = json.load(f)
+    config = load_json(sys.argv[1], "the config")
+    data = load_json(sys.argv[2], "the env record", dir_means="run.json")
 
     # env can be standalone env.json or nested in run.json
     env_packages = data.get("packages") or data.get("env", {}).get("packages", {})

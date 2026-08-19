@@ -3,12 +3,32 @@
 Usage:
     python capture_env.py                    # use default ML package list
     python capture_env.py pkg1,pkg2,pkg3     # use custom package list
+
+THE ARGUMENT IS A PACKAGE LIST, NOT A RUN DIR, and this file refuses one that
+looks like a path rather than accepting it. `/train-run` Step 2 documented the
+call as `capture_env.py <RUN_DIR>` for as long as that step has existed, next
+to `code_snapshot.py <code_dir> <RUN_DIR>` and `check_deps.py <..> <RUN_DIR>`,
+which do take one. Nothing raised: the run directory became the sole entry of
+`package_list`, so the record read
+
+    "packages": {"/…/stages/training/runs/run_007": null}
+
+and every ML package version went unrecorded. Downstream that is not a visible
+gap -- `/repro`'s env axis finds nothing to compare and returns `unverifiable`,
+which is also what it returns for a run that predates env capture. A run whose
+environment was silently not captured and one that never had it recorded are
+the same fact to every reader.
+
+This script writes to STDOUT and to nothing else, like `code_snapshot.py`; the
+caller merges the JSON into `run.json -> env`.
 """
 import subprocess
 import json
 import os
 import sys
 import platform
+
+from _records import broke  # same directory; noqa: E402
 
 DEFAULT_ML_PACKAGES = [
     "numpy", "pandas", "scipy", "scikit-learn", "pillow", "matplotlib",
@@ -94,7 +114,15 @@ def get_cudnn_version():
 def main():
     package_list = DEFAULT_ML_PACKAGES
     if len(sys.argv) > 1:
-        package_list = [p.strip() for p in sys.argv[1].split(",") if p.strip()]
+        raw = sys.argv[1]
+        seps = [c for c in (os.sep, os.altsep) if c]
+        if any(c in raw for c in seps) or os.path.isdir(raw):
+            broke(f"the argument is a comma-separated PACKAGE LIST, not a path: {raw!r}",
+                  fix="drop it -- `python capture_env.py` captures the default ML package "
+                      "set and prints JSON on stdout; merge that into `run.json -> env`. "
+                      "Its neighbours in /train-run Step 2 (`code_snapshot.py`, "
+                      "`check_deps.py`) do take a run dir; this one never has.")
+        package_list = [p.strip() for p in raw.split(",") if p.strip()]
 
     gpu = get_gpu_info()
     env = {
