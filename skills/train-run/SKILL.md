@@ -147,7 +147,16 @@ Follow `lifecycle/references/run-mechanics.md` "Run Skill Internal Dependencies"
 - Debug mode runs in foreground because it's short. Production mode never does.
 - **Set `run.json -> mode: "debug"` and `scope`** (epochs / steps actually reached, actual batch size — read from the log, not from what you passed). A debug run's val metric describes a 1-epoch model and must never be compared against, or ranked alongside, a full run's — see `lifecycle/references/run-mechanics.md` "Metric comparability".
 
-**Production mode** — ask local or server. In both cases set `run.json -> mode: "production"` and `scope` (full epochs, full data) at launch, then correct `scope` at finalize from what the log actually reports:
+**Production mode.** ‼️ **First, the provenance gate** — before anything else, and before asking local or server:
+
+```
+python <mlclaw_root>/lifecycle/scripts/train-run/provenance_gate.py check \
+    --project {PROJECT} --stage training --mode production
+```
+
+Exit 1 is the answer, not a failure — do **not** fall back and launch. It means `provenance.json` still calls a value a guess, and this run's `run.json` would state that value as a fact for `/conclude` to cite. Two routes and only these two: settle the entry (that is `/train-init` Step 7), or `--waive <key>` and **write the returned `stamp` into `run.json` before launching** — a waiver outside the record is a flag. Unattended, do neither silently: `ask.py open` the question and carry on with what does not depend on it. `absent` entries never block; they are conclusions.
+
+Then ask local or server. In both cases set `run.json -> mode: "production"` and `scope` (full epochs, full data) at launch, then correct `scope` at finalize from what the log actually reports:
 - **Local**: launch in background (`run_in_background`) with `PYTHONUNBUFFERED=1` in the environment, redirect stdout to `{RUN_DIR}/logs/stdout.log`. Set `run.json -> pid`, `started_at`, `status: "running"`. Return immediately.
 - **Remote**: SCP run dir to server, launch via tmux session with `PYTHONUNBUFFERED=1` set **inside** the session command (`tmux new-session -d ... 'PYTHONUNBUFFERED=1 <cmd> > logs/stdout.log 2>&1'`) — tmux does not inherit the local shell's env. Record session name in `run.json -> server` and `pid: tmux:<session>`. Return immediately.
 
