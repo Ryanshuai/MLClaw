@@ -1,224 +1,298 @@
-# 辩论角色：可直接抄的 prompt + 裁决格式
+# Debate roles: prompts you can copy directly, plus the adjudication format
 
-配 `SKILL.md` 的「多 agent 辩论：只在四处起」。subagent 拿不到对话上下文，
-所以每个 prompt 都必须**自带被辩对象的原始材料**（数字、脚本路径、config diff、代码行号），
-不要写"看看我们刚才说的那个结论"。
+Companion to `SKILL.md`'s "multi-agent debate: only in four places". A subagent cannot see the
+conversation, so **every prompt must carry the raw material of what is being debated**
+(numbers, script paths, the config diff, code line numbers). Never write "look at that
+conclusion we just discussed".
 
-## 先问一句：这场辩论该不该开
+## First ask: should this debate happen at all
 
-‼️ **如果反驳清单上的问题能被一条命令直接回答，就去跑那条命令，别开辩论会。**
-"噪声底量过没有" → 同权重跑两遍。"对照是不是今天的代码" → 去看 git sha。
-**辩论是给证据已经用尽或取证很贵的问题用的，不是廉价测量的替代品。**
-开会之前先把清单上能直接查的那几条查掉，剩下的才进辩论。
+‼️ **If a question on the rebuttal checklist can be answered by running one command, run the
+command instead of convening a debate.** "Has the noise floor been measured" → run the same
+weights twice. "Is the control on today's code" → look at the git sha.
+**Debate is for questions where the evidence is exhausted or expensive to obtain, not a
+substitute for a cheap measurement.** Clear the directly-checkable items off the list before
+convening; only what is left enters the debate.
 
-## 盲输入协议
+## The blind-input protocol
 
-反对方**只拿三样东西**：被辩的那句主张、支撑它的原始材料、以及它那份反驳清单。
-**不给它提出方的推理过程**，否则它只会围着那套推理打补丁，而漏掉推理没提到的那个混淆变量。
-提出方的理由在裁决时才和反驳并排放。
+The opposing side gets **exactly three things**: the claim under debate, the raw material
+supporting it, and its own rebuttal checklist. **It is not given the proposer's reasoning** —
+otherwise it will only patch holes in that reasoning and miss the confounder the reasoning never
+mentioned. The proposer's reasoning is placed beside the rebuttal only at adjudication time.
 
 ---
 
-## ① Stage 6 结果解读（最高价值）
+## ① Stage 6 result interpretation (highest value)
 
-两个 agent，同一批材料，只是任务相反。
+Two agents, the same material, opposite tasks.
 
-**提出方（Proponent）prompt 骨架：**
-
-```
-被辩主张：<改动 X 让 <指标> 从 A 变到 B，机理是 <一句话>>
-材料：训练/eval 日志路径、两次运行的完整命令行、git sha、权重路径、
-      预注册指标的计算脚本路径、FINDINGS 里那条失败的计数脚本路径。
-你的任务：给出这个主张成立的最强论证。必须包含：
-  1. 预注册指标动了没有、动了多少；
-  2. FINDINGS 里那条失败的计数动了没有；
-  3. 这两个方向和机理是否一致（不一致就说不一致）。
-禁止：用论文里的涨幅当我们的证据。
-```
-
-**怀疑方（Skeptic）prompt 骨架：**
+**Proponent prompt skeleton:**
 
 ```
-被辩主张：<同上>
-材料：<同上，但不含提出方的论证>
-你的任务：证伪它。逐条走这份清单，每条给「已排除 / 未排除 / 查不了」+ 依据：
-  1. 噪声底量过没有？同权重同口径两次的差是多少？这次的 delta 有没有超过它？
-  2. 对照是不是用今天的代码重跑的，还是读的旧日志？
-  3. 两边的过滤门限（score 阈值、NMS、可见性筛选）是否同源？
-  4. 度量 / 渲染器 / 取帧方式在两次之间变过没有？
-  5. 这一轮是不是同时动了两件事？（数一下 diff 里有几个语义变化）
-  6. 预注册指标动了没有？如果只有 AP 动了而它没动，机理就没验上。
-  7. 结论的档位标签（T1/T2/T3）对不对得上它实际的验证强度？
-不确定时默认判「未排除」。禁止用「我感觉可能没问题」结案。
+Claim under debate: <change X moved <metric> from A to B; the mechanism is <one sentence>>
+Material: training/eval log paths, the full command lines of both runs, git sha, weights
+          paths, the path of the pre-registered metric's computation script, the path of the
+          counting script for that failure in FINDINGS.
+Your task: give the strongest argument that this claim holds. It must include:
+  1. whether the pre-registered metric moved, and by how much;
+  2. whether the count of that failure in FINDINGS moved;
+  3. whether those two directions agree with the mechanism (say so if they do not).
+Forbidden: citing the improvement reported in a paper as evidence about us.
 ```
 
-## ② 输入 A 的量化脚本红队
-
-一个 agent 就够，它不看结论，只读脚本。
+**Skeptic prompt skeleton:**
 
 ```
-材料：量化脚本全文 + 它输出的那组数字 + 数据集里 2-3 个真实样本的字段清单。
-你的任务：找出这个脚本会在什么情况下量出一个假的失败、或漏掉一个真的失败。逐条走：
-  1. 分母是什么？n 多大？是"全语料"还是"我看过的几帧"？
-  2. 有没有把一个物体的标号约定用到另一个物体上？
-     （典型：拿 GT 的轴号去索引预测的 size —— 等价坐标系下这会把正确框算成大误差）
-  3. 判据里有没有筛选步骤，会先把该检出的那类失败筛掉？
-  4. 有没有内建对照（一个已知应该为零的量）和控制组？
-  5. 对照/控制样本是显式配对选的，还是靠日志相邻行凑的？
-  6. 阈值是从数据里选的还是外部给定的？如果是从数据里选的，是不是在同一批数据上选的？
-输出：每条一个判断 + 一个能让它露馅的具体输入（构造一个 case，不要泛泛说"可能有问题"）。
+Claim under debate: <as above>
+Material: <as above, but without the proponent's argument>
+Your task: falsify it. Walk this checklist item by item; each gets
+「ruled out / not ruled out / cannot be checked」 plus the basis:
+  1. Has the noise floor been measured? What is the spread between two runs at the same
+     weights and same convention? Does this delta exceed it?
+  2. Was the control re-run on today's code, or read off an old log?
+  3. Do both sides' filtering thresholds (score threshold, NMS, visibility filtering) come
+     from the same source?
+  4. Did the metric / renderer / frame sampling change between the two runs?
+  5. Did this round change two things at once? (count the semantic changes in the diff)
+  6. Did the pre-registered metric move? If only AP moved and it did not, the mechanism was
+     not confirmed.
+  7. Does the conclusion's tier label (T1/T2/T3) match its actual verification strength?
+When uncertain, default to 「not ruled out」. Closing with "I feel it's probably fine" is
+forbidden.
 ```
 
-## ③ Stage 3.5 定档
+## ② Red-teaming the quantification script for Input A
 
-三个 agent，各写一轮，互不看对方（V 轴是客观的，不用辩；只辩 P 和 U）。
-
-- **乐观方**：为什么这条会成？在别的仓库/论文里复现过几次？参考实现里是不是一个 flag？
-- **悲观方**：它在别人那儿的收益是不是来自另一个数据分布 / 另一个瓶颈？我们这儿的前提成立吗？
-- **下游方**（只代表使用方）：**成了会改变下游哪个动作？** 用 FINDINGS 那条失败的份额说话，
-  不许用 AP。如果下游方说不出一个动作会变，U 就是低 —— 无论 AP 多少。
-
-## ④ Stage 3 提案表
-
-每条提案一个 Proponent + 一个 Skeptic，Skeptic 的清单：
+One agent is enough. It does not look at the conclusion; it reads only the script.
 
 ```
-1. 机理和 FINDINGS 里那条失败对不上（说清哪一步断了）；
-2. 这技巧其实已经在代码里 —— 去 grep，指出函数名和调用点；如果是"有但被削弱"，
-   指出削弱它的那一行（`.detach()`、默认关的 flag、走错的分支）；
-3. 输出自由度和信息量不匹配（数一下输出维度 vs 真自由度，冗余几维）；
-4. 依赖没满足（它需要另一条先落地）；
-5. 改动量被低估（列出它会碰到的文件/函数）；
-6. 那条失败的份额被高估（重算份额）；
-7. 收益来自另一个数据分布（点密度、类别数、遮挡程度、标注质量）。
+Material: the full text of the quantification script + the numbers it produced + the field
+          list of 2-3 real samples from the dataset.
+Your task: find the circumstances under which this script measures a false failure, or misses
+a real one. Item by item:
+  1. What is the denominator? How large is n? Is it "the whole corpus" or "the few frames I
+     looked at"?
+  2. Is one object's labelling convention being applied to a different object?
+     (Typical: indexing a prediction's size by the GT's axis numbering — under equivalent
+     coordinate frames this scores a correct box as a large error)
+  3. Does the criterion contain a filtering step that removes the very class of failure it
+     should detect?
+  4. Is there a built-in control (a quantity known to be zero) and a control group?
+  5. Are the control/comparison samples chosen by explicit pairing, or scraped from adjacent
+     log lines?
+  6. Is the threshold chosen from the data or given externally? If from the data, was it
+     chosen on the same data it is applied to?
+Output: a judgement per item plus a concrete input that exposes it (construct a case; do not
+say vaguely "there might be a problem").
 ```
 
-## ⑤ Stage 5 移植验收（三方对齐）
+## ③ Stage 3.5 tiering
 
-三个 agent，**互不看对方**，材料各不相同 —— 材料的差异就是三条对齐线的差异。
-在**打开 flag、开大跑之前**跑完。
+Three agents, one round each, none seeing the others (the V axis is objective and needs no
+debate; only P and U are debated).
 
-**A 忠实度**（我们的实现 ↔ 参考实现）：
+- **Optimist**: why will this work? How many times has it been reproduced in other repos or
+  papers? Is it one flag in the reference implementation?
+- **Pessimist**: does its benefit elsewhere come from a different data distribution or a
+  different bottleneck? Does its premise hold here?
+- **Downstream** (representing the consumer only): **if it works, which downstream action
+  changes?** Argue from the share of that failure in FINDINGS, never from AP. If the downstream
+  side cannot name one action that would change, U is low — whatever AP says.
 
-```
-材料：Stage 4.5 的接口对照表 + 我们的 diff 全文 + 参考实现对应文件的全文（按 sha 取）。
-你的任务：逐条走「语义差异」列，每处给一个判定 + 依据：
-  - 无关：数值/命名/形状顺序层面的差异，机理不依赖它。要说出机理为什么不依赖它。
-  - 待定：不确定。**这是默认判定**，不许因为"看起来差不多"就判无关。
-  - 致命：改了这一处，这个 trick 的作用机制就不成立（说清哪一步断了）。
-另外单独回答三问：
-  1. diff 里有哪些 hunk 指不到参考实现的行（= 自创），各自做了什么？
-  2. 参考实现里只在 train 存在的分支，我们都搬了吗？（去噪 query / 辅助头 / EMA / 调度）
-  3. 参考实现里被我们**放弃**的部分，放弃的是核心还是外围？
-每个「待定」和「致命」都要附一个**便宜检查**（下面的目录里选，或自己设计），
-不许只说"需要验证"。
-```
+## ④ Stage 3 proposal table
 
-**B 需求对齐**（我们的实现 ↔ FINDINGS）—— ‼️ **不给它参考实现，也不给它论文**：
+One Proponent and one Skeptic per proposal. The Skeptic's checklist:
 
 ```
-材料：findings.json 中的目标条目 F<n>（含 measure.script 和份额）+ 我们的 diff 全文
-      + 这条提案的预注册指标。
-你的任务：只回答一个问题 —— 这份实现能不能压住 F<n> 描述的那个失败？
-  1. 从 F<n> 的机制出发，指出 diff 里哪一行开始改变这个机制；指不出来就说指不出来。
-  2. 预注册指标是不是真的会被这份实现影响？还是只会影响别的量？
-  3. 如果它只能压住 F<n> 的一部分，说清压住的是哪一部分、剩下的那部分归谁。
-禁止：用"这是论文里验证过的方法"作为理由 —— 你看不到论文，这正是故意的。
+1. The mechanism does not match that failure in FINDINGS (say which step breaks);
+2. The technique is already in the code — go grep, name the function and the call site; if it
+   is "present but weakened", name the line that weakens it (`.detach()`, a flag defaulting to
+   off, a branch that is never taken);
+3. Output degrees of freedom do not match the information content (count output dimensions
+   against true degrees of freedom; how many are redundant);
+4. A dependency is unmet (it needs another one to land first);
+5. The size of the change is underestimated (list the files/functions it will touch);
+6. That failure's share is overestimated (recompute the share);
+7. The benefit comes from a different data distribution (point density, number of classes,
+   degree of occlusion, annotation quality).
 ```
 
-**C 机理对齐**（我们的需求 ↔ 那边的 trick）：
+## ⑤ Stage 5 port acceptance (three-way alignment)
+
+Three agents, **none seeing the others**, each with different material — the difference in
+material *is* the difference between the three alignment lines. Run to completion **before
+turning the flag on and before any large run**.
+
+**A · Fidelity** (our implementation ↔ the reference implementation):
 
 ```
-材料：参考实现 + 论文里它自己的 ablation 表 + 我们这边的关键统计
-      （点密度、类别数、每帧 GT 数、正负样本比、query 数、分布差异、标注质量）。
-你的任务：回答"这个 trick 在它自己的设定下靠什么起作用，那个前提在我们这儿成立吗"。
-  1. 它的收益在原文里是在什么条件下测出来的？（数据集、query 数、训练轮数、baseline 强度）
-  2. 那些条件里哪几条我们不满足？不满足会让收益变小、消失，还是变成负的？
-  3. 它解决的问题和我们 F<n> 是同一个问题，还是只是症状像？
-这一条允许得出"实现完全忠实，但这个 trick 本来就不对我们的症"。
+Material: the Stage 4.5 interface comparison table + the full text of our diff + the full text
+          of the corresponding reference-implementation files (fetched by sha).
+Your task: walk the "semantic difference" column; each entry gets a judgement plus the basis:
+  - irrelevant: a numeric/naming/shape-ordering difference the mechanism does not depend on.
+    You must state why the mechanism does not depend on it.
+  - undecided: not sure. **This is the default judgement**; you may not rule something
+    irrelevant because "it looks about the same".
+  - fatal: change this and the trick's mechanism no longer holds (say which step breaks).
+Additionally answer three questions separately:
+  1. Which hunks in the diff point at no line in the reference implementation (= invented), and
+     what does each of them do?
+  2. Branches that exist only in train in the reference implementation — did we port all of
+     them? (denoising queries / auxiliary heads / EMA / scheduling)
+  3. Of the parts of the reference implementation we ABANDONED, was what we abandoned core or
+     peripheral?
+Every 「undecided」 and 「fatal」 must come with a cheap check (pick from the catalogue below, or
+design one). "Needs verification" alone is not acceptable.
 ```
 
-**便宜检查目录**（给「待定」项用，都不需要完整训练）：
+**B · Requirement alignment** (our implementation ↔ FINDINGS) — ‼️ **give it neither the
+reference implementation nor the paper**:
 
-- **单 batch 过拟合**：机理接通的话一个 batch 应该压到接近零 loss；压不下去 = 梯度没通 / 目标构造错了。
-- **正负样本计数**：改动前后各数一遍，独立列举，别看 `.shape`。
-- **loss 数值手算**：构造一个能手算的极小输入，比对到小数位。
-- **梯度流断言**：断言该有梯度的张量 `grad` 非 None、该被截断的确实是 None（`.detach()` 类差异专用）。
-- **关掉 flag 应逐位等于旧代码**：flag 默认关时输出与移植前 bit-exact，不等就是漏改了默认路径。
-- **train/eval 分支对账**：只在 train 存在的分支，eval 时确认真的没跑。
+```
+Material: the target entry F<n> in findings.json (including measure.script and the share) + the
+          full text of our diff + this proposal's pre-registered metric.
+Your task: answer one question only — can this implementation suppress the failure F<n>
+describes?
+  1. Starting from F<n>'s mechanism, point at the line in the diff where that mechanism starts
+     to change; if you cannot point at one, say so.
+  2. Will the pre-registered metric actually be affected by this implementation, or will only
+     other quantities be?
+  3. If it can suppress only part of F<n>, say which part, and who owns the rest.
+Forbidden: "this is a method validated in the literature" as a reason — you cannot see the
+paper, and that is deliberate.
+```
 
-**裁决按 2×2 分四种**（动作完全不同，别混）：
+**C · Mechanism alignment** (our requirement ↔ their trick):
 
-| | 忠实（A 通过） | 不忠实（A 判致命） |
+```
+Material: the reference implementation + the paper's own ablation table + our key statistics
+          (point density, number of classes, GT per frame, positive/negative ratio, number of
+          queries, distribution differences, annotation quality).
+Your task: answer "what makes this trick work in ITS setting, and does that premise hold here".
+  1. Under what conditions was its benefit measured in the original? (dataset, query count,
+     training epochs, baseline strength)
+  2. Which of those conditions do we not meet? Does failing them shrink the benefit, remove it,
+     or make it negative?
+  3. Is the problem it solves the same problem as our F<n>, or only a similar symptom?
+This one is allowed to conclude "the implementation is entirely faithful, and the trick simply
+does not address our symptom".
+```
+
+**Catalogue of cheap checks** (for 「undecided」 items; none requires full training):
+
+- **Overfit a single batch**: with the mechanism wired up, one batch should drop to near-zero
+  loss; failing to = the gradient does not flow, or the targets are constructed wrongly.
+- **Count positives and negatives**: count on both sides of the change, enumerating
+  independently — do not read `.shape`.
+- **Hand-compute the loss**: construct a minimal input you can compute by hand, and compare to
+  the decimal place.
+- **Gradient-flow assertions**: assert that tensors that should have gradients have non-None
+  `grad`, and that the ones that should be cut really are None (specifically for `.detach()`-
+  class differences).
+- **Flag off must be bit-identical to the old code**: with the flag at its default-off, the
+  output is bit-exact with the pre-port state; if not, a default path was missed.
+- **Reconcile the train/eval branches**: branches that exist only in train — confirm they really
+  do not run at eval.
+
+**Adjudication splits into four by a 2×2** (the actions differ completely; do not conflate them):
+
+| | Faithful (A passes) | Unfaithful (A says fatal) |
 |---|---|---|
-| **打中（B 通过）** | 上 | 先修忠实度再评估 —— 现在的收益可能是别的东西给的 |
-| **打不中（B 否）** | ‼️ **提案错了，不是实现错了。退回 Stage 3，别调实现** | 两个都错，退回 Stage 3 |
+| **On target (B passes)** | ship it | fix fidelity before evaluating — the current benefit may be coming from something else |
+| **Off target (B fails)** | ‼️ **the proposal is wrong, not the implementation. Go back to Stage 3; do not tune the implementation** | both are wrong; go back to Stage 3 |
 
-C 是横跨两列的独立否决：**C 否 = 这个 trick 对不上我们的症**，此时 A 越忠实越说明该退回 Stage 3。
+C is an independent veto spanning both columns: **C failing = this trick does not address our
+symptom**, and the more faithful A is at that point, the more clearly it says to go back to
+Stage 3.
 
-## ⑥ 预注册指标怎么设（性价比最高的一处）
+## ⑥ How to set the pre-registered metric (the highest-value one of all)
 
-和 ② 的分工：**② 问「尺子算得对不对」，⑥ 问「这把尺子该不该是这个形状」。**
-AABB 那次脚本算得完全正确、算的东西错了 —— ② 的清单一条都拦不住，只有 ⑥ 拦得住。
-在**写下预注册指标的那一刻**开，跑之前。
+Division of labour with ②: **② asks "does the ruler compute correctly", ⑥ asks "should the ruler
+have this shape at all".** In the AABB incident the script computed entirely correctly and
+computed the wrong thing — not one item on ②'s checklist would have stopped it; only ⑥ would.
+Convene it **at the moment the pre-registered metric is written down**, before any run.
 
-**盲区攻击方：**
-
-```
-材料：预注册指标的定义（或计算脚本）+ 它要衡量的那条 FINDINGS + 模型输出的字段清单
-      （每个字段的几何含义、坐标系、单位）。
-你的任务：构造一个「实现错了，而这个指标不动、甚至变好」的**具体**情形。
-  要给出具体的错误方式（不是"如果有 bug"），例如：
-  - 某个自由度在指标里被投影掉了（轴对齐化、取模、取绝对值、排序);
-  - 指标和实现读同一个可能错的中间量（同一个匹配、同一套阈值、同一份缓存）；
-  - 某类错误恰好让指标的分母变小。
-构造出来 → 这把尺子在那儿是盲的：必须补第二把独立的尺子，或者转人眼盲评。
-构造不出来 → 明确说"构造不出来"，并说明你检查了哪几个自由度。
-```
-
-**Goodhart 攻击方：**
+**Blind-spot attacker:**
 
 ```
-材料：预注册指标的定义 + 我们能调的所有旋钮（阈值、NMS 参数、query 数、后处理）。
-你的任务：给出一个能让这个指标涨、而下游更差的改动。
-  常见套路：抬/降 score 阈值、放宽 NMS、输出退化成大框全覆盖、
-  把召回换成精度（或反之）、只在容易的子集上变好。
-给得出来 → 尺子不合格，要么换，要么配一个护栏指标把这条路堵上。
+Material: the pre-registered metric's definition (or computation script) + the FINDINGS entry
+          it is meant to measure + the model's output field list (each field's geometric
+          meaning, coordinate frame, units).
+Your task: construct a CONCRETE situation where the implementation is wrong and this metric
+does not move, or even improves.
+  Give a specific way of being wrong (not "if there were a bug"), for example:
+  - a degree of freedom is projected away inside the metric (axis-alignment, modulo, absolute
+    value, sorting);
+  - the metric and the implementation read the same possibly-wrong intermediate (the same
+    matching, the same thresholds, the same cache);
+  - some class of error happens to shrink the metric's denominator.
+Constructed → the ruler is blind there: a second independent ruler is required, or move to
+blind human review.
+Not constructed → say explicitly "I could not construct one", and state which degrees of
+freedom you checked.
 ```
 
-**下游方**（同 ③ 的下游方，材料换成指标定义）：涨了以后**下游哪个动作会变**？
-说不出一个具体动作 → U 低，这个指标不值得当这一轮的主判据。
+**Goodhart attacker:**
 
-**这四条查表就能答，别开会**：噪声底量过没有（没量过的不能当预注册指标）、
-离饱和多远、量程里有多少是人为常数造出来的、`worse` 方向和单位。
+```
+Material: the pre-registered metric's definition + every knob we can turn (thresholds, NMS
+          parameters, query count, post-processing).
+Your task: give a change that raises this metric while making downstream worse.
+  Common routes: raise/lower the score threshold, loosen NMS, degenerate the output into one
+  large box covering everything, trade recall for precision (or the reverse), improve only on
+  the easy subset.
+If you can give one → the ruler is unfit: either replace it, or pair it with a guardrail metric
+that closes off that route.
+```
 
-**⑥ 的裁决**：盲区或 Goodhart 任一**构造成功且没被堵住** → **这把尺子不能当本轮判据**。
-补第二把独立的尺子、或者加护栏指标、或者升到人眼盲评（`SKILL.md` Stage 6.5）。
-**注意 ① 和 ⑤ 的辩论替代不了人眼** —— agent 不许看渲染截图声称"看着对了"。
+**Downstream** (same as ③'s downstream role, with the metric definition as its material): once
+it goes up, **which downstream action changes**? If no concrete action can be named → U is low,
+and this metric is not worth being the round's primary criterion.
+
+**These four are answered from a table; do not convene for them**: has the noise floor been
+measured (one that has not may not be a pre-registered metric), how far it is from saturation,
+how much of its range is manufactured by artificial constants, and the direction of `worse` plus
+its units.
+
+**⑥'s adjudication**: if either the blind spot or the Goodhart route is **successfully
+constructed and not closed off** → **this ruler may not be the round's criterion.** Add a second
+independent ruler, add a guardrail metric, or escalate to blind human review (`SKILL.md`
+Stage 6.5). **Note that the debates in ① and ⑤ are not a substitute for a person's eye** — an
+agent may not look at a rendered screenshot and declare "it looks right".
 
 ---
 
-## 裁决
+## Adjudication
 
-**裁决由主 agent 做，不由辩论方做。** 辩论方只负责把两边打满。
+**The main agent adjudicates, not the debating sides.** The debaters only argue both sides to
+the full.
 
-➜ **默认判决那张表（按被辩对象分三行：结论/数字 · 提案 · 实现）住在 `SKILL.md` 的「裁决」一节，
-这里不重复。** 它是决策时必须在场的判断，而这份文件是起辩论时才读的操作手册 ——
-同一张表放两处，跟着指针走会绕回原点，等于没有文档。本节只管**裁完之后怎么记**。
+➜ **The default-verdict table (three rows by what is under debate: conclusion/number ·
+proposal · implementation) lives in `SKILL.md`'s "Adjudication" section and is not repeated
+here.** It is a judgement that must be present at decision time, whereas this file is the
+operating manual read only when convening a debate — the same table in two places means
+following the pointer loops you back to where you started, which is the same as having no
+document. This section covers only **how to record the outcome**.
 
-‼️ 只重复一条，因为它在辩论进行中就要用：**分数不是对结构问题的回答。**
-"但 AP 涨了 0.4" 不能用来回应"你们两边的过滤门限不同源"。
+‼️ One thing is repeated, because it is needed *during* the debate: **a score is not an answer
+to a structural objection.** "But AP went up 0.4" cannot be used to answer "your two sides'
+filtering thresholds come from different sources".
 
-记录格式（进 `model_design.md`，一条不超过六行）：
+Recording format (goes into `model_design.md`, no more than six lines per entry):
 
 ```markdown
-#### 辩论 D3 — IoU-aware 分类是否解释了 0.999 饱和
-- 角色：Proponent / Skeptic（2 个 agent，盲输入）
-- 主张：把分类目标换成与匹配 GT 的 IoU，能让 NMS 的排序带定位质量信息
-- 最强反驳：清单 #6 —— 半节距错框占漏检的份额是按 IoU 0.2–0.5 算的，
-  换成 0.3–0.5 只剩 <x>%（未排除）
-- 裁决：提案保留，**降到 T2**；先补一次份额重算（脚本 <path>），再决定升不升 T3
-- 结论档位：[T2 对照]
+#### Debate D3 — does IoU-aware classification explain the 0.999 saturation
+- Roles: Proponent / Skeptic (2 agents, blind input)
+- Claim: making the classification target the IoU with the matched GT lets NMS ordering carry
+  localisation-quality information
+- Strongest rebuttal: checklist #6 — the share of half-pitch wrong boxes among misses was
+  computed at IoU 0.2–0.5; at 0.3–0.5 only <x>% remains (not ruled out)
+- Verdict: proposal retained, **dropped to T2**; recompute the share first (script <path>),
+  then decide whether to raise it to T3
+- Conclusion tier: [T2 controlled]
 ```
 
-**不写裁决过程的辩论等于没辩。** 只留结论、不留最强反驳，下一轮没人知道这条已经被质疑过什么。
+**A debate whose adjudication is not written down did not happen.** Keeping only the conclusion
+and not the strongest rebuttal means nobody next round knows what this has already been
+challenged on.

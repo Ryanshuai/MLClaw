@@ -1,194 +1,229 @@
-# 移植：搜什么 · 搬什么 · 改了什么 · 起效没有
+# Porting: what to search for · what to move · what changed · did it work
 
-Stage 4 / 4.5 / 5 的操作手册。核心那一节是 **§5：偏离分两种，适配和改坏，而它们事后长得一样。**
+The operating manual for Stages 4 / 4.5 / 5. The central section is **§5: there are two kinds
+of deviation — adaptation and breakage — and afterwards they look identical.**
 
 ---
 
-## 1. 搜之前：先审自己的代码
+## 1. Before searching: audit your own code
 
-‼️ **最常见的搜索结果是「它已经在仓库里，是个默认关的 flag」。** 本 repo 两次踩到：
+‼️ **The most common search result is "it is already in the repo, behind a flag that defaults
+to off".** This repo has stepped on it twice:
 
-| 以为没有 | 实际 |
+| Assumed missing | Actually |
 |---|---|
-| 一对一 / NMS-free | `--repeat_num` 设 0 或 1 就是纯一对一，作者注释里写着 |
-| query 内容来自 encoder | `--q_content random_add` 就是，默认 `random` 关着 |
+| one-to-one / NMS-free | `--repeat_num` set to 0 or 1 IS pure one-to-one, and the author's comment says so |
+| query content from the encoder | `--q_content random_add` is exactly that; the default `random` has it off |
 
-**没审代码就去查论文，等于去移植一个已经有的东西。** argparse 是这类东西的结构性盲区 ——
-grep 功能名搜不到，要 grep flag 名和默认值。
+**Going to the literature without auditing the code is going to port something you already
+have.** argparse is the structural blind spot for this — grepping the feature's name finds
+nothing; you have to grep the flag names and the defaults.
 
 ---
 
-## 2. 怎么搜：三层关键词，交叉领域靠**几何性质**不靠领域词
+## 2. How to search: three layers of keywords, and across fields go by **geometric property**, not domain vocabulary
 
-| 层 | 搜什么 | 例 |
+| Layer | What to search | Example |
 |---|---|---|
-| **规范名** | 这个技巧在文献里的正式叫法 | `mixed query selection`、`contrastive denoising` |
-| **代码符号** | 参考实现里的 flag / 变量名 —— 常常比论文名更准 | `learnt_init_query`、`label_noise_ratio`、`embed_init_tgt` |
-| **机理描述** | 当你不知道它叫什么时 | 「predicted boxes should not overlap each other」 |
+| **Canonical name** | what the technique is formally called in the literature | `mixed query selection`, `contrastive denoising` |
+| **Code symbols** | the flag or variable names in a reference implementation — often more accurate than the paper's name | `learnt_init_query`, `label_noise_ratio`, `embed_init_tgt` |
+| **Mechanism description** | for when you do not know what it is called | "predicted boxes should not overlap each other" |
 
-‼️ **交叉领域要抽掉领域词，只留几何性质。** 我们要的「密集贴合的框不能重叠」，
-在文献里住在 **2D 行人拥挤检测**（`crowd` / `occlusion`）和 **遥感密集目标**（`densely packed`）里。
-搜 `carton` / `logistics` / `palletizing` **什么都搜不到**；搜 `densely packed` + `repulsion` 一次命中。
+‼️ **Across fields, strip the domain vocabulary and keep only the geometric property.** The
+thing we wanted — "tightly packed boxes must not overlap" — lives in the literature under **2D
+crowd pedestrian detection** (`crowd` / `occlusion`) and **densely packed remote sensing**
+(`densely packed`). Searching `carton` / `logistics` / `palletizing` **finds nothing**;
+`densely packed` + `repulsion` hits on the first try.
 
-**搜完要显式记录「没搜到什么」**：本 repo 的 RepGT 那条，3D detection 侧**没有直接先例** ——
-这不是"搜得不够"，这是一条结论，它把条目从`移植`改成`跨域移植`，验证档要升。
+**Record explicitly what the search did NOT find**: for this repo's RepGT entry, there is **no
+direct precedent** on the 3D detection side — that is not "we did not search hard enough", it is
+a conclusion, and it moves the entry from `port` to `cross-domain port`, which raises the
+verification tier.
 
-### ‼️ 搜不到时先问一句：**这条约束在 2D 投影下成不成立？**
+### ‼️ When nothing turns up, ask first: **does this constraint even hold under 2D projection?**
 
-搜遍 detection 文献没有，常常不是因为它没用，而是因为**主流 detection 是 2D，那个约束在 2D 里是假的**。
-本 repo 两次撞上同一个形状：
+Searching the whole detection literature and finding nothing is often not because the idea is
+useless, but because **mainstream detection is 2D and the constraint is false in 2D**. This
+repo has hit the same shape twice:
 
-| 约束 | 2D 里 | 3D 度量空间 |
+| Constraint | In 2D | In 3D metric space |
 |---|---|---|
-| 框不能重叠 | **投影重合 = 遮挡**，合法且常见 ⇒ 没人写这个 loss | **重叠 = 物理穿透**，不可能 ⇒ 约束成立 |
-| 同型物体尺寸相同 | ‼️ **透视下不同** ⇒ 这个先验在 2D 里**是假的** | **完全相同** ⇒ 聚类先验成立 |
+| boxes must not overlap | **overlapping projections = occlusion**, legal and common ⇒ nobody writes that loss | **overlap = physical interpenetration**, impossible ⇒ the constraint holds |
+| objects of the same type have the same size | ‼️ **different under perspective** ⇒ this prior is **false** in 2D | **exactly identical** ⇒ the clustering prior holds |
 
-第二条有个强旁证：**SKU-110K**（CVPR 2019）密集货架，平均每图 **147 个几乎相同的物体**，
-它自己记录的失败和本 repo 的一模一样（「货物尺寸相同时，一个检测框可能跨越大片区域，显著降低召回」），
-**但它没有用「同型⇒同尺寸」这个先验** —— 因为在 2D 里用不了。
+The second has strong corroboration: **SKU-110K** (CVPR 2019), dense retail shelves, averaging
+**147 nearly identical objects per image**, records exactly the failure this repo records ("when
+goods are identically sized, one detection box may span a large region, significantly reducing
+recall") — **and it does not use the "same type ⇒ same size" prior**, because in 2D it cannot.
 
-⇒ **判断成立之后，去别的领域找先例**：3D 重建、机器人抓取、场景合成、轨迹优化。
-那些领域在度量空间工作，物理约束是它们的日常。
-‼️ **同时这也意味着分类要改**：找到的是"隔壁领域的机制"而不是"同任务的先例" ⇒
-按 Stage 5，自创的那部分**升一档验证**。
+⇒ **Once you judge that it holds, go find precedent in other fields**: 3D reconstruction, robot
+grasping, scene synthesis, trajectory optimisation. Those fields work in metric space, and
+physical constraints are their daily business.
+‼️ **This also changes the classification**: what you found is "a mechanism from a neighbouring
+field", not "a precedent on the same task" ⇒ per Stage 5, the self-invented portion gets its
+verification tier **raised by one**.
 
-**拿到官方实现就克隆到本地**（本 repo：`~/agent_space/detr_refs/`），读代码比读论文准 —— 理由见 §3。
-
-**拿到官方实现就克隆到本地**（本 repo：`~/agent_space/detr_refs/`），读代码比读论文准 —— 理由见 §3。
+**Once you have the official implementation, clone it locally** (this repo:
+`~/agent_space/detr_refs/`). Reading the code beats reading the paper — reasons in §3.
 
 ---
 
-## 2.5 ‼️ 找到先例之后先问：**它的难点，是不是我的难点？**
+## 2.5 ‼️ Having found a precedent, ask first: **is its hard problem my hard problem?**
 
-证据再强，如果那篇论文**在解的那个难题**在我们这儿不存在，能借的就只有**形式**，不是**技巧**。
+However strong the evidence, if the difficulty **that paper is solving** does not exist here,
+what can be borrowed is the **form**, not the **techniques**.
 
-本 repo 的实例：SKU pointer 找到两条强先例（ReID / 人脸、ProtoNet / few-shot），
-它们和我们确实是同一个问题家族（**open-set：测试类集 ≠ 训练类集**，解法都是「学度量不学分类器」）。但：
+This repo's case: the SKU pointer found two strong precedents (ReID / face recognition, and
+ProtoNet / few-shot). They genuinely are the same problem family as ours (**open-set: the test
+class set ≠ the training class set**, and both solve it by learning a metric rather than a
+classifier). But:
 
-| 先例 | 它的难点 | 我们 |
+| Precedent | Its hard problem | Ours |
 |---|---|---|
-| ReID | gallery 成千上万 ⇒ re-ranking、hard negative mining | **k ≤ 6** |
-| ProtoNet | prototype 要从 K 个样本**估** ⇒ 各种校准 | **目录直接给的真值** |
+| ReID | a gallery of many thousands ⇒ re-ranking, hard negative mining | **k ≤ 6** |
+| ProtoNet | the prototype must be **estimated** from K samples ⇒ all kinds of calibration | **ground truth handed over by the catalogue** |
 
-⇒ 只拿走**形式**（pointer = `W` 由输入现算 · CE 训练 / 检索推理 · 欧氏不用余弦），
-**技巧一个都不拿** —— 它们在解我们没有的问题，搬过来是纯负担。
+⇒ Take only the **form** (pointer = `W` computed from the input on the fly · CE for training,
+retrieval for inference · Euclidean rather than cosine), and **none of the techniques** — they
+solve problems we do not have, and importing them is pure overhead.
 
-‼️ **这个判断有第二重收益：它预测效果。** 两个领域公认难的部分我们都不难
-⇒ **这个任务本身可能没什么可学的** ⇒ 那条臂的前置判据（命中率是不是已经很高）
-从「顺便量一下」升成「**可能当场降 T0**」。**先例的难度是一个免费的效果先验。**
+‼️ **This judgement has a second payoff: it predicts the outcome.** The part both fields agree
+is hard is easy for us ⇒ **there may be very little to learn on this task at all** ⇒ that arm's
+precondition check (is the hit rate already high) is promoted from "measure it while we're
+here" to "**this may drop to T0 on the spot**". **A precedent's difficulty is a free prior on
+the effect.**
 
-‼️ **判断粒度是「臂」，不是「项目」——同一个先例，两条臂可以得出相反结论。**
-上表针对的是本 repo 的 **SKU 级 pointer**（gallery = 目录 k ≤ 6）。而**同一个项目**的
-**实例级 ReID** 那条臂，gallery 是 **5909 个 ID / 22.3 万样本**（比 MSMT17 还大）——
-**难点和 ReID 完全一致，那边的技巧就是该借的。**
-⇒ 换一条臂，这个判断要**重做一次**，不能把上一次的结论继承过来。
+‼️ **The unit of this judgement is the ARM, not the project — one precedent, two arms, opposite
+conclusions.** The table above is about this repo's **SKU-level pointer** (gallery = catalogue,
+k ≤ 6). The **instance-level ReID** arm of the **same project** has a gallery of **5909 IDs /
+223k samples** (larger than MSMT17) — **its hard problem is exactly ReID's, and those techniques
+are the ones to borrow.** ⇒ Change arm, and this judgement must be **made again**; last time's
+conclusion cannot be inherited.
 
-**反过来的失败形状**：搬来一堆解决「大 gallery」的技巧、跑出来没效果，
-然后归因成「实现不忠实」——实际上是**忠实地解决了一个我们没有的问题**（§6 第三行「机理不对症」）。
+**The failure shape in the other direction**: import a pile of techniques that solve "large
+gallery", get no effect, and attribute it to "the implementation was not faithful" — when in
+fact it **faithfully solved a problem we do not have** (§6, third row, "mechanism does not
+address our fault").
 
 ---
 
----
+## 3. ‼️ Grading evidence: **used by a top conference ≠ ablated**
 
-## 3. ‼️ 证据强度分级：**被顶会用过 ≠ 被消融过**
+Whether a technique is worth porting depends on **whether it was ablated on its own**, not on
+how many papers it appears in.
 
-判断一个技巧值不值得搬，看的是**它有没有被单独消融**，不是它出现在多少篇论文里。
-
-| 档 | 含义 | 本 repo 的实例 |
+| Grade | Meaning | Instance in this repo |
 |---|---|---|
-| **A · 有单独消融 + 数字** | 最强 | DINO Table 4：pure 46.5 → mixed 47.0 |
-| **B · 有消融但在别的 baseline 上** | 中 —— 边际会随 baseline 变 | DINO 的 CDN +0.5，叠在一个已有 DN 的 baseline 上 |
-| **C · 被用了，但作者从没消融过它** | ‼️ **弱** —— 它只是继承的默认超参 | RT-DETR 的 denoising、`learnt_init_query`，**两处都没消融** |
-| **D · 论文正文说 A，代码跑 B** | ‼️ **论文那句不能引** | V-DETR 论文说 content query 取自 encoder 特征，但官方 README 的训练命令不传 `--q_content`，**公布的数字是用学习槽位跑的** |
+| **A · ablated on its own, with numbers** | strongest | DINO Table 4: pure 46.5 → mixed 47.0 |
+| **B · ablated, but on a different baseline** | medium — the margin moves with the baseline | DINO's CDN +0.5, stacked on a baseline that already had DN |
+| **C · used, but the authors never ablated it** | ‼️ **weak** — it is just an inherited default hyperparameter | RT-DETR's denoising, and `learnt_init_query` — **neither ablated** |
+| **D · the paper's prose says A, the code runs B** | ‼️ **that sentence in the paper may not be cited** | V-DETR's paper says content queries come from encoder features, but the official README's training command does not pass `--q_content` — **the published numbers were run with learned slots** |
 
-**C 档踩到两次都是同一个仓库**，所以：**查到一个技巧在某仓库里"用着"，下一步是去它的论文里找那一格消融**，
-找不到就降档。
-
----
-
-## 4. 以代码为准，而且要看**训练脚本**
-
-优先级：**训练脚本/config > 类的默认参数 > 论文正文 > 二手解读**。
-
-`learnt_init_query: False` 写在 config 里、`embed_init_tgt = True` 写在 4 个 config 里 ——
-这些比论文里的散文可靠。而**训练脚本没传的 flag，就是用默认值跑出来的**，
-这一步能直接推翻论文正文（§3 的 D 档）。
+**Both grade-C encounters were in the same repository**, so: **having found a technique "in use"
+in some repo, the next step is to go to its paper and find that ablation cell**; failing to find
+it means dropping a grade.
 
 ---
 
-## 5. ‼️ 偏离分两种：**适配**和**改坏**，事后长得一样
+## 4. The code is authoritative — and read the **training script**
 
-搬过来必须改（不改就是错的），但改错了不报错。两者的签名：
+Priority: **training script / config > a class's default arguments > the paper's prose >
+second-hand interpretation.**
 
-| | **适配**（必须改） | **改坏**（以为在适配） |
+`learnt_init_query: False` written in a config, and `embed_init_tgt = True` written in four
+configs, are more reliable than any prose in the paper. And **a flag the training script does
+not pass is a flag that ran at its default**, which is a step that can directly overturn a
+paper's prose (grade D in §3).
+
+---
+
+## 5. ‼️ Two kinds of deviation: **adaptation** and **breakage**, and afterwards they look the same
+
+Porting requires changing things (not changing them would be wrong), and changing them wrongly
+raises nothing. Their signatures:
+
+| | **Adaptation** (must change) | **Breakage** (believed to be adaptation) |
 |---|---|---|
-| 被改的是 | **载体** —— 几何、数据结构、维度 | **机理** —— 但你以为改的是载体 |
-| 能不能说清"不改会怎样" | 能，而且后果具体可测 | 说不清，或理由是"我们这儿没有对应的东西" |
-| 改完之后 | 参考实现那句机理解释**还成立** | 那句解释**悄悄不成立了**，而代码照跑 |
+| What was changed | the **carrier** — geometry, data structures, dimensions | the **mechanism** — while you believed it was the carrier |
+| Can you state "what happens if I don't" | yes, and the consequence is concrete and measurable | no, or the reason is "we have nothing corresponding to that here" |
+| Afterwards | the reference implementation's mechanism explanation **still holds** | that explanation **quietly stops holding**, and the code runs on |
 
-### 判别法（事前，一句话）
+### The test (beforehand, one sentence)
 
-> **对每一处偏离，写下「参考实现为什么要那样写」。写不出来，就不许改。**
+> **For every deviation, write down why the reference implementation wrote it that way. If you
+> cannot write it, you may not change it.**
 
-D6 那次的原话是「**引对了行、读错了那行在干什么**」——
-`ref:` 注释属实，并不等于推论属实。
+The original wording from the D6 incident was "**cited the right line, misread what that line
+was doing**" — a `ref:` comment being accurate does not make the inference from it accurate.
 
-### 三个已知的「改坏」形状（本 repo 全踩过，全都不报错）
+### Three known breakage shapes (this repo hit all three; none raised)
 
-1. **同名不同义。** focal 的 `alpha` 乘**正**样本，VFL 的 `alpha` 只乘**负**样本 —— 同一个名字，
-   相反的角色。复用把背景权重从 0.75 砍到 0.25，**方向和目的正相反**。
-2. **删掉一个"看起来没用"的东西。** 参考的 `nn.Embedding(num_classes+1, ..., padding_idx=...)`
-   那个 `+1` 被删掉，理由写成"那是标签噪声的槽，我们没有标签噪声"。
-   ‼️ 读错了：那一行是**补位槽**，`padding_idx` 把它冻结在零；删掉之后，
-   一个满托盘样本会把同批其他样本全部补位，那个可训练向量同时收「你是箱子」和「你是背景」的梯度。
-3. ‼️ **在错误的空间里保持对称。** 框噪声在**比值**上对称（`E[new/old]=1`，读起来无偏），
-   而 loss 打的是 `log(gt/pre)`，log 是凹的 ⇒ 实测 `E[log(gt/pre)] = +0.113/轴`，
-   每个去噪正样本都在要求尺寸头**每轴放大 12%、体积 1.40×** ——
-   正好砸在这一轮的护栏指标上。**移植会去测量它自己的噪声设计。**
-   → 规矩：**在 loss 打分的那个空间里检查你的采样是不是无偏**，并把断言写在那个空间里。
+1. **Same name, different meaning.** focal's `alpha` multiplies **positive** samples; VFL's
+   `alpha` multiplies only the **negatives** — one name, opposite roles. Reusing it cut the
+   background weight from 0.75 to 0.25, **the opposite direction from the intent**.
+2. **Deleting something that "looks useless".** The reference's
+   `nn.Embedding(num_classes+1, ..., padding_idx=...)` had its `+1` removed, justified as "that
+   is the label-noise slot and we have no label noise".
+   ‼️ Misread: that row is the **padding slot**, frozen at zero by `padding_idx`. Remove it and
+   one full-pallet sample pads out every other sample in the batch, so that trainable vector
+   receives gradients for "you are a box" and "you are background" simultaneously.
+3. ‼️ **Symmetry maintained in the wrong space.** The box noise is symmetric in the **ratio**
+   (`E[new/old]=1`, which reads as unbiased), while the loss operates on `log(gt/pre)` and log
+   is concave ⇒ measured `E[log(gt/pre)] = +0.113` per axis, so every denoising positive was
+   asking the size head to **enlarge each axis by 12%, i.e. 1.40× in volume** — landing squarely
+   on that round's guardrail metric. **A port will go and measure its own noise design.**
+   → The rule: **check that your sampling is unbiased in the space the loss scores in**, and
+   write the assertion in that space.
 
-### 两条相反方向的提醒
+### Two reminders pointing the other way
 
-- ‼️ **参考实现里那些"奇怪的选择"，先问它在防什么。** RepGT 用 IoG 不用 IoU，看起来是细节，
-  实则是在防「回归器靠放大框来增大分母」——**和本 repo 独立构造出的 Goodhart 是同一个**。
-  照抄反而对；自作聪明换回 IoU 就重新打开了那条路。
-- ‼️ **参考实现的某个条件，在我们的配置下语义可能变了。** RepBox 只作用于"designated target 不同"
-  的预测对；在 `--repeat_num 5` 下，5 个 query 认领同一个箱子且**本来就该重叠** ——
-  不按目标分组就会和一对多正面打架。**同一行代码，在两个配置下做的是不同的事。**
+- ‼️ **When the reference implementation makes a "strange choice", ask what it is defending
+  against first.** RepGT uses IoG rather than IoU, which looks like a detail; it is in fact
+  defending against "the regressor enlarges the box to inflate the denominator" — **the same
+  Goodhart this repo independently constructed**. Copying it verbatim is correct; being clever
+  and switching back to IoU re-opens that path.
+- ‼️ **A condition in the reference implementation may mean something different under our
+  configuration.** RepBox applies only to prediction pairs with *different designated targets*;
+  under `--repeat_num 5`, five queries claim the same box and **are supposed to overlap** — not
+  grouping by target puts it in a head-on fight with one-to-many. **The same line of code does
+  different things under two configurations.**
 
-### 偏离必须可关
+### A deviation must be switchable off
 
-每个新 flag 默认关，且 **关掉时与移植前 bit-exact**，并写测试钉住。
-代价（多算一遍某个量之类）换的是「关掉即无差别」这个**可验收的性质**。
-
----
-
-## 6. 起效没有：三种失败要分开，复活条件不同
-
-跑完之后的裁决，**不是「涨了/没涨」两档**：
-
-| 裁决 | 判据 | 下一步 |
-|---|---|---|
-| **实现不忠实** | 接口对照表上有没被处理的「致命」格 | **回去修**，不是杀 |
-| **实现忠实但无效** | 忠实度过关，主判据没动 | 记 `killed_by: 实现忠实但无效`，`revive_if` 挂在口径/上游变化上 |
-| **机理不对症** | 忠实且有效，但**它治的不是我们的病** | 记 `killed_by: 机理不对症`，`revive_if` 是"直接量到效果" |
-| ‼️ **机理验上了但那个机理不值钱** | 主判据按字面通过，而结果更差 | 这是**前提问题**，不是实现问题。回去查前提份额（规则 2.5） |
-
-最后一行是本 repo 的真实情形：`e1` 声明的机理判据**通过了**（负样本真的补回来了），
-而 AP50 从 7.88 掉到 5.57 —— **不是"机理没验上"，是"验上了但那个机理不值钱"**，
-因为它的前提在本语料上只有 4.62%。
-
-‼️ **还有一种要特别小心：赢了但没归因。** 一条臂大赢，而它被提出来要解决的病
-**实测依然存在** ⇒ 它大概率不是靠那个机理赢的。这时候最便宜的下一步是**分离它**，
-不是把它当成"这个技巧有用"写进结论。
+Every new flag defaults to off, and **when off it is bit-exact with the pre-port state**, with a
+test pinning that. The cost (recomputing some quantity, say) buys the **verifiable property**
+that switching it off makes no difference.
 
 ---
 
-## 7. 本 repo 的偏离台账（每次移植都往里加）
+## 6. Did it work: three failures that must be kept apart, because they revive differently
 
-| 移植 | 适配（必须改） | 改坏（被辩论抓出来） |
+The verdict after a run is **not a two-way "improved / did not improve"**:
+
+| Verdict | Criterion | Next step |
 |---|---|---|
-| VFL / IoU-aware | 2D 轴对齐 IoU → `soft_iou9d`；目标侧用 `temp=0` | `alpha` 复用（D4） |
-| CDN | 框噪声搬进**框自己的坐标系**；`assignments` 直接生成不重算；在 topk **之后**注入 | 尺寸噪声在比值上对称（D5）；删掉 `padding_idx`（D6） |
-| CDN 的旋转噪声 | —— | **整条是自创**，最终判「机理不成立」：`rot6d_head` 是绝对预测，噪声旋转**在目标侧根本不出现** |
-| RepGT（计划中） | IoG 的几何换成有向 3D | 待定 —— 死区是自创偏离，**不是文献形式**，要单独消融 |
+| **Unfaithful implementation** | the interface comparison table has an unhandled "fatal" cell | **go back and fix it**, do not kill |
+| **Faithful but ineffective** | fidelity passes, the primary criterion did not move | record `killed_by: faithful but ineffective`; hang `revive_if` on a change of convention or upstream |
+| **Mechanism does not address our fault** | faithful and effective, but **it treats a disease we do not have** | record `killed_by: wrong mechanism`; `revive_if` is "measure the effect directly" |
+| ‼️ **Mechanism confirmed, and that mechanism is worthless** | the primary criterion passes literally, and the result is worse | This is a **premise** problem, not an implementation problem. Go back and check the premise share (rule 2.5) |
+
+The last row is a real case from this repo: `e1`'s declared mechanism criterion **passed** (the
+negatives really did come back) while AP50 fell from 7.88 to 5.57 — **not "the mechanism failed
+to check out", but "it checked out and was worth nothing"**, because its premise holds on only
+4.62% of this corpus.
+
+‼️ **One more to watch for: won but unattributed.** An arm wins big while the fault it was
+proposed to fix **is still measurably there** ⇒ it probably did not win by that mechanism. The
+cheapest next step is to **separate the two**, not to write "this technique works" into a
+conclusion.
+
+---
+
+## 7. This repo's deviation ledger (append on every port)
+
+| Port | Adaptation (had to change) | Breakage (caught in debate) |
+|---|---|---|
+| VFL / IoU-aware | 2D axis-aligned IoU → `soft_iou9d`; `temp=0` on the target side | `alpha` reuse (D4) |
+| CDN | box noise moved into **the box's own coordinate frame**; `assignments` generated directly rather than recomputed; injected **after** topk | size noise symmetric in the ratio (D5); `padding_idx` deleted (D6) |
+| CDN's rotation noise | — | **the whole thing was self-invented**, and finally judged "the mechanism does not hold": `rot6d_head` predicts absolutely, so a noised rotation **never appears on the target side at all** |
+| RepGT (planned) | IoG's geometry replaced with oriented 3D | pending — the dead zone is a self-invented deviation, **not the form from the literature**, and needs its own ablation |
