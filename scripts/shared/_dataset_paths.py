@@ -46,8 +46,9 @@ def census_paths(ddir):
 
     Sorted by filename, which sorts chronologically because a `census_id` is
     `census_<YYYYmmdd>_<HHMMSS>` — see layout.md "Dataset identity and census
-    records". A `.json.tmp` left by an interrupted write is excluded by the
-    suffix test, which is why the ordering survives a crashed scan.
+    records". A `<name>.<pid>.tmp` left by an interrupted write is excluded by
+    the suffix test, which is why the ordering survives a crashed scan -- and
+    why `atomic_write_json` keeps `.tmp` LAST rather than before the `.json`.
     """
     cdir = os.path.join(ddir, "census")
     if not os.path.isdir(cdir):
