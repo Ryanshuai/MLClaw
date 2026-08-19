@@ -40,13 +40,13 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__))), "shared"))
 from _records import (age_days, broke, emit, parse_ts, read_json, refuse)  # noqa: E402
 from _dataset_paths import dataset_dir, latest_census  # noqa: E402
+from _vocab import HANDOFF_TERMINAL as TERMINAL_HANDOFF  # noqa: E402
 
 # The line, in order. `retire` is present but is never RETURNED as a position:
 # retirement is an action on units, not a state a dataset arrives at. A dataset
 # that has had forty days deleted off the rig is still `ready` — so what this
 # reports for retire is what has happened to it, not where it stands.
 PHASES = ("collect", "label", "curate", "freeze", "ready", "retire")
-TERMINAL_HANDOFF = ("accepted", "rejected", "cancelled")
 GATES = ("freeze", "curate", "consume")
 DEFAULT_STALE_DAYS = 14.0
 

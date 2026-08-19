@@ -58,6 +58,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__))), "shared"))
 from _records import (atomic_write_json, broke, digits as _digits,  # noqa: E402
                       emit, now_utc, read_json, refuse)
+from _vocab import PROVENANCE, TIERS  # noqa: E402
 
 # Seven, and the load-bearing split is `filled` vs `closed`: 有结果 != 有结论.
 # A card whose numbers are in but whose verdict is not is `filled`. Collapsing
@@ -87,10 +88,6 @@ KILLED_BY = {
     "wrong_mechanism": "the proposal itself was wrong. Revive by measuring the effect DIRECTLY.",
     "unfaithful_port": "NOT a death -- go back and fix the port. Returns to `running`.",
 }
-
-# T4 is pricing only. An approximation failing never refutes the original, so a
-# T4 card may not be closed with a verdict of `lost` -- see cmd_close.
-TIERS = ("T0", "T1", "T2", "T3", "T4")
 
 VERDICTS = ("won", "lost", "downgraded")
 
@@ -132,7 +129,6 @@ TIER_POWER = {"T0": 0, "T1": 1, "T2": 2, "T3": 3, "T4": 0}
 # the whole value of the tag is that it cannot be earned by the agent's own
 # confidence. Same rule as `/ask-human` refusing to call an answer `verified`
 # when nothing but the person confirmed it.
-PROVENANCE = ("user", "ai-suggested", "ai-executed", "user-revised")
 
 # Required before `ready`. Per kind, because a measurement card genuinely has no
 # parent -- demanding one would teach the reader to write a fake value, which is

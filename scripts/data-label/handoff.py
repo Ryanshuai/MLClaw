@@ -37,6 +37,7 @@ from datetime import datetime, timezone
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__))), "shared"))
 from _records import (age_days, atomic_write_json, broke, emit, now_utc, read_json, refuse)  # noqa: E402
+from _vocab import HANDOFF_TERMINAL as TERMINAL  # noqa: E402
 
 # Fixed vocabulary, deliberately short. A handoff's kind decides what a reviewer
 # looks for on return, so an open string would make that undecidable downstream.
@@ -48,8 +49,6 @@ KINDS = ("annotation", "data_request", "review", "human_eval", "delivery", "othe
 MATCH_BY = ("path", "stem", "name")
 
 HASH_ALGOS = ("sha256", "size")
-
-TERMINAL = ("accepted", "rejected", "cancelled")
 
 
   # atomic: a half-written record is worse than none

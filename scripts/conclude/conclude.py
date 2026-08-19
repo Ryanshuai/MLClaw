@@ -58,6 +58,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__))), "shared"))
 from _records import (atomic_write_json, broke, emit, now_utc,  # noqa: E402
                       quotes_the_number, read_json, refuse)
+from _vocab import PROVENANCE, TIERS  # noqa: E402
 
 
 # Five, and the one ARA does not have is `unverifiable`. See the module
@@ -79,14 +80,10 @@ SETTLED = ("refuted", "superseded")
 EVIDENCE_KINDS = ("run", "node", "baseline", "finding", "audit", "census",
                   "snapshot", "handoff", "external")
 
-TIERS = ("T0", "T1", "T2", "T3", "T4")
-
 # Same ladder as `graph.py`, same reason. T4 is absent on purpose: it is an
 # approximation priced for the original, so it does not rank against the
 # others -- it is flagged, not weighed.
 TIER_POWER = {"T0": 0, "T1": 1, "T2": 2, "T3": 3}
-
-PROVENANCE = ("user", "ai-suggested", "ai-executed", "user-revised")
 
 SEVERITY = ("critical", "major", "minor")
 
