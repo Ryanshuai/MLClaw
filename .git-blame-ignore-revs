@@ -15,3 +15,21 @@ abe8a178c89fc4eeaffbb6707d020f367503d76d
 
 # style(roadmap): rewrap to the file's line width -- 332 lines moved, 7 words changed.
 fed95b8da0b531be9754b8a9e30037e85b03fc41
+
+# The Chinese-to-English pass. These four rewrote COMMENTS and DOCSTRINGS wholesale
+# while leaving the code beside them untouched -- the mirror image of the case above,
+# and worse: `code_newer_days` goes NEGATIVE on every one, so `stale` and `conflict`
+# report zero for these files forever, and a report saying "0 found" is indis-
+# tinguishable from a clean one.
+
+# docs(ara): to English -- including the four blocks ARTIFACT.md itself prints
+622c0ac906e0770fd7ffa1e7b0bdc0c5a7962783
+
+# docs(conclude): to English -- the skill, the rendered `conclusions.md`, and the fixtures
+7ea9a80a63876e261200126c4c67f523bc6b9be5
+
+# docs(evacuate,misc): to English -- the skill, the clearance line it prints, and the last scattered prose
+c6e737e80aca24d6a8d5467a26861ff03cfda745
+
+# docs(explore): the last Chinese in the code -- and three pointers my own rename had just broken
+8dbd3a2678b187067b3c14d421e06083693fd383
