@@ -27,7 +27,7 @@ import sys
 # The sanctioned routes. A command that IS one of these is never blocked -- they
 # are the plan -> apply pairs the rules point at.
 SANCTIONED = re.compile(r"""
-    lifecycle/scripts/(
+    scripts/(
         train-run/retention\.py      # checkpoints
       | data-retire/retire\.py       # data, against a census listing
       | evacuate/evacuate\.py        # a box about to be destroyed

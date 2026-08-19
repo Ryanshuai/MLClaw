@@ -1,6 +1,6 @@
 """A fine-tune records the base measured here, under its own weights' protocol.
 
-Enforces `lifecycle/references/run-mechanics.md` -> "Record integrity" (the
+Enforces `references/run-mechanics.md` -> "Record integrity" (the
 fine-tune baseline row) and the mechanism section it points at.
 
 Scope note, because it is the design: this script does NOT measure and does NOT

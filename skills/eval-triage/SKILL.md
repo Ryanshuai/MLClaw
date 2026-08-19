@@ -38,7 +38,7 @@ The eval set was cut from the training distribution, so **no sample from a regio
 ## The script
 
 ```bash
-S=<mlclaw_root>/lifecycle/scripts/eval-triage/triage.py
+S=<mlclaw_root>/scripts/eval-triage/triage.py
 
 python $S rank    --project <p> --run <eval run_id> [--limit 40] [--name <slug>]
 python $S judge   --project <p> --run <r> --session <sid> --unit <u> \
@@ -122,4 +122,4 @@ Then hand each pile to its owner:
 - **Requires**: an evaluation run with `status: "completed"`, and `stages/evaluation/output.json -> per_sample.path` non-null. Missing the second is `/eval-init` Step 1c — offer it rather than ranking something invented.
 - **Suggests**: whatever the piles named. `/data-label` on `label_wrong`; the data line on `sample_hard`; `/train-init` or a `/train-run` fork on `model_wrong`. **Never `/eval-run` "to try again"** — the same rule `/repro` follows, and for the same reason: re-measuring is not a fix.
 
-Per `lifecycle/references/skill-graph.md` -> "Workflow State Protocol", push on entry and pop on exit — `stage: "evaluation"`, `execution: <eval run_id>`, `step: null` (a triage has no step chain; its state is `status`, because the work is a person looking at images and there is no process to step through).
+Per `references/skill-graph.md` -> "Workflow State Protocol", push on entry and pop on exit — `stage: "evaluation"`, `execution: <eval run_id>`, `step: null` (a triage has no step chain; its state is `status`, because the work is a person looking at images and there is no process to step through).

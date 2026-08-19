@@ -14,7 +14,7 @@ description: >
 # /data-report — the board
 
 ```bash
-python <mlclaw_root>/lifecycle/scripts/data-report/board.py \
+python <mlclaw_root>/scripts/data-report/board.py \
     --project <p> [--out <file.html>] [--stale-days N] [--last N]
 ```
 
@@ -125,5 +125,5 @@ never more than a day behind the world. That is real freshness. Polling is not.
   line"), and this page is a reading surface, not a router. When the user's question narrows from
   "what is the state of everything" to one dataset, hand over to `/data`.
 
-Per `lifecycle/references/skill-graph.md` -> "Workflow State Protocol", push on entry and pop on exit — `stage: null`,
+Per `references/skill-graph.md` -> "Workflow State Protocol", push on entry and pop on exit — `stage: null`,
 `execution: null`. Rendering is not an execution to resume.

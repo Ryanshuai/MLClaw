@@ -10,7 +10,7 @@
 有执行者了：
 
 ```bash
-python <mlclaw_root>/lifecycle/scripts/explore/graph.py <verb> --project <PROJECT>
+python <mlclaw_root>/scripts/explore/graph.py <verb> --project <PROJECT>
 #   add   set   ready   fill   close   check   status
 ```
 
@@ -109,7 +109,7 @@ ready = { n | n.状态 == 🟩 且 n.依赖 全部 ∈ {✅, ❌} }
 2. GPU 节点：`并行度 ≤ 稳定容量`。‼️ 超出的部分不是"慢一点"是**结构性零产出**，
    而且会搅动已经拿到位子的臂（`SKILL.md` 那节写了为什么）。
    ‼️ **`ready` 不做容量筛选，它只算依赖。** 容量是 `pool.py` 的，一层之上 ——
-   `lifecycle/references/fleet.md`。两件事分开是对的：依赖是图的性质，容量是这一刻的性质。
+   `references/fleet.md`。两件事分开是对的：依赖是图的性质，容量是这一刻的性质。
 3. 同一组要相互比较的臂 **必须同卡型**，要换整组一起换。
 
 ‼️ **ready set 为空但队列非空 = 死锁**。两种原因，处理方式不同：

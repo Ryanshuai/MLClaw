@@ -15,7 +15,7 @@ Execute an inference run: resolve sources, run the model, collect outputs.
 
 **One question at a time** — asking multiple questions at once is overwhelming. Ask one, record, ask next. **And only what only they know** — a value you can read is not a question, and a value nobody has is recorded absent rather than asked for: CLAUDE.md "Decide what evidence can decide".
 
-**Workflow state, dependency checks, locate project, variable references** — follow `lifecycle/references/skill-graph.md` (state protocol + the requires/suggests table) and `lifecycle/references/layout.md` (Variable Reference Syntax). Stage = `inference`, upstream = `/infer-init` (check `config.json -> entry_command` non-empty).
+**Workflow state, dependency checks, locate project, variable references** — follow `references/skill-graph.md` (state protocol + the requires/suggests table) and `references/layout.md` (Variable Reference Syntax). Stage = `inference`, upstream = `/infer-init` (check `config.json -> entry_command` non-empty).
 
 ## Fork Check
 
@@ -27,11 +27,11 @@ If skip: fresh run, `fork_of = null`.
 
 ## Steps 1-3: Shared Run Mechanics
 
-Follow `lifecycle/references/run-mechanics.md` "Run Skill Internal Dependencies" for the shared step flow:
+Follow `references/run-mechanics.md` "Run Skill Internal Dependencies" for the shared step flow:
 
-1. **Resolve Assets** (step `resolve_assets`) — fill concrete paths in `artifacts.json` and `input.json` sources. For server matching, connectivity tests, and credential flows, see `lifecycle/references/run-mechanics.md` "Run Skill Internal Dependencies" Step 1. Scripts in `lifecycle/scripts/shared/` (test_connection.py, etc). If any script fails, do the same work manually with Bash.
+1. **Resolve Assets** (step `resolve_assets`) — fill concrete paths in `artifacts.json` and `input.json` sources. For server matching, connectivity tests, and credential flows, see `references/run-mechanics.md` "Run Skill Internal Dependencies" Step 1. Scripts in `scripts/shared/` (test_connection.py, etc). If any script fails, do the same work manually with Bash.
 2. **Create Run** (step `create_run`) — create run dir, initialize run.json, code snapshot, env snapshot, dependency check. Scripts: `create_run.py`, `capture_env.py`, `check_deps.py`. For code source resolution and environment resolution, see CLAUDE.md conventions.
-3. **Build & Execute** (step `execute`) — resolve `${}` references, then build the command **per-param from `config.json -> param_injection.items`** (`lifecycle/references/run-mechanics.md` "Launch contract (Step 3 detail)" rule 3), not by guessing from `config_format`. A `runtime_params` key with no entry, or one marked `overridable: false`, is an error — stop and ask rather than passing a flag the code may ignore. Set `run.json -> mode` and `scope` before launching. Save `config_snapshot.json` and `sources.json`, confirm with user.
+3. **Build & Execute** (step `execute`) — resolve `${}` references, then build the command **per-param from `config.json -> param_injection.items`** (`references/run-mechanics.md` "Launch contract (Step 3 detail)" rule 3), not by guessing from `config_format`. A `runtime_params` key with no entry, or one marked `overridable: false`, is an error — stop and ask rather than passing a flag the code may ignore. Set `run.json -> mode` and `scope` before launching. Save `config_snapshot.json` and `sources.json`, confirm with user.
 
 ### Execution Modes
 
@@ -45,7 +45,7 @@ Follow `lifecycle/references/run-mechanics.md` "Run Skill Internal Dependencies"
 - **Local**: run in background (`run_in_background`), log to `{RUN_DIR}/logs/`. Return immediately so the user can continue working. They can check back with `/infer-run` again, or `/loop 5m /infer-run` for auto-polling.
 - **Remote**: resolve server from resources.json, use `python_path` from server entry. SCP config + run.sh to server, launch in tmux. Return immediately.
 
-For local/remote execution details and path mapping, see `lifecycle/references/run-mechanics.md` "Run Skill Internal Dependencies" Step 3 and "Path Mapping".
+For local/remote execution details and path mapping, see `references/run-mechanics.md` "Run Skill Internal Dependencies" Step 3 and "Path Mapping".
 
 ### Status Check
 
@@ -66,7 +66,7 @@ After execution finishes:
 
 3. **Collect metrics** — extract from stdout/result files into `run.json -> metrics`. Script: `extract_metrics.py`. Fallback: parse logs manually.
 
-4. **Alias** — ask user for optional alias/description; write into `run.json -> alias` / `description`. No separate index file to update — `run.json` files are the source of truth, queried on demand via `shared/list_runs.py` (see `lifecycle/references/run-mechanics.md` "Listing runs (no separate index)").
+4. **Alias** — ask user for optional alias/description; write into `run.json -> alias` / `description`. No separate index file to update — `run.json` files are the source of truth, queried on demand via `shared/list_runs.py` (see `references/run-mechanics.md` "Listing runs (no separate index)").
 
 5. **Show summary**:
    ```

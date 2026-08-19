@@ -504,7 +504,7 @@ class ACitationMustNotBeStranded(EvacCase):
 
 
 class TheRecordLivesOffTheBox(EvacCase):
-    """`lifecycle/references/layout.md` on `retire/retire_{ts}.json`: 「Written
+    """`references/layout.md` on `retire/retire_{ts}.json`: 「Written
     BEFORE the first rm — one level above what it deletes, and on a different
     machine from the bytes.」
 
@@ -586,7 +586,7 @@ class TheArtifactIsCalledNotOwned(EvacCase):
         checkpoint in `weights/` here and `src/` there, and only the artifact
         would show it."""
         with open(os.path.join(os.path.dirname(os.path.dirname(
-                os.path.abspath(__file__))), "lifecycle", "scripts", "evacuate",
+                os.path.abspath(__file__))), "scripts", "evacuate",
                 "evacuate.py"), encoding="utf-8") as f:
             src = f.read()
         self.assertIn("from ara import", src)

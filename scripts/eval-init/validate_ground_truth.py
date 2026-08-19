@@ -458,7 +458,7 @@ def check_candidates(which, cands, dataset, project_root, fnd):
 
 
 def check_preprocessing(eval_preproc, train_preproc, train_path, allow_tta, fnd):
-    """lifecycle/references/run-mechanics.md 'Preprocessing contract (cross-stage)'.
+    """references/run-mechanics.md 'Preprocessing contract (cross-stage)'.
 
     The three shared blocks must be identical to training's; a difference means
     evaluation is not measuring the model that was trained, and nothing errors.

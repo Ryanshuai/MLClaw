@@ -43,7 +43,7 @@ So the stamp opens a question and a census answers it. Records-only, no network 
 **To pin it:** re-resolve the cited snapshot into openable paths and point the trial at that view.
 
 ```bash
-python <mlclaw_root>/lifecycle/scripts/data-check/census.py resolve --project {PROJECT} \
+python <mlclaw_root>/scripts/data-check/census.py resolve --project {PROJECT} \
     --dataset <id> --snapshot <snap> --at <location> --layer <l> \
     --out {RUN_DIR}/data_resolved.jsonl
 ```
@@ -81,7 +81,7 @@ git checkout <origin_commit> && git apply <run_dir>/<dirty_patch_path>
 
 ## env
 
-**Reads** `run.json → env` versus the current env, by invoking `lifecycle/scripts/shared/capture_env.py` rather than reimplementing the query.
+**Reads** `run.json → env` versus the current env, by invoking `scripts/shared/capture_env.py` rather than reimplementing the query.
 
 Only packages whose version silently changes what the model computes count toward the verdict (`torch`, `numpy`, `transformers`, `timm`, `mmcv`, `mmdet`, `detectron2`, `opencv-python`, `deepspeed`, …), plus `cuda` / `cudnn` / `nvidia_driver` / `gpu` / `gpu_count` / `python`. Everything else is recorded under `also_changed` and leaves the verdict alone.
 

@@ -118,7 +118,7 @@ Every run skill captures the exact code state at run-time so a completed run is 
   ```
   code_dir = stages/<stage>/code/_source if exists else stages/<stage>/code
   ```
-- **Helper**: `python <mlclaw_root>/lifecycle/scripts/shared/code_snapshot.py <code_dir> <RUN_DIR>` — outputs a JSON dict; merge it into `run.json -> code`.
+- **Helper**: `python <mlclaw_root>/scripts/shared/code_snapshot.py <code_dir> <RUN_DIR>` — outputs a JSON dict; merge it into `run.json -> code`.
 - **Git working tree** (typical): records `repo` (origin URL), `branch`, `origin_commit` (SHA). If the tree differs from that SHA, writes `<RUN_DIR>/code_dirty.patch` and fills `dirty_patch_path` + `dirty_files_count`. Reproduction contract: `git checkout <origin_commit> && git apply <run_dir>/code_dirty.patch`, run **from the code dir**.
 - **`code_dir` is often not the repo root.** `/project-init` puts `github` / `server` / `null` sources at `stages/<stage>/code/` — inside the *project's* git repo. The patch is then scoped to that subtree and `repo_subdir` records the offset, so the record describes the stage's code and not the whole project. Two consequences worth knowing: the patch still uses repo-relative paths (a `--relative` patch applies **nothing** from a subdirectory and exits 0 while doing it), and `origin_commit` is still repository-wide — editing `project.json` moves it, so it is not a stable identity for this stage's code alone. `list_runs.py --commit` inherits that limitation.
 - **Untracked files are part of the diff.** A new `model_v2.py` that was never `git add`ed is invisible to `git diff HEAD`; counting only tracked changes records a tree as clean that is not, and the run reproduces different code with nothing raised.
@@ -217,7 +217,7 @@ mixes them up reads the wrong file.
 | **stream** | the normalized record layer MLClaw owns | `<RUN_DIR>/stream.jsonl` — a convention, not a config value |
 | **record** | one line of the stream | — |
 
-One script owns this: `python <mlclaw_root>/lifecycle/scripts/train-run/ingest.py
+One script owns this: `python <mlclaw_root>/scripts/train-run/ingest.py
 <stage>/output.json --run-dir <RUN_DIR>`. It holds a thin adapter per source
 format, one shared records layer, and the sinks. The three scripts that read metric
 records — `reconcile_metrics.py`, `select_checkpoint.py`, `retention.py` — all
@@ -388,11 +388,11 @@ Rules for anything a run writes down now that somebody reads later. They share o
 
 There is no `runs_index.json` cache. The source of truth is the `run.json` files themselves; "list all runs" / "find comparable runs" is a scan of the run tree, run on demand. This avoids cache drift after rsync, manual run deletion, schema evolution, and concurrent updates — none of which need any code to handle when there's no cache.
 
-**Go through `lifecycle/scripts/shared/list_runs.py`. Do not hand-write the jq.** The rule below about `mode` is a correctness rule, and a correctness rule implemented as a snippet everyone retypes gets forgotten exactly once, silently, in the query that mattered. The script's `mode` argument is keyword-only with no default, so forgetting it is a `TypeError` at the call site rather than a leaderboard with debug runs in it.
+**Go through `scripts/shared/list_runs.py`. Do not hand-write the jq.** The rule below about `mode` is a correctness rule, and a correctness rule implemented as a snippet everyone retypes gets forgotten exactly once, silently, in the query that mattered. The script's `mode` argument is keyword-only with no default, so forgetting it is a `TypeError` at the call site rather than a leaderboard with debug runs in it.
 
 ```bash
 # All completed production runs in a stage
-python <mlclaw_root>/lifecycle/scripts/shared/list_runs.py <project_root> \
+python <mlclaw_root>/scripts/shared/list_runs.py <project_root> \
     --stage training --mode production
 
 # Runs comparable for /train-tune (same code SHA, not part of a session, full-scale)

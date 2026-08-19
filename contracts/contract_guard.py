@@ -82,9 +82,9 @@ class GuardStaysOutOfTheWay(unittest.TestCase):
 
     def test_the_sanctioned_routes_pass(self):
         for cmd in (
-            "python /x/lifecycle/scripts/train-run/retention.py apply --project p",
-            "python /x/lifecycle/scripts/data-retire/retire.py apply --project p",
-            "python /x/lifecycle/scripts/evacuate/evacuate.py verify --project p",
+            "python /x/scripts/train-run/retention.py apply --project p",
+            "python /x/scripts/data-retire/retire.py apply --project p",
+            "python /x/scripts/evacuate/evacuate.py verify --project p",
         ):
             with self.subTest(cmd=cmd):
                 self.assertIsNone(run(cmd))

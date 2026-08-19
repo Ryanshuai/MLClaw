@@ -1,5 +1,5 @@
 {
-  "_comment": "One exchange with a party MLClaw does not control. Written by lifecycle/scripts/data-label/handoff.py; this template documents the shape and is what a manual fallback must reproduce. Unlike run.json there is no `steps` block — a handoff has no internal step chain to resume, its state is the `status` field and the per-round reconciliations. Lives at {PROJECT}/handoffs/{handoff_id}/handoff.json.",
+  "_comment": "One exchange with a party MLClaw does not control. Written by scripts/data-label/handoff.py; this template documents the shape and is what a manual fallback must reproduce. Unlike run.json there is no `steps` block — a handoff has no internal step chain to resume, its state is the `status` field and the per-round reconciliations. Lives at {PROJECT}/handoffs/{handoff_id}/handoff.json.",
 
   "handoff_id": "handoff_{YYYYMMDD}_{HHmmss}",
   "project": "",

@@ -221,13 +221,13 @@ working directory decides is something else:
   somewhere global and you get the skills without the thing that decides which one, and
   what must not happen.
 - **Skills find each other through documents, not through discovery.** `CLAUDE.md`'s
-  skill table and `lifecycle/references/skill-graph.md`'s requires/suggests table are what
+  skill table and `references/skill-graph.md`'s requires/suggests table are what
   make `/train-run` hand off to `/eval-run`. Neither is a skill; both live here. Skill
   discovery only ever supplies names.
-- **`lifecycle/references/*.md` is read on demand by relative path.** No repo, no
+- **`references/*.md` is read on demand by relative path.** No repo, no
   references.
 
-Scripts are invoked as `python <mlclaw_root>/lifecycle/scripts/…`, where `<mlclaw_root>`
+Scripts are invoked as `python <mlclaw_root>/scripts/…`, where `<mlclaw_root>`
 comes from `shared/workspaces.py tool` (self-bootstrapping, cached in
 `~/.mlclaw/state.json`) — so the scripts themselves are portable.
 `contract_docs.ScriptPathsAreResolvedNotAssumed` keeps them that way, because a

@@ -7,7 +7,7 @@ what it can and hands the rest to the code as a literal `${input.foo}`, which
 becomes a missing-file error hundreds of lines into someone else's stack trace,
 or — worse — a path the code silently treats as absent.
 
-Namespaces, per lifecycle/references/layout.md "Variable Reference Syntax `${}`":
+Namespaces, per references/layout.md "Variable Reference Syntax `${}`":
 
     ${artifact.x}   artifacts.json -> items
     ${input.x}      input.json -> items  UNION  input.json -> ground_truth.items

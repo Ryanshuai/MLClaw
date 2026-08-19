@@ -18,7 +18,7 @@ description: >
 
 `/data-check` censuses: existence, location, completeness markers, **never content**. That line is
 what keeps it one small script instead of a second pipeline, and it is right. But it leaves a real
-gap, named in `lifecycle/references/roadmap.md` → "Also outstanding": *curate records a conversion
+gap, named in `docs/roadmap.md` → "Also outstanding": *curate records a conversion
 and the census reads no file content; neither performs one.* A unit can be present at every
 location, replicated three times, marked complete — and be 40 000 annotations whose category ids
 stopped matching the class list two collections ago.
@@ -156,7 +156,7 @@ Ask what else to check. Domain checks are the point of a conversational tool —
 "aspect ratio over 10:1", "anything the vendor touched last week". Write and run it. Record it in
 `audit.json -> ad_hoc`; when the same one recurs across audits, that is the signal to promote it to a
 numbered step above, which is the same promotion rule as `steps.ad_hoc` in
-`lifecycle/references/skill-graph.md`.
+`references/skill-graph.md`.
 
 Keep asking until the user says done.
 
@@ -192,7 +192,7 @@ change to the fatal it caused, the other says what the audit did **not** look at
 
 ## Why the AUDIT has no script — and why the GATE does
 
-`lifecycle/scripts/data-audit/` holds exactly one file, `audit_gate.py`, and it is not an
+`scripts/data-audit/` holds exactly one file, `audit_gate.py`, and it is not an
 auditor. It is the **consumer's** check: it reads the `layers` verdict map a finished audit
 wrote and refuses a production run whose data is `fatal` / `never_audited` / `unverifiable` /
 `stale` / `unreadable`. That is format-independent by construction — it never opens a sample.
@@ -228,7 +228,7 @@ promotion by recurring, it earns a script.
   - clean → whatever the user was heading for: `/train-run`, `/eval-run`.
   - `/data-audit-report` whenever there is anything a person should look at rather than read.
 
-Per `lifecycle/references/skill-graph.md` → "Workflow State Protocol", push on entry and pop on exit.
+Per `references/skill-graph.md` → "Workflow State Protocol", push on entry and pop on exit.
 `stage: null` (a dataset is not a stage — same reason as `/data-check`), `execution: <audit_id>`,
 `step` one of `integrity` / `compatibility` / `consistency` / `statistics` / `schema_diff` /
 `ad_hoc` / `record`. Unlike a census, an audit **does** have a step chain and is resumable: it is a

@@ -86,7 +86,7 @@ def gather(verb, project, stale_days, *extra):
     otherwise follows the console codepage — cp1252 on Windows, where `phase.py`
     prints an em-dash and the decode blows up in subprocess's reader thread. The
     flag is per-process and does NOT inherit, so it has to be passed at every
-    spawn; there are eight of them across `lifecycle/scripts/`.
+    spawn; there are eight of them across `scripts/`.
     """
     if not os.path.isfile(PHASE_PY):
         broke(f"phase.py not found at {PHASE_PY}")

@@ -24,7 +24,7 @@ the code had already left — `dict | dict` (PEP 584) and `str.removeprefix`
 the floor read as tested. Note the `-p`: the default pattern is `test*.py` and
 would silently find nothing.
 
-Some script directories have hyphens (`lifecycle/scripts/train-run/`), which are
+Some script directories have hyphens (`scripts/train-run/`), which are
 not importable package names, so scripts are loaded by file path throughout.
 """
 import importlib.util
@@ -37,7 +37,7 @@ import tempfile
 import unittest
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SCRIPTS = os.path.join(REPO_ROOT, "lifecycle", "scripts")
+SCRIPTS = os.path.join(REPO_ROOT, "scripts")
 
 # The harness reads and writes utf-8 regardless of the host's codepage. `-X utf8`
 # on the child (see run_script) covers the scripts run as subprocesses; this covers

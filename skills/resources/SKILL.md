@@ -9,7 +9,7 @@ Search the local machine for credentials, models, and data in common default loc
 
 Ask one question at a time — multiple questions at once overwhelms users. **And only what only they know** — a value you can read is not a question, and a value nobody has is recorded absent rather than asked for: CLAUDE.md "Decide what evidence can decide".
 
-Follow `lifecycle/references/skill-graph.md` -> "Workflow State Protocol": push on entry, update step as you progress, pop on completion.
+Follow `references/skill-graph.md` -> "Workflow State Protocol": push on entry, update step as you progress, pop on completion.
 
 ## Prerequisites
 
@@ -33,7 +33,7 @@ Ensure `{WORKSPACE}/resources.json` exists (workspace root, shared across projec
 
 Discover from `~/.ssh/config` (Host, HostName, User, IdentityFile) and `~/.ssh/known_hosts`.
 
-Run `python <mlclaw_root>/lifecycle/scripts/resources/parse_ssh_config.py`. **Fallback**: manually read `~/.ssh/config`.
+Run `python <mlclaw_root>/scripts/resources/parse_ssh_config.py`. **Fallback**: manually read `~/.ssh/config`.
 
 For each server found, create an entry with host, username, ssh_key_path, alias (SSH config Host name). Ask user for `mlclaw_root` (remote workspace root for path mapping) and `python_path` (try `ssh <host> "which python3"` to auto-detect). Leave gpu/description empty for user to fill.
 

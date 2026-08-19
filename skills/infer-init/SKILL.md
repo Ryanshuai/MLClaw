@@ -25,7 +25,7 @@ Ask one question at a time. Users find it overwhelming when asked to fill multip
 
 ## On entry
 
-Follow `lifecycle/references/skill-graph.md` -> "Workflow State Protocol": push to stack, check dependencies (project.json exists, code available), locate project, resolve code directory. These are all documented in CLAUDE.md — follow them, don't duplicate them here.
+Follow `references/skill-graph.md` -> "Workflow State Protocol": push to stack, check dependencies (project.json exists, code available), locate project, resolve code directory. These are all documented in CLAUDE.md — follow them, don't duplicate them here.
 
 ## Output: 4 JSON files
 
@@ -66,7 +66,7 @@ Determine:
 - **Inputs** -> images, video, text, or directories of data
 - **Outputs** -> prediction files, annotated images, JSON results, visualizations
 - **Metrics** -> performance values the code reports (FPS, latency, throughput), with extraction patterns
-- **Required packages**: run `python <mlclaw_root>/lifecycle/scripts/infer-init/scan_requirements.py <code_dir>`. If it fails, check requirements.txt manually.
+- **Required packages**: run `python <mlclaw_root>/scripts/infer-init/scan_requirements.py <code_dir>`. If it fails, check requirements.txt manually.
 
 For metrics: after identifying them, ask the user which ones to track across runs. Their selection goes into `output.json -> metrics.watch`. Inference metrics are typically performance-oriented (FPS, latency, throughput) rather than accuracy metrics, which belong in the evaluation stage.
 
@@ -107,7 +107,7 @@ For inference the casualty is the **performance number**: if `batch_size`, `prec
 
 Cheap checks: `grep -rn "batch_size\|half\|fp16\|device" --include=*.py <code_dir>` then read the use site; `python infer.py --help` confirms which flags actually exist.
 
-**3d. Record**: selected params -> `config.json -> runtime_params` (**effective values** — what the code runs with, not what the config declares) with `${artifact.xxx}` / `${input.xxx}` references where applicable. Each key also gets a `config.json -> param_injection.items` entry recording `via` / flag-or-key / `overridable` / `evidence` (`path:line`), per `lifecycle/references/run-mechanics.md` "Launch contract (Step 3 detail)" rule 3. Params found `overridable: false` must **not** go into `runtime_params` — keep them in `param_injection` with a note and tell the user which line to edit. Unselected params stay in original config files untouched.
+**3d. Record**: selected params -> `config.json -> runtime_params` (**effective values** — what the code runs with, not what the config declares) with `${artifact.xxx}` / `${input.xxx}` references where applicable. Each key also gets a `config.json -> param_injection.items` entry recording `via` / flag-or-key / `overridable` / `evidence` (`path:line`), per `references/run-mechanics.md` "Launch contract (Step 3 detail)" rule 3. Params found `overridable: false` must **not** go into `runtime_params` — keep them in `param_injection` with a note and tell the user which line to edit. Unselected params stay in original config files untouched.
 
 ## Step 4: Present Each File for Review
 
@@ -117,7 +117,7 @@ For each file: show proposed content, then wait for the user to confirm before m
 
 ## Step 5: Validate
 
-Run `python <mlclaw_root>/lifecycle/scripts/infer-init/validate_refs.py <stage_dir>`. If the script fails, check manually:
+Run `python <mlclaw_root>/scripts/infer-init/validate_refs.py <stage_dir>`. If the script fails, check manually:
 
 - Entry script file exists in code/
 - All items have a valid `type` field
@@ -129,4 +129,4 @@ Don't save if there are broken references — the user needs to fix those first,
 
 ## Step 6: Save
 
-Write all 4 JSON files to `{project.root}/stages/inference/`. Update workflow state per `lifecycle/references/skill-graph.md`. Offer `/infer-run` as next step.
+Write all 4 JSON files to `{project.root}/stages/inference/`. Update workflow state per `references/skill-graph.md`. Offer `/infer-run` as next step.

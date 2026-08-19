@@ -39,7 +39,7 @@ card by `run_id` — the same layering `/train-tune` has over `/train-run`, and 
 a search that runs its own trials is a second run machinery that drifts from the first. So
 `stages/exploration/` has no `runs/` directory, and that absence is correct rather than missing.
 
-**Nine skills are not stage nodes.** Where each writes and why is one lookup; full paths in `lifecycle/references/layout.md`. **All but one have no step chain** — in those cases the work happens outside any process MLClaw can step through, so the state is a `status` field, not a resumable position.
+**Nine skills are not stage nodes.** Where each writes and why is one lookup; full paths in `references/layout.md`. **All but one have no step chain** — in those cases the work happens outside any process MLClaw can step through, so the state is a `status` field, not a resumable position.
 
 `/data-audit` is the exception, and the exception is informative: it is not a stage node (a dataset is not a stage) yet it *is* a process MLClaw runs end to end, so it has steps and resumes like a run skill. Non-stage and non-resumable are two different properties that happened to coincide until this skill existed — a census has no steps because the world has no steps, not because it sits outside `stages/`.
 

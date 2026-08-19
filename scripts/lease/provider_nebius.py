@@ -2,7 +2,7 @@
 """provider_nebius — Nebius Cloud adapter for /lease.
 
 Contract: `skills/lease/references/contract.md`. Shape/price table:
-`machines_nebius.json`. Fleet-level rules this serves: `lifecycle/references/fleet.md`.
+`machines_nebius.json`. Fleet-level rules this serves: `references/fleet.md`.
 
   machine_type   `<region>:<platform>/<preset>@<pool>`, e.g.
                  `eu-north1:gpu-h100-sxm/1gpu-16vcpu-200gb@preemptible`

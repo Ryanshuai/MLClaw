@@ -28,8 +28,8 @@ STATE = Path.home() / ".mlclaw" / "state.json"
 
 
 def _self_mlclaw_root():
-    # workspaces.py lives at <mlclaw_root>/lifecycle/scripts/shared/workspaces.py
-    return Path(__file__).resolve().parents[3]
+    # workspaces.py lives at <mlclaw_root>/scripts/shared/workspaces.py
+    return Path(__file__).resolve().parents[2]
 
 
 def _to_portable(path):

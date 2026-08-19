@@ -17,7 +17,7 @@ here everything is about the data's own state; a snapshot is where it becomes a 
 Crossing it takes **two moves, and confusing them is the mistake**:
 
 ```bash
-S=<mlclaw_root>/lifecycle/scripts/data-check/census.py
+S=<mlclaw_root>/scripts/data-check/census.py
 
 # 1. pin MEMBERSHIP — the permanent, machine-independent claim
 python $S snapshot --project <p> --dataset <d> --id <snapshot_id> \
@@ -123,5 +123,5 @@ dropped: the snapshot id and `unverified_units`. Schema: `/eval-init` references
 - **Suggests**: `/train-init` or `/train-run` for the stage that wanted the set; `/data` to confirm
   the dataset now reads as `ready`.
 
-Per `lifecycle/references/skill-graph.md` -> "Workflow State Protocol", push on entry and pop on exit. `stage: null`,
+Per `references/skill-graph.md` -> "Workflow State Protocol", push on entry and pop on exit. `stage: null`,
 `execution: <snapshot_id>`.

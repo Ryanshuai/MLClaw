@@ -11,7 +11,7 @@
     "retention": "keep_all"
   },
   "metrics": {
-    "_comment": "Streamed during training. Two granularities — step (high-freq, e.g. loss/lr) and epoch (low-freq, used for ckpt selection). primary_metric drives 'best' decisions. log_format/log_path describe the SOURCE — what the training code itself writes. What every downstream script reads is the normalized stream at <RUN_DIR>/stream.jsonl, which is a fixed convention and deliberately has no field here. See lifecycle/references/run-mechanics.md -> \"Metric stream\".",
+    "_comment": "Streamed during training. Two granularities — step (high-freq, e.g. loss/lr) and epoch (low-freq, used for ckpt selection). primary_metric drives 'best' decisions. log_format/log_path describe the SOURCE — what the training code itself writes. What every downstream script reads is the normalized stream at <RUN_DIR>/stream.jsonl, which is a fixed convention and deliberately has no field here. See references/run-mechanics.md -> \"Metric stream\".",
     "log_format": "",
     "log_path": "",
     "stdout_extractor": null,

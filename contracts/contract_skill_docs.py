@@ -54,7 +54,7 @@ class AFlagTheDocsTellPeopleToTypeStillExists(unittest.TestCase):
     """
 
     def test_ask_open_still_has_the_flags_the_rule_tells_people_to_pass(self):
-        src = (ROOT / "lifecycle" / "scripts" / "ask-human" / "ask.py").read_text(
+        src = (ROOT / "scripts" / "ask-human" / "ask.py").read_text(
             encoding=ENCODING)
         for flag in ("--asked", "--why", "--verify", "--to"):
             self.assertIn(flag, src, f"ask.py no longer offers {flag}")

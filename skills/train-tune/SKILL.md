@@ -57,7 +57,7 @@ three shapes calls *this* skill: a **scoped** tune inside one arm, so a ported c
 judged at a fair operating point rather than at the paper's. When invoked that way, the
 result belongs to that card, not to the model — it does not become the project's config —
 and the control arm gets the same budget. The full three shapes and the dividing test:
-`lifecycle/references/skill-graph.md` -> "`/train-tune` vs `/explore`".
+`references/skill-graph.md` -> "`/train-tune` vs `/explore`".
 
 ## Re-entry behavior
 
@@ -72,13 +72,13 @@ When invoked again, route by `--session <id>` arg (or auto-detect latest):
 
 ## On entry
 
-Follow `lifecycle/references/skill-graph.md` -> "Workflow State Protocol". Stage = `training`. Upstream:
+Follow `references/skill-graph.md` -> "Workflow State Protocol". Stage = `training`. Upstream:
 - `/train-init` done (`stages/training/config.json -> entry_command` non-empty)
 - At least one prior `/train-run` completed (so we have a baseline configuration to fork from). If none, suggest user run a baseline first.
 - **The architecture is settled.** Nothing declares this, but one thing can contradict it: if `stages/exploration/graph.json` exists, read it —
 
   ```bash
-  python <mlclaw_root>/lifecycle/scripts/explore/graph.py status --project <PROJECT>
+  python <mlclaw_root>/scripts/explore/graph.py status --project <PROJECT>
   ```
 
   Any card in `draft` / `blocked` / `ready` / `running` / `filled` means the model is still in question. **This is a warning, not a gate** — the user asked for a tune and may well want one anyway. Name the open cards, say in one line that a config tuned around a component under an open card is **provisional**, note it in the session's `state.json` and in `chain.md`'s recipe, and carry on. What is not acceptable is running the session as if nothing were open: the config comes out looking final, and it dies silently with whatever the open card removes.
@@ -121,14 +121,14 @@ optional `--name` arg or "tune"). Create dir + initial `state.json`:
 
 Skip this entirely when `max_concurrent == 1` and the local machine can hold the job —
 one box needs no fleet, and `/train-run` already reaches it. Read
-`lifecycle/references/fleet.md` before doing anything here; it is the authority for
+`references/fleet.md` before doing anything here; it is the authority for
 everything below and states what each rule costs when broken.
 
-`lifecycle/scripts/shared/pool.py` holds the machines; it is provider-blind, so an owned
+`scripts/shared/pool.py` holds the machines; it is provider-blind, so an owned
 4090 and a rented H100 arrive as the same kind of slot.
 
 ```bash
-P=lifecycle/scripts/shared/pool.py
+P=scripts/shared/pool.py
 python $P plan  --slots 4 --gpu-count 1 --gpu-memory-gb 40 --hours 8 [--allow-preemptible]
 python $P open  --session {SESSION_DIR} --slots 4 --gpu-count 1 --gpu-memory-gb 40 \
                 --hours 8 --confirmed-usd-per-hr <the figure the user agreed to>
@@ -201,7 +201,7 @@ Do not hand-write this filter. The condition above is four clauses long and
 forgetting the fourth is invisible — type all four flags, every time:
 
 ```bash
-python <mlclaw_root>/lifecycle/scripts/shared/list_runs.py <project_root> --stage training --mode production --commit <sha> --no-session
+python <mlclaw_root>/scripts/shared/list_runs.py <project_root> --stage training --mode production --commit <sha> --no-session
 ```
 
 Read `comparable` in the result before ranking anything. False means the matched
@@ -259,7 +259,7 @@ loop:
 sized in hours and a search runs overnight; the loop is the only thing that knows the
 search is still alive, so a missed heartbeat kills every trial in flight. It is one call
 for the whole pool precisely so it cannot be half-forgotten
-(`lifecycle/references/fleet.md` "Whose dead-man switch, and what renews it").
+(`references/fleet.md` "Whose dead-man switch, and what renews it").
 
 **A trial ending does not release its machine.** `pool.py release` returns the *slot*, not
 the lease — the next trial wants that box, already provisioned and already staged. The
@@ -325,7 +325,7 @@ Do not invent a tiebreaker. Do not silently pick `trials[0]`. The whole point is
 worth minutes; a held fleet bills until something destroys it.
 
 ```bash
-python <mlclaw_root>/lifecycle/scripts/shared/pool.py close --session {SESSION_DIR}
+python <mlclaw_root>/scripts/shared/pool.py close --session {SESSION_DIR}
 ```
 
 `close` verifies each teardown and **exits non-zero with the leases left open** when one
@@ -366,7 +366,7 @@ own preferences:
    the poisoned belief is indistinguishable from a real one. `pool.py release --outcome
    preempted` is what keeps them apart, and its `trial_counts_as_evidence: false` is the
    field to read. `scope` on the run records what it actually completed, so the existing
-   comparability rules refuse it too (`lifecycle/references/run-mechanics.md` "Record
+   comparability rules refuse it too (`references/run-mechanics.md` "Record
    integrity").
 
 (Single-seed-best detection lives in `/train-tune-report`'s Open Questions section — it's a reporting concern that fires regardless of session status, not a stop-condition for the search loop. The agent can still proactively launch `[verify]` re-runs as a `refine_best` decision if budget allows, but it's no longer mandatory before stopping.)

@@ -36,8 +36,8 @@ MLClaw 四层全都在产,只是**没有地方放**。一轮跑完剩下的是�
 ## 两个动词
 
 ```
-<mlclaw_root>/lifecycle/scripts/ara/ara.py build --project <P> [--root <R>] [--out <D>]
-<mlclaw_root>/lifecycle/scripts/ara/ara.py check --project <P>
+<mlclaw_root>/scripts/ara/ara.py build --project <P> [--root <R>] [--out <D>]
+<mlclaw_root>/scripts/ara/ara.py check --project <P>
 ```
 
 `build` 默认从**项目**分层,`--root` 换成别的树(`/evacuate` 传的就是那台快没的机器的路径)。

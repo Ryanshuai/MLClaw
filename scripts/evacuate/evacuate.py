@@ -175,7 +175,7 @@ def _save(project, rec):
 
 def _template():
     return read_json(os.path.join(os.path.dirname(os.path.dirname(_HERE)),
-                                  "evacuate", "evacuation.json"), required=False) or {}
+                                  "lifecycle", "evacuate", "evacuation.json"), required=False) or {}
 
 
 def _latest(project, host=None):

@@ -81,7 +81,7 @@ def build_graph(runs):
 
         # Extract key metric. Anything not full-scale gets tagged — an unlabeled
         # debug number sitting next to production ones on the same graph invites
-        # exactly the false comparison lifecycle/references/run-mechanics.md "Metric comparability" warns about.
+        # exactly the false comparison references/run-mechanics.md "Metric comparability" warns about.
         metrics = run.get("metrics", {})
         mode = run.get("mode")
         key_metric = ""

@@ -11,7 +11,7 @@ needed to decide what to do next, which is why it is not in CLAUDE.md.
 
 **MLClaw repo** — auto-detected and cached in `~/.mlclaw/state.json`:
 ```
-mlclaw_root  = $(python <repo>/lifecycle/scripts/shared/workspaces.py tool)
+mlclaw_root  = $(python <repo>/scripts/shared/workspaces.py tool)
 ```
 Self-bootstraps from `__file__` on first call, so skills don't need the user to pass the MLClaw path each time. Override with `workspaces.py register-tool <path>` if you have multiple clones.
 
@@ -20,8 +20,8 @@ Self-bootstraps from `__file__` on first call, so skills don't need the user to 
 | | |
 |---|---|
 | `CLAUDE.md` | loaded from the working directory and its parents. Elsewhere, the *Never silently* rules and the routing table are simply absent — and they were put in the always-loaded file for the case where nothing else is loaded |
-| `lifecycle/references/*.md` | read on demand by relative path, including this file |
-| `lifecycle/scripts/…` | resolved through `<mlclaw_root>`, so these are portable — enforced by `contract_docs.ScriptPathsAreResolvedNotAssumed` |
+| `references/*.md` | read on demand by relative path, including this file |
+| `scripts/…` | resolved through `<mlclaw_root>`, so these are portable — enforced by `contract_docs.ScriptPathsAreResolvedNotAssumed` |
 
 ‼️ The first two fail SILENTLY, which is why this is written down rather than left to Quick Start. Skills copied to a global directory are still discovered by name and still run; what disappears is everything that decides *which* one and *what must not happen*. Nothing reports the difference.
 
@@ -83,7 +83,7 @@ code_dir = stages/<stage>/code/_source if exists else stages/<stage>/code
 
 **Why a symlink (not a copy) for `local`**: ML users iterate in their own repo with their own IDE/git. Copying creates two trees and bidirectional sync friction; symlink keeps a single source of truth. The lockdown of "what code did this run actually use" is solved separately at run-time by `code_snapshot.py` (SHA + dirty patch — see Run Skill Internal Dependencies).
 
-**rsync portability**: the symlink stores an *expanded* absolute path (filesystems don't expand `~` at read time), so it dangles after `rsync` to a new machine where `$HOME` is different. Recovery: `python lifecycle/scripts/shared/relink_sources.py [<project_root>]` reads the `~/`-portable `code_source.path` from `project.json` and recreates symlinks for all local-source stages on the current host. Idempotent.
+**rsync portability**: the symlink stores an *expanded* absolute path (filesystems don't expand `~` at read time), so it dangles after `rsync` to a new machine where `$HOME` is different. Recovery: `python scripts/shared/relink_sources.py [<project_root>]` reads the `~/`-portable `code_source.path` from `project.json` and recreates symlinks for all local-source stages on the current host. Idempotent.
 
 `code_path` (project.json) is always `stages/<stage>/code` — keep it as the join target, don't reinterpret it per source.
 
@@ -142,6 +142,86 @@ skills/                             ← one dir per skill; a skill's own `refere
   evacuate/SKILL.md                 ← /evacuate
   ara/SKILL.md                      ← /ara
   settings.json
+scripts/                             ← the executable half. Root-level and not per-skill because the call graph is not 1:1 — 17 of 30 skills call another skill's scripts, and `shared/` is a library
+  project-init/
+    init_project.py               ← create project dirs, copy templates, git init
+  infer-init/
+    scan_requirements.py          ← extract dependencies from code
+    validate_refs.py              ← validate ${} references across JSONs
+  eval-init/
+    validate_ground_truth.py      ← validate GT config consistency
+  eval-run/
+    compare_baseline.py           ← compare metrics against baseline
+  eval-triage/
+    triage.py                     ← rank/judge/confirm/route; label_wrong never becomes a hard example
+  train-run/
+    ingest.py                     ← source → records → stream.jsonl + tb/; all adapters
+    _stream.py                    ← shared stream reader; infers the record-type key
+    reconcile_metrics.py          ← declared metric schema vs what the stream emits
+    select_checkpoint.py          ← rank ckpts, show the jsonl values behind the pick
+    retention.py                  ← plan / apply; the only irreversible operation
+  lease/
+    lease.py                      ← acquire / renew / release a rented host
+    provider_ssh.py               ← SSH-reachable provider backend
+    _common.py                    ← JSON/error conventions every provider adapter reuses
+  ask-human/
+    ask.py                        ← open / answer / status; an answer carries its evidential status
+  data-label/
+    handoff.py                    ← send / receive / close / status; the manifest is the only authority
+  data-collect/
+    collect.py                    ← plan / pull / status; ingest only, records what arrived
+    rig.py                        ← optional provenance: rig facts + silent-change tripwires
+  data-online-sample/
+    online.py                     ← declare / sample / status; uniform only, a reading nobody can retake
+  data-check/
+    census.py                     ← scan / show / snapshot / resolve / status; three states, never two
+  data-audit/
+    audit_gate.py                 ← check; the ONLY script on this skill, and it is the consumer's not the auditor's — five states, and `never_audited` is not `clean`
+  data-curate/
+    curate.py                     ← plan / register / trace; derived_from, checked against the run
+  data-retire/
+    retire.py                     ← plan / apply / log; the only delete on the data line
+  discover/
+    discover.py                   ← sources / record / probe / report; `gone` ≠ `unreachable`
+  repro/
+    repro.py                      ← check/open/trial/band/attribute/close; five axes of rot
+  explore/
+    graph.py                      ← add/set/ready/fill/close/check/status; nine invariants, reported and never repaired. Executes nothing
+  conclude/
+    conclude.py                   ← new/add/evidence/set/refute/supersede/check/status/render; `status` and `tier` are computed, never written. Executes nothing
+  evacuate/
+    evacuate.py                   ← plan/freeze/push/verify/bundle/clearance/status; the manifest is frozen at the source, and `clearance` is what a release reads
+  ara/
+    ara.py                        ← build/check; the five layers and ARTIFACT.md. `check` reports where the frozen copy stopped agreeing with the live record
+  adaptation/
+    adapt.py                      ← open/raise/respond/round/distill/relax/close/status; the shared ledger
+  data-report/
+    board.py                      ← the whole line as one self-contained HTML page
+  data/
+    phase.py                      ← join census + handoffs + snapshots + citing runs → phase, gates
+  resources/
+    parse_ssh_config.py           ← parse ~/.ssh/config into server entries
+  shared/                         ← the run step chain lives here, not under any one run skill
+    _records.py                   ← emit/refuse/broke (the exit-code contract), UTC time, atomic json io
+    _dataset_paths.py             ← dataset dir + THE definition of "the newest census"
+    create_run.py                 ← create run directory + initialize run.json (UTC-offset timestamps)
+    capture_env.py                ← capture ML environment snapshot
+    check_deps.py                 ← compare required vs installed packages
+    test_connection.py            ← test SSH/S3 connectivity
+    extract_metrics.py            ← extract metrics; "could not read" never becomes null
+    finalize_run.py               ← update run.json with duration/status
+    code_snapshot.py              ← SHA + dirty patch incl. untracked; reproduction contract
+    compare.py                    ← THE definition of "are these two values equivalent"
+    list_runs.py                  ← THE run query; mode filter cannot be omitted
+    relink_sources.py             ← repair local-source symlinks after a cross-host rsync
+    build_dag.py                  ← build lineage DAG from all runs
+    tag_lineage.py                ← tag a run + propagate up the DAG
+    workspaces.py                 ← locate the MLClaw tool repo
+references/                          ← cross-skill context, loaded on demand. A skill's own `references/` stays with the skill; these are the ones more than one skill reads
+  run-mechanics.md                ← run step chain, contracts, record integrity (read on demand)
+  layout.md                       ← this file (read on demand)
+  skill-graph.md                  ← node hierarchy, requires/suggests, requirement checks, state protocol
+  data-line.md                    ← what each data phase owns; what is deliberately not a phase
 contracts/                          ← executable form of this file's contracts; stdlib only
   helpers.py                        ← temp dirs, real git repos, script loading by path
   contract_code_snapshot.py         ← the reproduction contract
@@ -162,93 +242,15 @@ contracts/                          ← executable form of this file's contracts
   contract_evacuate.py              ← a file that exists is not a file that arrived; leaving one behind is a delete
   contract_docs.py                  ← this file, README, and skills/ must agree
 .github/workflows/ci.yml            ← contracts + compileall + JSON parse + no-credentials gate
-docs/                               ← README assets only; nothing here is read by a skill
-lifecycle/
-  references/
-    run-mechanics.md                ← run step chain, contracts, record integrity (read on demand)
-    layout.md                       ← this file (read on demand)
-    skill-graph.md                  ← node hierarchy, requires/suggests, requirement checks, state protocol
-    data-line.md                    ← what each data phase owns; what is deliberately not a phase
-    roadmap.md                      ← designed, not built; nothing here has a script to call
+docs/                               ← decision records + README assets. NOT `references/`: nothing here is loaded on demand
+  roadmap.md                        ← designed, not built; nothing here has a script to call
+  identity.md                       ← how many kinds of id, and who maintains them; a settled debate, not yet a contract
+  mlclaw.png                        ← README asset
+lifecycle/                          ← the template set, and now ONLY that: what /project-init copies into a project
   project.json                      ← project config template
   resources.json                    ← access credentials and resource definitions template
   history.json                      ← workflow state template
   run.json                          ← run record template
-  scripts/
-    project-init/
-      init_project.py               ← create project dirs, copy templates, git init
-    infer-init/
-      scan_requirements.py          ← extract dependencies from code
-      validate_refs.py              ← validate ${} references across JSONs
-    eval-init/
-      validate_ground_truth.py      ← validate GT config consistency
-    eval-run/
-      compare_baseline.py           ← compare metrics against baseline
-    eval-triage/
-      triage.py                     ← rank/judge/confirm/route; label_wrong never becomes a hard example
-    train-run/
-      ingest.py                     ← source → records → stream.jsonl + tb/; all adapters
-      _stream.py                    ← shared stream reader; infers the record-type key
-      reconcile_metrics.py          ← declared metric schema vs what the stream emits
-      select_checkpoint.py          ← rank ckpts, show the jsonl values behind the pick
-      retention.py                  ← plan / apply; the only irreversible operation
-    lease/
-      lease.py                      ← acquire / renew / release a rented host
-      provider_ssh.py               ← SSH-reachable provider backend
-      _common.py                    ← JSON/error conventions every provider adapter reuses
-    ask-human/
-      ask.py                        ← open / answer / status; an answer carries its evidential status
-    data-label/
-      handoff.py                    ← send / receive / close / status; the manifest is the only authority
-    data-collect/
-      collect.py                    ← plan / pull / status; ingest only, records what arrived
-      rig.py                        ← optional provenance: rig facts + silent-change tripwires
-    data-online-sample/
-      online.py                     ← declare / sample / status; uniform only, a reading nobody can retake
-    data-check/
-      census.py                     ← scan / show / snapshot / resolve / status; three states, never two
-    data-audit/
-      audit_gate.py                 ← check; the ONLY script on this skill, and it is the consumer's not the auditor's — five states, and `never_audited` is not `clean`
-    data-curate/
-      curate.py                     ← plan / register / trace; derived_from, checked against the run
-    data-retire/
-      retire.py                     ← plan / apply / log; the only delete on the data line
-    discover/
-      discover.py                   ← sources / record / probe / report; `gone` ≠ `unreachable`
-    repro/
-      repro.py                      ← check/open/trial/band/attribute/close; five axes of rot
-    explore/
-      graph.py                      ← add/set/ready/fill/close/check/status; nine invariants, reported and never repaired. Executes nothing
-    conclude/
-      conclude.py                   ← new/add/evidence/set/refute/supersede/check/status/render; `status` and `tier` are computed, never written. Executes nothing
-    evacuate/
-      evacuate.py                   ← plan/freeze/push/verify/bundle/clearance/status; the manifest is frozen at the source, and `clearance` is what a release reads
-    ara/
-      ara.py                        ← build/check; the five layers and ARTIFACT.md. `check` reports where the frozen copy stopped agreeing with the live record
-    adaptation/
-      adapt.py                      ← open/raise/respond/round/distill/relax/close/status; the shared ledger
-    data-report/
-      board.py                      ← the whole line as one self-contained HTML page
-    data/
-      phase.py                      ← join census + handoffs + snapshots + citing runs → phase, gates
-    resources/
-      parse_ssh_config.py           ← parse ~/.ssh/config into server entries
-    shared/                         ← the run step chain lives here, not under any one run skill
-      _records.py                   ← emit/refuse/broke (the exit-code contract), UTC time, atomic json io
-      _dataset_paths.py             ← dataset dir + THE definition of "the newest census"
-      create_run.py                 ← create run directory + initialize run.json (UTC-offset timestamps)
-      capture_env.py                ← capture ML environment snapshot
-      check_deps.py                 ← compare required vs installed packages
-      test_connection.py            ← test SSH/S3 connectivity
-      extract_metrics.py            ← extract metrics; "could not read" never becomes null
-      finalize_run.py               ← update run.json with duration/status
-      code_snapshot.py              ← SHA + dirty patch incl. untracked; reproduction contract
-      compare.py                    ← THE definition of "are these two values equivalent"
-      list_runs.py                  ← THE run query; mode filter cannot be omitted
-      relink_sources.py             ← repair local-source symlinks after a cross-host rsync
-      build_dag.py                  ← build lineage DAG from all runs
-      tag_lineage.py                ← tag a run + propagate up the DAG
-      workspaces.py                 ← locate the MLClaw tool repo
   inference/                        ← inference stage JSON templates
     artifacts.json
     config.json

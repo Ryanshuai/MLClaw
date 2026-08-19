@@ -47,7 +47,7 @@ Ask one question at a time. Training has more knobs than infer/eval (lr, bs, epo
 
 ## On entry
 
-Follow `lifecycle/references/skill-graph.md` -> "Workflow State Protocol": push to stack, check dependencies (project.json exists, code available), locate project, resolve code directory.
+Follow `references/skill-graph.md` -> "Workflow State Protocol": push to stack, check dependencies (project.json exists, code available), locate project, resolve code directory.
 
 **Settle `provenance.json -> source_mode` first** — it decides whether the steps below ask or excavate. Infer a default and confirm in one line rather than asking cold:
 
@@ -127,12 +127,12 @@ Determine:
 - **distributed**: `single_gpu`, `ddp`, `fsdp`, `deepspeed_zero{1,2,3}`, `tensor_parallel`, or `""` if single-process
 - **Resources** → fill `config.json -> resources` (gpu_count, gpu_memory_gb, expected_duration_h)
 - **Artifacts** → pretrained backbone, tokenizer, base ckpt (for fine-tune / training extension)
-  - **If there is a base ckpt, this stage is a fine-tune, and that changes what `output.json` has to carry.** `/train-run` will measure that base on this run's data before launching, so work out *how* now, while the eval path is in front of you, and record it as `output.json -> baseline_measurement`: the command or API call, and the settings dict it must use. `null` is a legitimate answer with a reason — what is not legitimate is leaving it unasked, because at launch time the question surfaces as "skip it, we can measure later", and later never comes. Rationale and the two refusals it feeds: `lifecycle/references/run-mechanics.md` → "Baseline measurement (fine-tune only)".
+  - **If there is a base ckpt, this stage is a fine-tune, and that changes what `output.json` has to carry.** `/train-run` will measure that base on this run's data before launching, so work out *how* now, while the eval path is in front of you, and record it as `output.json -> baseline_measurement`: the command or API call, and the settings dict it must use. `null` is a legitimate answer with a reason — what is not legitimate is leaving it unasked, because at launch time the question surfaces as "skip it, we can measure later", and later never comes. Rationale and the two refusals it feeds: `references/run-mechanics.md` → "Baseline measurement (fine-tune only)".
   - Fill the settings from what the **base checkpoint itself records**, not from the library's defaults — most frameworks bury evaluation-shaping flags (mask overlap, NMS iou, letterboxing, max detections) in defaults that differ from what the weights were trained under, and a measurement taken at the default produces a plausible number that is not comparable to anything published for those weights.
 - **Inputs** → train images/text + train labels + val images/text + val labels
 - **Ground truth pairing** → directory parallel / coco json / hf datasets / yolo txt
 - **Outputs** → checkpoints (with naming pattern), log files
-- **Required packages**: run `python <mlclaw_root>/lifecycle/scripts/infer-init/scan_requirements.py <code_dir>`. If it fails, check requirements.txt manually.
+- **Required packages**: run `python <mlclaw_root>/scripts/infer-init/scan_requirements.py <code_dir>`. If it fails, check requirements.txt manually.
 
 ### 1b. Extract the preprocessing chain
 
@@ -173,7 +173,7 @@ Fill `input.json -> candidates` and `artifacts.json -> candidates` — the list 
 Before writing one down as `match: "ok"`, gate it:
 
 ```bash
-python <mlclaw_root>/lifecycle/scripts/data/phase.py gate --project {PROJECT} --dataset <id> --to consume
+python <mlclaw_root>/scripts/data/phase.py gate --project {PROJECT} --dataset <id> --to consume
 ```
 
 Exit 1 is the answer, not a broken script — pass it through. It catches two things invisible from the filesystem: `snapshot_stale` (frozen from a census predating accepted inflow — reads as current and is not) and `census_incomplete` (every count under it is a lower bound). Record such a snapshot as `mismatch` with the blocker verbatim in `notes` and route to `/data-freeze`. **Never `--acknowledge` here**: it would stamp a stale citation into a config permanently, and that is not this skill's call. `/train-run` gates again at launch; this pass exists so a broken citation never becomes an `ok`.
@@ -333,7 +333,7 @@ This step has no equivalent in infer-init / eval-init. Training emits metrics co
 
 Record in `output.json -> metrics.log_format` and `metrics.log_path`. Both name
 **the source** — what the code writes. What `/train-run` reads is the normalized
-stream; see `lifecycle/references/run-mechanics.md` → "Metric stream".
+stream; see `references/run-mechanics.md` → "Metric stream".
 
 **Record what you found, then say what it costs.** `references/schemas.md` →
 `output.json -> metrics` owns the per-row detail (what "never executed" means for

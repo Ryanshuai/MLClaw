@@ -91,5 +91,5 @@ denominator rule broken by a different route.
   defect, `/data-freeze` for a corrected snapshot. Rendering changes nothing about who owns what, so
   this skill routes exactly where `/data-audit` did and never softens it.
 
-Per `lifecycle/references/skill-graph.md` → "Workflow State Protocol", push on entry and pop on exit
+Per `references/skill-graph.md` → "Workflow State Protocol", push on entry and pop on exit
 — `stage: null`, `execution: null`. Rendering is not an execution to resume.

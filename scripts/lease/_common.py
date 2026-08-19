@@ -129,8 +129,8 @@ def resources_from_workspace_root(arg):
 
 def _from_claude_md():
     """CLAUDE.md's `workspace_root:` is the single source of truth for where projects and
-    the shared resources.json live (lifecycle/references/layout.md "Workspace and tool-repo location")."""
-    # .../<repo>/lifecycle/scripts/lease/_common.py -> <repo>
+    the shared resources.json live (references/layout.md "Workspace and tool-repo location")."""
+    # .../<repo>/scripts/lease/_common.py -> <repo>
     repo = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
     try:
         with open(os.path.join(repo, "CLAUDE.md")) as fh:

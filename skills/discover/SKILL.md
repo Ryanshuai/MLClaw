@@ -26,7 +26,7 @@ the problem. This skill is the step before, and it is the data-side counterpart 
 source sweep — same discipline, same `provenance`-style honesty about what was read versus guessed.
 
 ```bash
-S=<mlclaw_root>/lifecycle/scripts/discover/discover.py
+S=<mlclaw_root>/scripts/discover/discover.py
 
 python $S sources --project <p>
 python $S introspect --project <p> --checkpoint <a .pt on disk> [--record]
@@ -406,6 +406,6 @@ rather than a fixed string.
   `/ask-human` for anything `gone` or still only `claim`ed, while there is somebody to ask;
   `/resources` when `sources` says the blocker is credentials.
 
-Per `lifecycle/references/skill-graph.md` -> "Workflow State Protocol", push on entry and pop on exit. `stage: null`,
+Per `references/skill-graph.md` -> "Workflow State Protocol", push on entry and pop on exit. `stage: null`,
 `execution: null` — a sweep is an observation, not an execution to resume, and the leads file is what
 persists.

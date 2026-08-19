@@ -350,7 +350,7 @@ class TheGroundingCheckDoesNotFloodOnIdentifiers(ConcludeCase):
 
 
 class AConfidenceIsComputedNotWritten(ConcludeCase):
-    """`lifecycle/references/layout.md` — the split between what goes and looks
+    """`references/layout.md` — the split between what goes and looks
     (`census.py`, dated, may be partial) and the durable contract
     (`dataset.json`) — applied here: the declared half is the statement, the
     falsifier and the refs; the derived half is `status` and `tier`.
@@ -505,7 +505,7 @@ class AConclusionIsAboutACorpus(ConcludeCase):
 
 
 class SettledConclusionsAreNotRewritten(ConcludeCase):
-    """`lifecycle/references/run-mechanics.md` -> "Record integrity", and the
+    """`references/run-mechanics.md` -> "Record integrity", and the
     same rule `graph.py` applies to settled cards.
 
     What was believed at the time is what explains the runs launched at the

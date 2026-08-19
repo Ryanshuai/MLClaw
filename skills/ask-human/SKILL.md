@@ -41,7 +41,7 @@ This is the whole reason the skill exists rather than a notes field. *"The opera
 finished"* and *"the census counted 52 finished units"* are different facts, and they become
 identical the moment someone writes "done" somewhere. The first one has been wrong before.
 
-`lifecycle/references/run-mechanics.md` "Record integrity" says never record a metric you did not
+`references/run-mechanics.md` "Record integrity" says never record a metric you did not
 read. This is that rule where the instrument is a person.
 
 **Everything downstream branches on `answer.kind`, never on the text of `says`.**
@@ -49,7 +49,7 @@ read. This is that rule where the instrument is a person.
 ## The script
 
 ```bash
-S=<mlclaw_root>/lifecycle/scripts/ask-human/ask.py
+S=<mlclaw_root>/scripts/ask-human/ask.py
 python $S open   --project <p> --to <who> --asked "<question>" [--kind ...] [--verify "<cmd>"] [--due ...]
 python $S answer --project <p> --id <id> --says "<reply>" --as claim|verified|decision|refused|unknown
 python $S status --project <p> [--open-only] [--stale-days N]
@@ -127,7 +127,7 @@ Two rules for whoever adds the first one:
 - **Suggests**: whatever `why` said was blocked. When the answer unblocks a pull, `/data-collect`;
   a freeze, `/data-check`; a whole batch of work, `/data-label`.
 
-Per `lifecycle/references/skill-graph.md` -> "Workflow State Protocol", push on entry and pop on exit. `stage: null`,
+Per `references/skill-graph.md` -> "Workflow State Protocol", push on entry and pop on exit. `stage: null`,
 `execution: <ask_id>`. **Pop after `open`** — an ask waiting on a person is the expected long-lived
 state, not unfinished work, and leaving it on the stack opens every session for the next week with
 a false resume prompt. Same rule as a handoff at `await`.

@@ -2484,7 +2484,7 @@ class TheFrameworkBlindSpotIsCheckable(DiscoverCase):
         spec = importlib.util.spec_from_file_location(
             "fi", os.path.join(os.path.dirname(os.path.dirname(
                 os.path.abspath(__file__))),
-                "lifecycle", "scripts", "shared", "framework_integrity.py"))
+                "scripts", "shared", "framework_integrity.py"))
         fi = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(fi)
         for state in ("as_published", "edited", "incomplete", "not_installed",

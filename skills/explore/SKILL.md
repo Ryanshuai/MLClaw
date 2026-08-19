@@ -95,7 +95,7 @@ description: >
 的超参，组件一删就作废；而一个架构如果是在「手边刚好是什么参数」下判的，那就是在一个没人
 选过的点上判的。第三种形状就是在不倒转顺序的前提下把后半句付掉。
 
-完整对照表在 `lifecycle/references/skill-graph.md` -> "`/train-tune` vs `/explore`"。
+完整对照表在 `references/skill-graph.md` -> "`/train-tune` vs `/explore`"。
 
 **它不跑任何东西。** 一条臂是 `stages/<target_stage>/runs/` 里一次**普通的 run**，由
 `/train-run` 或 `/eval-run` 发起，卡上用 `run_id` 引它。这是 `/data-curate` 对转换划的
@@ -122,7 +122,7 @@ stages/<target_stage>/runs/   ← 臂住在这儿，不在 exploration 下
 ### 那七条不变量现在有执行者了
 
 ```bash
-python <mlclaw_root>/lifecycle/scripts/explore/graph.py <verb> --project <PROJECT>
+python <mlclaw_root>/scripts/explore/graph.py <verb> --project <PROJECT>
 ```
 
 | verb | 干什么 |
@@ -149,7 +149,7 @@ MLClaw 加的两条，是原版靠记忆执行的两条规矩：
 
 ### On entry
 
-按 `lifecycle/references/skill-graph.md` -> "Workflow State Protocol"。Stage = `exploration`。
+按 `references/skill-graph.md` -> "Workflow State Protocol"。Stage = `exploration`。
 
 | | |
 |---|---|
@@ -171,7 +171,7 @@ MLClaw 加的两条，是原版靠记忆执行的两条规矩：
 ### 「现在有什么新的结论了吗？」
 
 ```bash
-python <mlclaw_root>/lifecycle/scripts/explore/graph.py new --project <P> [--since 12h]
+python <mlclaw_root>/scripts/explore/graph.py new --project <P> [--since 12h]
 ```
 
 ‼️ **这个动词存在的理由不是方便，是它挡住一次特定的滑坡。** 这个问题在原版那一轮里被问了

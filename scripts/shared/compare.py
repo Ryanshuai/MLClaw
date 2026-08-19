@@ -29,7 +29,7 @@ The settled semantics, and why:
   refused comparison) rather than silent (a fake one).
 
 Stdlib only. Imported from hyphenated script directories with the usual
-`sys.path.insert(0, <…>/lifecycle/scripts/shared)` line.
+`sys.path.insert(0, <…>/scripts/shared)` line.
 """
 import json
 

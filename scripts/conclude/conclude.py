@@ -486,7 +486,7 @@ def cmd_new(a):
     if os.path.exists(path) and not a.force:
         refuse(f"{path} already exists", fix="pass --force to overwrite")
     tmpl = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
-        os.path.abspath(__file__)))), "knowledge", "conclusions.json")
+        os.path.abspath(__file__)))), "lifecycle", "knowledge", "conclusions.json")
     rec = read_json(tmpl, required=False) or {"conclusions": []}
     rec["project"] = os.path.basename(os.path.abspath(a.project))
     rec["conclusions"] = []

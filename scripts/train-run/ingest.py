@@ -5,7 +5,7 @@
 One records layer, N thin source adapters, and sinks that share it. Not a
 per-format converter: a `tb_to_stream.py` alongside a `wandb_to_stream.py` would
 each re-implement grouping, provenance stamping, and the write discipline, and
-they would drift. See `lifecycle/references/run-mechanics.md` -> "Metric stream"
+they would drift. See `references/run-mechanics.md` -> "Metric stream"
 for the vocabulary (source / stream / record) and the rules enforced here.
 
 Two of those rules are the reason this file is small and boring on purpose:

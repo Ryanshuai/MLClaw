@@ -2,7 +2,7 @@
 """provider_lambda — Lambda Cloud adapter for /lease.
 
 Contract: `skills/lease/references/contract.md`. Shape table: `machines_lambda.json`.
-Fleet-level rules this serves: `lifecycle/references/fleet.md`.
+Fleet-level rules this serves: `references/fleet.md`.
 
   machine_type   `<region>:<instance_type>`, e.g. `us-west-1:gpu_1x_a10`.
                  Everything `up` needs is in the string, because L2 passes nothing else.

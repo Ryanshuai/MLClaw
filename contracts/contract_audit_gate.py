@@ -16,7 +16,7 @@ import unittest
 
 from helpers import REPO_ROOT
 
-GATE = os.path.join(REPO_ROOT, "lifecycle", "scripts", "data-audit", "audit_gate.py")
+GATE = os.path.join(REPO_ROOT, "scripts", "data-audit", "audit_gate.py")
 CLEAN = {"integrity": {"verdict": "INFO"}, "compatibility": {"verdict": "WARN"}}
 
 

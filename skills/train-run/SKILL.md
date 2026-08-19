@@ -19,7 +19,7 @@ Execute a training run: validate resources, resolve sources, launch in backgroun
 
 **One question at a time** — training has many knobs (lr, bs, epochs, seed, optimizer, scheduler, mixed precision, save policy …). Asking them all at once overwhelms; ask one, record, ask next. **And only what only they know** — a value you can read is not a question, and a value nobody has is recorded absent rather than asked for: CLAUDE.md "Decide what evidence can decide".
 
-**Workflow state, dependency checks, locate project, variable references** — follow `lifecycle/references/skill-graph.md` (state protocol + the requires/suggests table) and `lifecycle/references/layout.md` (Variable Reference Syntax). Stage = `training`, upstream = `/train-init` (check `config.json -> entry_command` non-empty).
+**Workflow state, dependency checks, locate project, variable references** — follow `references/skill-graph.md` (state protocol + the requires/suggests table) and `references/layout.md` (Variable Reference Syntax). Stage = `training`, upstream = `/train-init` (check `config.json -> entry_command` non-empty).
 
 **Re-entry behavior** — when this skill is invoked again on an existing run, do NOT re-launch. Read `run.json -> status` and route:
 
@@ -51,10 +51,10 @@ The reasoning ("why continue") goes in `description` / `hypothesis`, or in `deci
 
 A Hugging Face id, a vendor checkpoint, a colleague's `best.pt`. It runs through the identical launch path, which is exactly why this needs saying: **it does not record the same way, and both of the steps above break silently.**
 
-- `fork_of` is same-stage and carries **no I/O dependency** by definition (`lifecycle/references/run-mechanics.md` → "Lineage"). There is no prior run to fork, so it stays null and the "I extend prior training" fact has nowhere to live.
+- `fork_of` is same-stage and carries **no I/O dependency** by definition (`references/run-mechanics.md` → "Lineage"). There is no prior run to fork, so it stays null and the "I extend prior training" fact has nowhere to live.
 - `lineage.parents` *is* the right slot — a fine-tune consumes the base's weights, a hard dependency — but its entry grammar is `<stage>/<run_id>`. **A foreign model is not a run, so it currently has no citable form** and ends up as a string inside `runtime_params`.
 
-Until `models/<id>@<release>` exists (`lifecycle/references/roadmap.md` → "the model identity layer"), **say the gap to the user instead of routing around it** — a missing record capability and a record that says `null` are two different facts, the same distinction the metric rules draw:
+Until `models/<id>@<release>` exists (`docs/roadmap.md` → "the model identity layer"), **say the gap to the user instead of routing around it** — a missing record capability and a record that says `null` are two different facts, the same distinction the metric rules draw:
 
 > This base is not a run in this project, so MLClaw can record its *path* but not its *identity*. Three consequences, none of which raise on their own: nothing can later check the checkpoint is the artifact its publisher published; `retention.py` does not know anything depends on it, so a correct retention pass can orphan a LoRA/adapter output; and the base's published numbers are a `claim` measured on someone else's `scope`, so they are never this run's baseline.
 
@@ -62,14 +62,14 @@ Then record it as far as the schema allows — base path plus any digest in `sou
 
 ### Measure the base before you launch — every fine-tune, no exceptions
 
-The section above ends by saying the base's published numbers "are never this run's baseline." This is what is. **Before launching, run `/eval-run` against the base checkpoint** on this run's data, and cite it in `run.json -> baseline_delta.before`. At finalize, `/eval-run` the child the same way into `baseline_delta.after`. Rationale, and why *before* rather than at finalize: `lifecycle/references/run-mechanics.md` → "Baseline measurement (fine-tune only)".
+The section above ends by saying the base's published numbers "are never this run's baseline." This is what is. **Before launching, run `/eval-run` against the base checkpoint** on this run's data, and cite it in `run.json -> baseline_delta.before`. At finalize, `/eval-run` the child the same way into `baseline_delta.after`. Rationale, and why *before* rather than at finalize: `references/run-mechanics.md` → "Baseline measurement (fine-tune only)".
 
 It is one eval, and both inputs are already resolved — Step 1 just picked the base checkpoint and the data. Skipping it does not cost the run; it costs the only number the run produces that anyone can read, and it costs it permanently, because after the run nobody measures a model they are not shipping.
 
 **This means a fine-tune requires an evaluation stage.** If there is none, say so and route to `/eval-init` — do not measure it here by hand. `/train-run` growing a private evaluator is the mistake `/eval-init` refuses to make in the other direction, and it would immediately disagree with the real one about preprocessing, thresholds and scope.
 
 ```bash
-python <mlclaw_root>/lifecycle/scripts/train-run/baseline_delta.py check <RUN_DIR>
+python <mlclaw_root>/scripts/train-run/baseline_delta.py check <RUN_DIR>
 ```
 
 `check` refuses (exit 1) on a fine-tune with no before-measurement. That is the answer, not a script bug — pass it through. If the base genuinely cannot be measured, record why in `run.json -> baseline_delta.waived` and say it in the summary; the run then carries a stated gap instead of a metric with no scale.
@@ -97,9 +97,9 @@ For remote servers, query the server's `nvidia-smi` over SSH first; resolve via 
 
 ## Steps 1-3: Shared Run Mechanics
 
-Follow `lifecycle/references/run-mechanics.md` "Run Skill Internal Dependencies" — that section owns the cross-skill rules. The shared parts in plain words:
+Follow `references/run-mechanics.md` "Run Skill Internal Dependencies" — that section owns the cross-skill rules. The shared parts in plain words:
 
-1. **Resolve Assets** (step `resolve_assets`) — **pick from `candidates`; don't ask for paths.** `/train-init` Step 1c already located the options for every item in `artifacts.json` and `input.json` (plus `ground_truth` for both splits). Full rules: `lifecycle/references/run-mechanics.md` → "Asset resolution (Step 1 detail)" — read them there, not from a summary here. **Every `match` value routes somewhere and filtering to `ok` is a bug**: a `pending` candidate has a party and a due date, an `unreachable` one has a missing credential, and reporting either as "no options" conflates *not here* with *could not look*. Record the choice in the run's `sources.json`.
+1. **Resolve Assets** (step `resolve_assets`) — **pick from `candidates`; don't ask for paths.** `/train-init` Step 1c already located the options for every item in `artifacts.json` and `input.json` (plus `ground_truth` for both splits). Full rules: `references/run-mechanics.md` → "Asset resolution (Step 1 detail)" — read them there, not from a summary here. **Every `match` value routes somewhere and filtering to `ok` is a bug**: a `pending` candidate has a party and a due date, an `unreachable` one has a missing credential, and reporting either as "no options" conflates *not here* with *could not look*. Record the choice in the run's `sources.json`.
 
    The chosen `location` changes what happens next: `local` → use directly; `s3` / `downloadable` → fetch before launch and record where it landed; **`server:<key>` → this is the signal to run on that machine** instead of copying the data to this one. Raise that as an option rather than silently starting a 19GB transfer.
 
@@ -108,15 +108,15 @@ Follow `lifecycle/references/run-mechanics.md` "Run Skill Internal Dependencies"
 2. **Create Run** (step `create_run`) — **use the scripts; do not create the run dir by hand.**
 
    ```bash
-   python <mlclaw_root>/lifecycle/scripts/shared/create_run.py <stage_dir> <mlclaw_root>/lifecycle/run.json
-   python <mlclaw_root>/lifecycle/scripts/shared/code_snapshot.py <code_dir> <RUN_DIR>   # merge into run.json -> code
-   python <mlclaw_root>/lifecycle/scripts/shared/capture_env.py <RUN_DIR>
-   python <mlclaw_root>/lifecycle/scripts/shared/check_deps.py  <code_dir> <RUN_DIR>
+   python <mlclaw_root>/scripts/shared/create_run.py <stage_dir> <mlclaw_root>/lifecycle/run.json
+   python <mlclaw_root>/scripts/shared/code_snapshot.py <code_dir> <RUN_DIR>   # merge into run.json -> code
+   python <mlclaw_root>/scripts/shared/capture_env.py <RUN_DIR>
+   python <mlclaw_root>/scripts/shared/check_deps.py  <code_dir> <RUN_DIR>
    ```
 
    `create_run.py` is not a convenience here. `run_id` has one-second resolution, and a `/train-tune` session with `max_concurrent > 1` launches trials in the same second — hand-rolled `mkdir -p` lets two runs share a directory and the second `run.json` write destroys the first run's record. The script allocates a free id and says so. It also writes `created_at` as UTC-with-offset, which is what makes `list_runs.py`'s ordering correct across machines.
 
-   **Code snapshot** — see `lifecycle/references/run-mechanics.md` "Code snapshot (Step 2 detail)". Read `reproducible` in its output before continuing; false means the snapshot cannot rebuild this tree.
+   **Code snapshot** — see `references/run-mechanics.md` "Code snapshot (Step 2 detail)". Read `reproducible` in its output before continuing; false means the snapshot cannot rebuild this tree.
 
    **Train-specific: diff the captured env against `config.json -> env_snapshot`** (what the original author had) and report key-package mismatches before launching:
 
@@ -127,7 +127,7 @@ Follow `lifecycle/references/run-mechanics.md` "Run Skill Internal Dependencies"
 
    Don't block on it — just say it. This is the first thing to check when the author's numbers won't reproduce: same code, same data, different `torch` or `timm` → different results, and without this line the code takes the blame for an environment difference. When `env_snapshot.source` is `"none"`, say that instead: there's no record to compare against, so a reproduction gap can't be attributed either way.
 
-3. **Build & Launch** (step `execute`) — resolve `${}` references, then build the command **per-param from `config.json -> param_injection.items`**, not by guessing from `config_format`: `via: cli` → append its `flag`, `via: yaml` → write its `key` into the config copy, `via: env` → export it. A `runtime_params` key with no `param_injection` entry is an error, not a "just try `--key value`" — stop and ask, because a silently-ignored flag produces a run whose recorded config doesn't match what trained. Params marked `overridable: false` must never be passed (they can't take effect); if the user wants one changed, tell them which `path:line` to edit. Then save `config_snapshot.json` and `sources.json`, **and write `run.json -> workload` from the entries you just built the command from** — `world_size` / `batch_size` / `grad_accum` / `epochs` / `samples_per_epoch`, plus `source` mirroring each one's `via`. Rule 4 of `lifecycle/references/run-mechanics.md` "Launch contract (Step 3 detail)": every value is already resolved at this line, and it is the only record of what the run was *asked* to do — what it actually did is compared against it at finalize. **Anything the config does not state stays null; never fill a default.**
+3. **Build & Launch** (step `execute`) — resolve `${}` references, then build the command **per-param from `config.json -> param_injection.items`**, not by guessing from `config_format`: `via: cli` → append its `flag`, `via: yaml` → write its `key` into the config copy, `via: env` → export it. A `runtime_params` key with no `param_injection` entry is an error, not a "just try `--key value`" — stop and ask, because a silently-ignored flag produces a run whose recorded config doesn't match what trained. Params marked `overridable: false` must never be passed (they can't take effect); if the user wants one changed, tell them which `path:line` to edit. Then save `config_snapshot.json` and `sources.json`, **and write `run.json -> workload` from the entries you just built the command from** — `world_size` / `batch_size` / `grad_accum` / `epochs` / `samples_per_epoch`, plus `source` mirroring each one's `via`. Rule 4 of `references/run-mechanics.md` "Launch contract (Step 3 detail)": every value is already resolved at this line, and it is the only record of what the run was *asked* to do — what it actually did is compared against it at finalize. **Anything the config does not state stays null; never fill a default.**
 
    **Echo `config.json -> hazards` before asking for confirmation** — one line per `degrades` and `risks` entry. This is the only moment anyone reads them; left sitting in JSON they may as well not exist. Judge `risks` against *this* launch, since the condition is finally knowable: a `world_size` hazard matters now that the GPU count is decided, `network_required` now that you know whether this host has egress.
 
@@ -136,7 +136,7 @@ Follow `lifecycle/references/run-mechanics.md` "Run Skill Internal Dependencies"
    ⚠ degrades · val split unseeded — metrics drift between runs (dataset.py:118)
    ```
 
-   A `blocks` entry should never reach here (init stops on those), so if you find one, treat it as a bug in the init record and stop. Then confirm with user. **`cwd` + `output_dir` rules** — see `lifecycle/references/run-mechanics.md` "Launch contract (Step 3 detail)". Train-specific overrides: production mode runs in background (see "Execution Modes" below).
+   A `blocks` entry should never reach here (init stops on those), so if you find one, treat it as a bug in the init record and stop. Then confirm with user. **`cwd` + `output_dir` rules** — see `references/run-mechanics.md` "Launch contract (Step 3 detail)". Train-specific overrides: production mode runs in background (see "Execution Modes" below).
 
 ### Execution Modes
 
@@ -145,12 +145,12 @@ Follow `lifecycle/references/run-mechanics.md` "Run Skill Internal Dependencies"
 - Run synchronously, stream stdout. Watch for crash signatures (see references/crash-signatures.md).
 - On failure: diagnose, propose fix, ask "Apply and re-run debug?". On success: ask "production / inspect / cancel?"
 - Debug mode runs in foreground because it's short. Production mode never does.
-- **Set `run.json -> mode: "debug"` and `scope`** (epochs / steps actually reached, actual batch size — read from the log, not from what you passed). A debug run's val metric describes a 1-epoch model and must never be compared against, or ranked alongside, a full run's — see `lifecycle/references/run-mechanics.md` "Metric comparability".
+- **Set `run.json -> mode: "debug"` and `scope`** (epochs / steps actually reached, actual batch size — read from the log, not from what you passed). A debug run's val metric describes a 1-epoch model and must never be compared against, or ranked alongside, a full run's — see `references/run-mechanics.md` "Metric comparability".
 
 **Production mode.** ‼️ **First, the provenance gate** — before anything else, and before asking local or server:
 
 ```
-python <mlclaw_root>/lifecycle/scripts/train-run/provenance_gate.py check \
+python <mlclaw_root>/scripts/train-run/provenance_gate.py check \
     --project {PROJECT} --stage training --mode production
 ```
 
@@ -159,7 +159,7 @@ Exit 1 is the answer, not a failure — do **not** fall back and launch. It mean
 ‼️ **Then the audit gate** — the data half of the same question:
 
 ```
-python <mlclaw_root>/lifecycle/scripts/data-audit/audit_gate.py check \
+python <mlclaw_root>/scripts/data-audit/audit_gate.py check \
     --project {PROJECT} --stage training --mode production
 ```
 
@@ -171,7 +171,7 @@ Then ask local or server. In both cases set `run.json -> mode: "production"` and
 
 `PYTHONUNBUFFERED=1` is not cosmetic: it is what makes `logs/stdout.log` advance in real time, and that file is the reliable leg of the Step 4b liveness check. MLClaw controls the launch environment, so this costs the training code nothing — zero code invasion holds.
 
-For path mapping (so jsonl on the server is readable from local), see `lifecycle/references/run-mechanics.md` "Path Mapping (Cross-Machine Execution)". For multi-GPU launchers, the entry_command from `config.json` already encodes them — pass through.
+For path mapping (so jsonl on the server is readable from local), see `references/run-mechanics.md` "Path Mapping (Cross-Machine Execution)". For multi-GPU launchers, the entry_command from `config.json` already encodes them — pass through.
 
 ## Step 4: Monitor (step `monitor`, training-specific)
 
@@ -181,7 +181,7 @@ Re-entrant, so `steps.monitor.status` stays null while the job runs; set it `com
 
 ### 4a. Update streaming state in run.json (sub-step `stream_state`)
 
-Two different files, for two different jobs — see `lifecycle/references/run-mechanics.md` "Metric stream" for the vocabulary:
+Two different files, for two different jobs — see `references/run-mechanics.md` "Metric stream" for the vocabulary:
 
 - **Probe the source** — `{RUN_DIR}/<output.json -> metrics.log_path>` and `{RUN_DIR}/logs/stdout.log`. Liveness must read what the training process itself touches. Probing the derived stream instead makes "training stalled" and "our ingest failed" look identical, and the second one would be reported as the first.
 - **Read records from the stream** — resolve it through `stream_path()` (explicit path → `{RUN_DIR}/stream.jsonl` → source fallback) rather than opening `log_path` directly, so this step reads the same records `select_checkpoint` will later rank.
@@ -189,7 +189,7 @@ Two different files, for two different jobs — see `lifecycle/references/run-me
 Re-derive the stream first, then read it:
 
 ```bash
-{run_in_env} python <mlclaw_root>/lifecycle/scripts/train-run/ingest.py \
+{run_in_env} python <mlclaw_root>/scripts/train-run/ingest.py \
     <stage>/output.json --run-dir <RUN_DIR>
 ```
 
@@ -270,7 +270,7 @@ After done_signal matched (or user manually marks completed). **Run these three 
 ### 5a'. Reconcile the metric schema (sub-step `reconcile_metrics`)
 
 ```bash
-python <mlclaw_root>/lifecycle/scripts/train-run/reconcile_metrics.py \
+python <mlclaw_root>/scripts/train-run/reconcile_metrics.py \
     <stage>/output.json --run-dir <RUN_DIR>
 ```
 
@@ -281,7 +281,7 @@ The verdict this catches most often: `primary_metric` names a field the code nev
 ### 5a. Pick best checkpoint (sub-step `select_checkpoint`)
 
 ```bash
-python <mlclaw_root>/lifecycle/scripts/train-run/select_checkpoint.py \
+python <mlclaw_root>/scripts/train-run/select_checkpoint.py \
     <stage>/output.json --run-dir <RUN_DIR> --output-dir <RUN_DIR>/output
 ```
 
@@ -304,12 +304,12 @@ Record `chosen.path` in `run.json -> outputs.best_checkpoint`. Cases it surfaces
 
 ```bash
 # 1. plan — deletes nothing, ever. Prints each file with the metric value that decided its fate.
-python <mlclaw_root>/lifecycle/scripts/train-run/retention.py plan \
+python <mlclaw_root>/scripts/train-run/retention.py plan \
     <stage>/output.json --run-dir <RUN_DIR> --output-dir <RUN_DIR>/output \
     --plan <RUN_DIR>/retention_plan.json
 
 # 2. show the table to the user, then apply with the token from the plan file
-python <mlclaw_root>/lifecycle/scripts/train-run/retention.py apply \
+python <mlclaw_root>/scripts/train-run/retention.py apply \
     --plan <RUN_DIR>/retention_plan.json --confirm <confirm_token>
 ```
 
@@ -320,7 +320,7 @@ python <mlclaw_root>/lifecycle/scripts/train-run/retention.py apply \
 ### 5c. Finalize run.json (sub-step `finalize`)
 
 ```bash
-python <mlclaw_root>/lifecycle/scripts/shared/finalize_run.py <RUN_DIR>/run.json completed
+python <mlclaw_root>/scripts/shared/finalize_run.py <RUN_DIR>/run.json completed
 ```
 
 Sets `status` / `finished_at` / `duration_s`. Read the `warnings` it returns rather than only the duration — it reports when `started_at` carried no timezone (so the duration rests on an assumption), when the subtraction could not be done at all, and when the result is negative from clock skew between the launch host and this one. A null `duration_s` with no explanation is indistinguishable from a run that never started.
@@ -334,7 +334,7 @@ Then fill the rest by hand:
 
 ### 5d. Summary
 
-- No separate index file to update — `run.json` is the source of truth, queried on demand via `shared/list_runs.py` (see `lifecycle/references/run-mechanics.md` "Listing runs (no separate index)" for canonical patterns).
+- No separate index file to update — `run.json` is the source of truth, queried on demand via `shared/list_runs.py` (see `references/run-mechanics.md` "Listing runs (no separate index)" for canonical patterns).
 - Ask user for optional alias / description, write into `run.json -> alias` / `description`.
 - Show summary:
   ```
@@ -348,7 +348,7 @@ Then fill the rest by hand:
 
 ### 5e. Downstream suggestion
 
-Offer `/eval-run` (per `lifecycle/references/skill-graph.md` -> "Skill Dependency Graph") — pre-fill the new ckpt as the eval input artifact. If user accepts, invoke as sub-skill per Workflow State Protocol.
+Offer `/eval-run` (per `references/skill-graph.md` -> "Skill Dependency Graph") — pre-fill the new ckpt as the eval input artifact. If user accepts, invoke as sub-skill per Workflow State Protocol.
 
 For sweeps and continued chains: also surface "Fork to try a variant?" or "Continue training (more epochs)?" offers, depending on training trajectory. (`/train-compare`, when available, will be offered for comparing multiple completed runs.)
 

@@ -38,7 +38,7 @@ If you find yourself using this skill to *describe* state the user can already r
 ## The script
 
 ```bash
-S=<mlclaw_root>/lifecycle/scripts/data/phase.py
+S=<mlclaw_root>/scripts/data/phase.py
 python $S phase --project <p> [--dataset <d>] [--stale-days N]
 python $S gate  --project <p> --dataset <d> --to freeze|curate|consume [--acknowledge <n>]
 ```
@@ -101,7 +101,7 @@ Two orderings are not staleness and must not be reported as clean either:
   resolution, so the ordering is unknown. Unknown counts as stale.
 - **a timestamp missing or without a UTC offset** — reported as `staleness_undetermined`, its own
   blocker. Recording it as "not stale" would be the extraction-failure-vs-absence bug from
-  `lifecycle/references/run-mechanics.md` "Record integrity", committed by the checker itself.
+  `references/run-mechanics.md` "Record integrity", committed by the checker itself.
 
 ## Gates
 
@@ -166,6 +166,6 @@ runs, and an open handoff still refuses.
 - **Suggests**: whatever `next_skill` names, or the blocker's owner from the table above. Both come
   from the script's output so this file does not carry a second copy of the routing table.
 
-Per `lifecycle/references/skill-graph.md` -> "Workflow State Protocol", push on entry and pop on exit. Use `stage: null` and
+Per `references/skill-graph.md` -> "Workflow State Protocol", push on entry and pop on exit. Use `stage: null` and
 `execution: null` — like a census, an assessment is a dated observation, not an execution to
 resume. **Pop before reporting**, or a routing question leaves a false resume prompt behind it.

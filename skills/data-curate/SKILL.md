@@ -27,7 +27,7 @@ a script at commit `abc123`, lives nowhere but in whoever's memory. That is the 
 ## The script
 
 ```bash
-S=<mlclaw_root>/lifecycle/scripts/data-curate/curate.py
+S=<mlclaw_root>/scripts/data-curate/curate.py
 
 python $S plan     --project <p> --from datasets/<id>@<snap> --to <new_id> \
                    --op convert|split|dedup|relabel|sample|merge \
@@ -75,7 +75,7 @@ the one a user actually arrives at: `/train-init` wrote `match: "mismatch"` and 
 
 One transform is almost never right the first time, so Step 2 becomes a loop, and the loop needs a
 ledger or it does not converge — round five re-tries what round two eliminated. That ledger is
-`lifecycle/scripts/adaptation/adapt.py`; the record it writes is `{PROJECT}/adaptation/<id>/session.json`.
+`scripts/adaptation/adapt.py`; the record it writes is `{PROJECT}/adaptation/<id>/session.json`.
 
 ```
 adapt.py open --project {P} --dataset <parent> --snapshot <frozen> --consumer-stage training
@@ -212,5 +212,5 @@ is the loop and the record, not the transform.
   where the new dataset lands on the line. After a Step 2b campaign that ended
   `degraded_to_rework`, `/data-label` for the rework round the unresolved findings describe.
 
-Per `lifecycle/references/skill-graph.md` -> "Workflow State Protocol", push on entry and pop on exit. `stage: "curate"` when the
+Per `references/skill-graph.md` -> "Workflow State Protocol", push on entry and pop on exit. `stage: "curate"` when the
 transform runs as an MLClaw run, `execution: <run_id>`; `stage: null` when it does not.

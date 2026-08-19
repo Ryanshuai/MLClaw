@@ -17,7 +17,7 @@ import unittest
 
 from helpers import REPO_ROOT
 
-GATE = os.path.join(REPO_ROOT, "lifecycle", "scripts", "train-run", "provenance_gate.py")
+GATE = os.path.join(REPO_ROOT, "scripts", "train-run", "provenance_gate.py")
 
 
 def project(unresolved, source_mode="inherited", write=True):

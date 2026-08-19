@@ -1,5 +1,5 @@
 {
-  "_comment": "The experiment graph — one card per proposal, and the only order-of-work truth. Ported from the arch-transplant skill's `references/experiment-graph.md`, whose version lived in a markdown design doc and whose seven invariants said \"scan periodically\" with nothing scanning. `lifecycle/scripts/explore/graph.py check` is that scanner; this file is what it reads.\n\nA card is NOT a run. The arm that verifies a card is an ordinary training run in `stages/training/runs/`, cited here by `run_id` — same boundary `/data-curate` draws for a conversion and `adaptation` draws for a converter. Nothing in the explore stage executes.",
+  "_comment": "The experiment graph — one card per proposal, and the only order-of-work truth. Ported from the arch-transplant skill's `references/experiment-graph.md`, whose version lived in a markdown design doc and whose seven invariants said \"scan periodically\" with nothing scanning. `scripts/explore/graph.py check` is that scanner; this file is what it reads.\n\nA card is NOT a run. The arm that verifies a card is an ordinary training run in `stages/training/runs/`, cited here by `run_id` — same boundary `/data-curate` draws for a conversion and `adaptation` draws for a converter. Nothing in the explore stage executes.",
 
   "schema_version": 1,
   "stage": "exploration",

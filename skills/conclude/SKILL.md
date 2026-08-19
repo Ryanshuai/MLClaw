@@ -43,7 +43,7 @@ description: >
 项目级，不在 `stages/` 下面：一条结论比产生它的那次 exploration 活得久，而且可能来自 eval、
 tune 或 audit。
 
-脚本 `<mlclaw_root>/lifecycle/scripts/conclude/conclude.py`，九个动词：
+脚本 `<mlclaw_root>/scripts/conclude/conclude.py`，九个动词：
 `new | add | evidence | set | refute | supersede | check | status | render`。
 
 ## ‼️ `status` 和 `tier` 是算出来的，不是写的

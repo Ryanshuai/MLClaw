@@ -17,7 +17,7 @@ respect that decides the whole design: **a checkpoint deleted by mistake costs a
 deleted by mistake is gone.** 260731 cannot be re-shot.
 
 ```bash
-S=<mlclaw_root>/lifecycle/scripts/data-retire/retire.py
+S=<mlclaw_root>/scripts/data-retire/retire.py
 
 python $S plan  --project <p> --dataset <d> --at <location key> \
                 [--unit U ...| --units-from <f>] [--waive <reason>] [--because "..."]
@@ -122,5 +122,5 @@ plan does, so read the plan.
 - **Suggests**: `/data-check scan` again afterwards, so the census reflects the disk; then `/data`,
   which will now report anything the deletion pushed below its replication floor.
 
-Per `lifecycle/references/skill-graph.md` -> "Workflow State Protocol", push on entry and pop on exit. `stage: null`,
+Per `references/skill-graph.md` -> "Workflow State Protocol", push on entry and pop on exit. `stage: null`,
 `execution: <retire_id>`.

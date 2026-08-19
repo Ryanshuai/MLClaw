@@ -37,11 +37,11 @@ README = os.path.join(REPO_ROOT, "README.md")
 # only; detail lives in these, read on demand. A citation may target any of them.
 DOC_FILES = {
     "CLAUDE.md": CLAUDE_MD,
-    "run-mechanics.md": os.path.join(REPO_ROOT, "lifecycle", "references", "run-mechanics.md"),
-    "layout.md": os.path.join(REPO_ROOT, "lifecycle", "references", "layout.md"),
-    "skill-graph.md": os.path.join(REPO_ROOT, "lifecycle", "references", "skill-graph.md"),
-    "data-line.md": os.path.join(REPO_ROOT, "lifecycle", "references", "data-line.md"),
-    "fleet.md": os.path.join(REPO_ROOT, "lifecycle", "references", "fleet.md"),
+    "run-mechanics.md": os.path.join(REPO_ROOT, "references", "run-mechanics.md"),
+    "layout.md": os.path.join(REPO_ROOT, "references", "layout.md"),
+    "skill-graph.md": os.path.join(REPO_ROOT, "references", "skill-graph.md"),
+    "data-line.md": os.path.join(REPO_ROOT, "references", "data-line.md"),
+    "fleet.md": os.path.join(REPO_ROOT, "references", "fleet.md"),
 }
 LAYOUT_MD = DOC_FILES["layout.md"]
 CONTRACTS_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -159,7 +159,7 @@ def actual_dirs(root):
         if not filenames:
             continue
         rel = os.path.relpath(dirpath, root).replace(os.sep, "/")
-        # Every ancestor too: `skills` and `lifecycle/scripts` hold only
+        # Every ancestor too: `skills` and `scripts` hold only
         # subdirectories, and they are real declared entries. What is being
         # excluded is a subtree with no file anywhere in it, not a container.
         while rel != ".":
@@ -399,7 +399,7 @@ class CitationsResolve(unittest.TestCase):
                         offenders.append(f"{os.path.relpath(path, REPO_ROOT)}:{n}")
         self.assertEqual(offenders, [],
                          "hand-written jq over the run tree — call "
-                         "lifecycle/scripts/shared/list_runs.py instead")
+                         "scripts/shared/list_runs.py instead")
 
     def test_every_contract_file_cites_something(self):
         uncited = []
@@ -433,10 +433,10 @@ def report():
 
 class ScriptPathsAreResolvedNotAssumed(unittest.TestCase):
     """CLAUDE.md -> "Script Integration": scripts are invoked via
-    `python <mlclaw_root>/lifecycle/scripts/…`, and `<mlclaw_root>` is resolved
+    `python <mlclaw_root>/scripts/…`, and `<mlclaw_root>` is resolved
     by `shared/workspaces.py tool` rather than assumed.
 
-    A bare `python lifecycle/scripts/…` is correct only when the working
+    A bare `python scripts/…` is correct only when the working
     directory happens to be this repo. That is a live question — the skills are
     also discoverable from `~/.claude/skills/`, where the working directory is
     whatever the user is standing in.
@@ -453,7 +453,7 @@ class ScriptPathsAreResolvedNotAssumed(unittest.TestCase):
     """
 
     ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    BARE = re.compile(r"python3? lifecycle/scripts/")
+    BARE = re.compile(r"python3? scripts/")
 
     def _docs(self):
         for sub in ("*/SKILL.md", "*/references/*.md"):
@@ -467,19 +467,19 @@ class ScriptPathsAreResolvedNotAssumed(unittest.TestCase):
                     if self.BARE.search(line):
                         bad.append(f"{os.path.relpath(path, self.ROOT)}:{n}")
         self.assertEqual(bad, [], "invoke scripts as "
-                                  "`python <mlclaw_root>/lifecycle/scripts/…` — a "
+                                  "`python <mlclaw_root>/scripts/…` — a "
                                   "cwd-relative path fails silently into the "
                                   "manual fallback")
 
     def test_the_resolver_it_points_at_exists(self):
         """A convention naming a tool that is not there is worse than none."""
         self.assertTrue(os.path.exists(os.path.join(
-            self.ROOT, "lifecycle", "scripts", "shared", "workspaces.py")))
+            self.ROOT, "scripts", "shared", "workspaces.py")))
 
     def test_claude_md_states_the_resolved_form(self):
         with open(os.path.join(self.ROOT, "CLAUDE.md"), encoding="utf-8") as f:
             claude = f.read()
-        self.assertIn("<mlclaw_root>/lifecycle/scripts/", claude)
+        self.assertIn("<mlclaw_root>/scripts/", claude)
 
 
 if __name__ == "__main__":

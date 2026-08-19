@@ -9,7 +9,7 @@ One-time project setup. Creates directory structure, `project.json`, and stage c
 
 Ask one question at a time — multiple questions at once overwhelms users. **And only what only they know** — a value you can read is not a question, and a value nobody has is recorded absent rather than asked for: CLAUDE.md "Decide what evidence can decide".
 
-Follow `lifecycle/references/skill-graph.md` -> "Workflow State Protocol": push on entry, update step as you progress, pop on completion.
+Follow `references/skill-graph.md` -> "Workflow State Protocol": push on entry, update step as you progress, pop on completion.
 
 ## Conversation flow
 
@@ -45,8 +45,8 @@ Each stage has: `enabled`, `code_path` (`stages/{stage}/code`), `code_source` (`
 ## Create project
 
 ```
-MLCLAW_ROOT=$(python <repo>/lifecycle/scripts/shared/workspaces.py tool)
-python "$MLCLAW_ROOT/lifecycle/scripts/project-init/init_project.py" '<project_json_string>' "$MLCLAW_ROOT"
+MLCLAW_ROOT=$(python <repo>/scripts/shared/workspaces.py tool)
+python "$MLCLAW_ROOT/scripts/project-init/init_project.py" '<project_json_string>' "$MLCLAW_ROOT"
 ```
 
 Creates directories, copies templates, writes `.gitignore`, runs git init + initial commit. `$HOME`-relative paths (project root, workspace, each stage's `code_source.path`) are rewritten to `~/`-prefixed form in `project.json` so the file survives rsync across machines.
@@ -55,10 +55,10 @@ Creates directories, copies templates, writes `.gitignore`, runs git init + init
 
 ## Clone / Link code
 
-The unified contract (see `lifecycle/references/layout.md` "Code Source Resolution") is `code_dir = stages/{stage}/code/_source if exists else stages/{stage}/code`. Per source mode:
+The unified contract (see `references/layout.md` "Code Source Resolution") is `code_dir = stages/{stage}/code/_source if exists else stages/{stage}/code`. Per source mode:
 
 - **Git URL** (`code_source.source == "github"`): `git clone <code_source.path>` into `stages/{stage}/code/`, record `branch` + `commit` (HEAD SHA) in `project.json`, remove `.git` so the code becomes plain files tracked by project git. No `_source` symlink for this mode.
-- **Local path** (`code_source.source == "local"`): `init_project.py` already creates the symlink `stages/{stage}/code/_source -> expanduser(code_source.path)` during creation. **Do not copy — the user iterates in their own repo, copy creates bidirectional sync friction**. Reproducibility comes from `code_snapshot.py` at run-time, not from a project-wide copy. After rsync to a new machine the symlink will dangle (it stores an expanded absolute path); repair every stage at once with `python <mlclaw_root>/lifecycle/scripts/shared/relink_sources.py <project_root>`. It is idempotent, and it refuses rather than replacing a real directory that has taken the `_source` slot — which a hand-written `ln -sfn` would silently clobber.
+- **Local path** (`code_source.source == "local"`): `init_project.py` already creates the symlink `stages/{stage}/code/_source -> expanduser(code_source.path)` during creation. **Do not copy — the user iterates in their own repo, copy creates bidirectional sync friction**. Reproducibility comes from `code_snapshot.py` at run-time, not from a project-wide copy. After rsync to a new machine the symlink will dangle (it stores an expanded absolute path); repair every stage at once with `python <mlclaw_root>/scripts/shared/relink_sources.py <project_root>`. It is idempotent, and it refuses rather than replacing a real directory that has taken the `_source` slot — which a hand-written `ln -sfn` would silently clobber.
 - **Server** (`code_source.source == "server"`): `scp` into `stages/{stage}/code/`, no `_source` symlink.
 
 Code modifications during runs stay in project git (for github/server) or are captured per-run via `code_snapshot.py` SHA + dirty patch (for local) — never pushed back to the original repo.

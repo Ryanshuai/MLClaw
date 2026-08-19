@@ -18,7 +18,7 @@ path on it, pull.** What earns it a skill rather than a remembered `rsync` line 
 which resource, which session, how much arrived, and whether the transfer actually finished.
 
 ```bash
-S=<mlclaw_root>/lifecycle/scripts/data-collect/collect.py
+S=<mlclaw_root>/scripts/data-collect/collect.py
 python $S plan   --project <p> --from <resource> --at <path> --into <dir>
 python $S pull   --project <p> --from <resource> --at <path> --into <dir> [--session <s>] [--rig <r>]
 python $S status --project <p> [--root <dir>]
@@ -108,6 +108,6 @@ tailnet IP through it. Same split as `rig.json -> host.server` and `/data-label`
   is; this skill pulls once somebody knows. A `verified` lead is exactly what `--from` / `--at` need.
   Don't go hunting from here — that is a sweep, and there is one.
 
-Per `lifecycle/references/skill-graph.md` -> "Workflow State Protocol", push on entry and pop on exit. `stage: null`,
+Per `references/skill-graph.md` -> "Workflow State Protocol", push on entry and pop on exit. `stage: null`,
 `execution: <session>`; `step` is `plan` / `pull`. A long pull is the one thing here that can be
 interrupted — on resume just re-run `pull`, which is incremental by construction.

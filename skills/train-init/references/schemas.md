@@ -233,7 +233,7 @@ how a stale local copy gets picked over the real thing.
 **`dataset:` is the only location that is a citation rather than a path**, and it is the one to prefer when it exists. Every other value names bytes somewhere; this one names a *frozen membership set* — 1240 specific units, pinned against a census, with the unverified ones counted. `path` stays empty on purpose: the paths are derived, not stored, by
 
 ```bash
-python <mlclaw_root>/lifecycle/scripts/data-check/census.py resolve \
+python <mlclaw_root>/scripts/data-check/census.py resolve \
   --project {PROJECT} --dataset boxes --snapshot v3 \
   --at nas --layer rgbd --layer gt \
   --out {RUN_DIR}/data_resolved.jsonl
@@ -281,7 +281,7 @@ For items inherited from someone else — a handed-over checkpoint, a paper's re
 | `claimed` | the author's / wandb's recorded number, not re-checked |
 | `asked` | told verbally, no artifact backs it |
 
-**`scope` and `confidence` are both required.** Without scope, the number can't be compared to anything (see `lifecycle/references/run-mechanics.md` "Metric comparability"). Without confidence, a `claimed` number gets treated as ground truth — and inherited unverified metrics are the most damaging fake metrics there are, because everything downstream is calibrated against them. Authors misremember, hand over the wrong file, or forget TTA was enabled.
+**`scope` and `confidence` are both required.** Without scope, the number can't be compared to anything (see `references/run-mechanics.md` "Metric comparability"). Without confidence, a `claimed` number gets treated as ground truth — and inherited unverified metrics are the most damaging fake metrics there are, because everything downstream is calibrated against them. Authors misremember, hand over the wrong file, or forget TTA was enabled.
 
 **Promote `claimed` → `verified` by re-running eval with this ckpt.** That single run validates the preprocessing chain, the data, the metric definition, and the environment simultaneously — it's the best acceptance test a handover has. Record the verifying run's ID in `source` when you do.
 
@@ -358,7 +358,7 @@ What happens to an input before the model sees it. Read out of code, so every bl
 `log_format` names **the source** — what the training code itself writes. It says
 nothing about what `/train-run` reads: that is always the normalized stream at
 `<RUN_DIR>/stream.jsonl`, one shape regardless of source. See
-`lifecycle/references/run-mechanics.md` → "Metric stream" for the vocabulary and
+`references/run-mechanics.md` → "Metric stream" for the vocabulary and
 the normalizer's rules.
 
 | Value | What the code does | Normalizer |

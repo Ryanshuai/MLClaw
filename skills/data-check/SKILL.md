@@ -66,7 +66,7 @@ Confirm the file before writing it, per CLAUDE.md "Confirm before saving".
 ## Step 2 — Scan
 
 ```bash
-S=<mlclaw_root>/lifecycle/scripts/data-check/census.py
+S=<mlclaw_root>/scripts/data-check/census.py
 python $S scan     --project <p> --dataset <d> [--allow-unreachable]
 python $S show     --project <p> --dataset <d> [--census <id>] [--units]
 python $S snapshot --project <p> --dataset <d> --id <sid> [--layer <l>] [--at <loc>]
@@ -236,7 +236,7 @@ behind it was right.
   training run cites a snapshot and this skill does not make one. On INCOMPLETE or UNARCHIVED,
   nothing — those are the user's to act on, and offering a next skill buries them.
 
-Per `lifecycle/references/skill-graph.md` -> "Workflow State Protocol", push to the stack on entry and pop on exit. Use
+Per `references/skill-graph.md` -> "Workflow State Protocol", push to the stack on entry and pop on exit. Use
 `stage: null` and `execution: <census_id>` once a scan has run; `step` is one of `declare` / `scan`
 / `snapshot`. **Pop before reporting a long verdict list** — a census is not unfinished work, and
 leaving it on the stack opens the next session with a false resume prompt.

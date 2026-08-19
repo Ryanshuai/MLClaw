@@ -31,7 +31,7 @@ bills, but the hold is real. Callers never branch on rented-vs-owned.
 ## For orchestrating skills (L3)
 
 ```bash
-S=lifecycle/scripts/lease
+S=scripts/lease
 python $S/lease.py capacity --gpu-count 1 --gpu-memory-gb 80 --arch-min sm_90
 python $S/lease.py up --provider <p> --machine-type <s> --ttl-s <n> --price-hr <f> \
                       --run <run_id> --project <name>     # -> lease_id + reach://
@@ -40,17 +40,17 @@ python $S/lease.py renew   <lease_id> --ttl-s <n>
 python $S/lease.py release <lease_id>
 ```
 
-`up` returns a `reach://` handle; from there proceed exactly as `lifecycle/references/run-mechanics.md` "Path Mapping (Cross-Machine Execution)" and
+`up` returns a `reach://` handle; from there proceed exactly as `references/run-mechanics.md` "Path Mapping (Cross-Machine Execution)" and
 `/train-run` Execution Modes already specify. Nothing downstream may branch on provider name.
 
 **Re-resolve with `addr` rather than storing what `up` returned.** A stop/start hands the
 box a different address and hands the old one to somebody else; with relaxed host-key
 checking, ssh then connects to a stranger's machine without complaining.
 
-**Holding several at once is not this layer's job.** `lifecycle/scripts/shared/pool.py`
+**Holding several at once is not this layer's job.** `scripts/shared/pool.py`
 is the caller above — it fills owned hardware before anything that bills, states the cost
 of the whole fleet once before acquiring it, and knows that a preempted trial is not a
-refuted one. `lifecycle/references/fleet.md` is its authority; read that, not this file,
+refuted one. `references/fleet.md` is its authority; read that, not this file,
 before a search opens more than one machine.
 
 **What L3 owns, and L2 deliberately does not:**

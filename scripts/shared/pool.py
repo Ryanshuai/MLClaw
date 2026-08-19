@@ -3,7 +3,7 @@
 
   /train-tune, /explore    ->  pool.py  ->  lease.py  ->  provider_<name>.py
 
-Read `lifecycle/references/fleet.md` before changing anything here; every rule this file
+Read `references/fleet.md` before changing anything here; every rule this file
 implements is stated there with what it costs when broken. The short version:
 
   * a **slot** is one trial's worth of compute, not one machine. An 8-GPU box is eight

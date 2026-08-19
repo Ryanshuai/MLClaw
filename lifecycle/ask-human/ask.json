@@ -1,5 +1,5 @@
 {
-  "_comment": "One question or request put to a person, and what came back. Written by lifecycle/scripts/ask-human/ask.py; this template documents the shape and is what a manual fallback must reproduce. Lives flat at {PROJECT}/asks/{ask_id}.json — one file, no directory, because an ask holds no attachments. Like a handoff it has no `steps` block: the work happens in somebody's head and inbox, not in a process MLClaw can step through.",
+  "_comment": "One question or request put to a person, and what came back. Written by scripts/ask-human/ask.py; this template documents the shape and is what a manual fallback must reproduce. Lives flat at {PROJECT}/asks/{ask_id}.json — one file, no directory, because an ask holds no attachments. Like a handoff it has no `steps` block: the work happens in somebody's head and inbox, not in a process MLClaw can step through.",
 
   "ask_id": "ask_{YYYYMMDD}_{HHmmss}",
   "project": "",

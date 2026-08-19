@@ -775,7 +775,7 @@ class EveryAdapterDeclaresItsLimits(unittest.TestCase):
     trusts before it has ever made a call.
     """
 
-    LEASE_DIR = os.path.join(REPO_ROOT, "lifecycle", "scripts", "lease")
+    LEASE_DIR = os.path.join(REPO_ROOT, "scripts", "lease")
     VERBS = ("capacity", "up", "addr", "state", "down", "renew", "sweep", "history")
 
     @classmethod
@@ -871,7 +871,7 @@ class TableProvenance(unittest.TestCase):
     """
 
     def setUp(self):
-        with open(os.path.join(REPO_ROOT, "lifecycle", "scripts", "lease",
+        with open(os.path.join(REPO_ROOT, "scripts", "lease",
                                "machines_nebius.json")) as fh:
             self.table = json.load(fh)
 
@@ -908,13 +908,13 @@ class TableProvenance(unittest.TestCase):
         out of a repo that is not the never-committed file."""
         pattern = ("tenant-e0", "project-e0", "project-u0", "project-i0",
                    "vpcsubnet-", "vpcnetwork-", "computeinstance-e0", "useraccount-e0")
-        targets = [os.path.join(REPO_ROOT, "lifecycle", "scripts", "lease", f)
+        targets = [os.path.join(REPO_ROOT, "scripts", "lease", f)
                    for f in sorted(os.listdir(
-                       os.path.join(REPO_ROOT, "lifecycle", "scripts", "lease")))
+                       os.path.join(REPO_ROOT, "scripts", "lease")))
                    if f.endswith((".py", ".json"))]
-        targets += [os.path.join(REPO_ROOT, "lifecycle", "scripts", "shared", "pool.py"),
+        targets += [os.path.join(REPO_ROOT, "scripts", "shared", "pool.py"),
                     os.path.join(REPO_ROOT, "lifecycle", "resources.json"),
-                    os.path.join(REPO_ROOT, "lifecycle", "references", "fleet.md")]
+                    os.path.join(REPO_ROOT, "references", "fleet.md")]
         for path in targets:
             rel = os.path.relpath(path, REPO_ROOT)
             with self.subTest(file=rel):

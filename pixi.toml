@@ -32,7 +32,7 @@ python = "*"
 # `discover.py`'s service-family probes shell out to `sys.executable`, so the
 # packages have to be importable by the interpreter running discover.py — which is
 # exactly why they belong in a named environment rather than in `default`. Run the
-# probes with `pixi run -e probes python lifecycle/scripts/discover/discover.py …`
+# probes with `pixi run -e probes python scripts/discover/discover.py …`
 # and the stdlib-only guarantee still holds everywhere else.
 #
 # mlflow is deliberately absent: its listing is urllib-only REST, which is why it
@@ -47,4 +47,4 @@ probes = ["probes"]
 
 [tasks]
 test = "python -m unittest discover -s contracts -t contracts -p 'contract_*.py'"
-compile = "python -m compileall -q lifecycle/scripts contracts"
+compile = "python -m compileall -q scripts contracts"

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Canonical run listing for MLClaw — the `mode` filter cannot be forgotten.
 
-`run.json -> mode` is a correctness filter, not a display field (lifecycle/references/run-mechanics.md
+`run.json -> mode` is a correctness filter, not a display field (references/run-mechanics.md
 "Metric comparability"): a debug mAP over 20 images and a production mAP over
 5000 are different quantities sharing a name. Mixing them produces a *fake
 comparison* — nothing errors, no data is missing, and a wrong conclusion gets
@@ -30,7 +30,7 @@ The contract
    within one scope, filter the returned entries by `scope_key`.
 5. A malformed `run.json` becomes an `errors` entry, never a dead scan.
 
-No cache (lifecycle/references/run-mechanics.md "Listing runs (no separate index)") — the `run.json` files
+No cache (references/run-mechanics.md "Listing runs (no separate index)") — the `run.json` files
 are the source of truth and are rescanned per call.
 
     query_comparable_runs(root, *, mode, ...)    -> result   # the main door
@@ -367,7 +367,7 @@ def list_all_modes_not_comparable(root, stage=None, status=None, session="*",
     report["warnings"].insert(0, (
         "MODE FILTER OFF — these entries mix %s workloads. Use for listing and "
         "menus only; do not rank, diff, or aggregate their metrics. See "
-        "lifecycle/references/run-mechanics.md 'Metric comparability'." % mixed))
+        "references/run-mechanics.md 'Metric comparability'." % mixed))
     return report
 
 

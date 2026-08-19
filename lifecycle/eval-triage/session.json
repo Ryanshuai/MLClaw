@@ -1,5 +1,5 @@
 {
-  "_comment": "One triage of one eval run's bad cases: what was ranked, who looked, what each case turned out to be, and where it was sent. Written by lifecycle/scripts/eval-triage/triage.py; this template documents the shape and is what a manual fallback must reproduce. Lives at {PROJECT}/stages/evaluation/runs/{run_id}/triage/{session_id}/session.json — under the run, because a bad case is a property of one model measured on one set, unlike a repro session which spans two stages. Like a handoff it has no `steps` block: the work is somebody looking at images, and there is no process MLClaw can step through.",
+  "_comment": "One triage of one eval run's bad cases: what was ranked, who looked, what each case turned out to be, and where it was sent. Written by scripts/eval-triage/triage.py; this template documents the shape and is what a manual fallback must reproduce. Lives at {PROJECT}/stages/evaluation/runs/{run_id}/triage/{session_id}/session.json — under the run, because a bad case is a property of one model measured on one set, unlike a repro session which spans two stages. Like a handoff it has no `steps` block: the work is somebody looking at images, and there is no process MLClaw can step through.",
 
   "session_id": "triage_{YYYYMMDD}_{HHmmss}",
   "project": "",

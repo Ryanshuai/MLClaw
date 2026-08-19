@@ -134,7 +134,7 @@ kind, and why tier 2 must stay out of the citation grammar.
 
 Not a skill, not a service.
 
-`lifecycle/scripts/shared/cite.py` — one parser, one `KINDS` table, one `cited_by` walk — plus
+`scripts/shared/cite.py` — one parser, one `KINDS` table, one `cited_by` walk — plus
 `contracts/contract_identity.py` citing `layout.md`'s identity section. The repo has run this
 exact play four times (`shared/compare.py`, `shared/_records.py`,
 `contract_candidate_match.py`, and `contract_docs.py`'s grep that *forbids a hand-rolled

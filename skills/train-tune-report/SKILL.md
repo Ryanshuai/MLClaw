@@ -31,7 +31,7 @@ do reasoning, but humans read this to understand what happened.
 
 ## On entry
 
-Follow `lifecycle/references/skill-graph.md` -> "Workflow State Protocol". Stage = `training`. Upstream check:
+Follow `references/skill-graph.md` -> "Workflow State Protocol". Stage = `training`. Upstream check:
 at least one run with `lineage.session = <id>` must exist.
 
 ## Step 1: Resolve Session
@@ -44,7 +44,7 @@ If no session exists at all: tell the user, exit. (Don't create one — that's `
 ## Step 2: Collect Runs
 
 ```bash
-python <mlclaw_root>/lifecycle/scripts/shared/list_runs.py <project_root> --stage training --mode production \
+python <mlclaw_root>/scripts/shared/list_runs.py <project_root> --stage training --mode production \
     --session <session_id> --sort created_at --asc
 ```
 

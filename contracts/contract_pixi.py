@@ -160,11 +160,11 @@ class EveryThirdPartyImportIsOptional(unittest.TestCase):
         been wrong.
 
         The criterion is computable and always current: a sibling `.py` under
-        `lifecycle/scripts/` or `contracts/` is repo-local by construction, since
+        `scripts/` or `contracts/` is repo-local by construction, since
         that is exactly what `sys.path.insert` makes importable.
         """
         names = set()
-        for base in ("lifecycle/scripts", "contracts"):
+        for base in ("scripts", "contracts"):
             for dirpath, _d, files in os.walk(os.path.join(REPO_ROOT, base)):
                 if "__pycache__" in dirpath:
                     continue
@@ -240,7 +240,7 @@ class EveryThirdPartyImportIsOptional(unittest.TestCase):
         allowed = stdlib | self._repo_local_modules() | {"__future__"}
 
         unguarded, optional = {}, {}
-        for base in ("lifecycle/scripts", "contracts"):
+        for base in ("scripts", "contracts"):
             for dirpath, _d, files in os.walk(os.path.join(REPO_ROOT, base)):
                 if "__pycache__" in dirpath:
                     continue

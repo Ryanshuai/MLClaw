@@ -43,7 +43,7 @@ Nothing here knows that production data is date-partitioned, that a unit is a di
 ## The script
 
 ```bash
-S=<mlclaw_root>/lifecycle/scripts/data-online-sample/online.py
+S=<mlclaw_root>/scripts/data-online-sample/online.py
 
 python $S declare --project <p> --dataset <d> --resource <r> --kind server|s3|local \
                   --partition strftime|flat|external [--pattern 'inputs/%Y/%m/%d'] \
@@ -102,4 +102,4 @@ Per prefix: it did not answer / it answered and the prefix is not there / it ans
 - **Requires**: `datasets/<id>/dataset.json` (the identity contract both sides count with), plus `resources.json` when the source is a server. A frozen snapshot is *not* required to take a reading — only to compare one.
 - **Suggests**: a drift comparison against a frozen snapshot; `/data-collect --cite-window` when the interesting units are worth pulling and labeling; `/ask-human` for a `decision` when `retain_until` or vendor access is in question.
 
-Per `lifecycle/references/skill-graph.md` -> "Workflow State Protocol", push on entry and pop on exit. `stage: null`, `execution: null` — a reading is a dated observation, not an execution to resume, so there is no step chain and nothing to continue from.
+Per `references/skill-graph.md` -> "Workflow State Protocol", push on entry and pop on exit. `stage: null`, `execution: null` — a reading is a dated observation, not an execution to resume, so there is no step chain and nothing to continue from.

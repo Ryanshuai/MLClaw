@@ -57,7 +57,7 @@ checkpoint 留下 —— 同一条中止条件,只不过执行删除的是「机
 
 ## 顺序不能换
 
-脚本 `<mlclaw_root>/lifecycle/scripts/evacuate/evacuate.py`，七个动词：
+脚本 `<mlclaw_root>/scripts/evacuate/evacuate.py`，七个动词：
 
 ```
 plan → freeze → push → verify → bundle → clearance      (+ status)

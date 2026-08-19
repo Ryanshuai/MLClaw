@@ -122,7 +122,7 @@ class TheBoardComputesNothing(BoardCase):
     """
 
     def src(self):
-        board = os.path.join(REPO_ROOT, "lifecycle", "scripts", "data-report", "board.py")
+        board = os.path.join(REPO_ROOT, "scripts", "data-report", "board.py")
         with open(board, encoding="utf-8") as f:
             return f.read()
 

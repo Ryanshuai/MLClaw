@@ -265,7 +265,7 @@ class Workload(unittest.TestCase):
     def test_run_mechanics_documents_every_field(self):
         """The template and the rule that tells skills to fill it must not drift.
         A field no document mentions is a field no skill writes."""
-        with open(os.path.join(REPO_ROOT, "lifecycle", "references",
+        with open(os.path.join(REPO_ROOT, "references",
                                "run-mechanics.md"), encoding="utf-8") as f:
             doc = f.read()
         missing = [k for k in self.FIELDS if f"`{k}`" not in doc]

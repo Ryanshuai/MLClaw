@@ -106,7 +106,7 @@ class TheLayersAreARAsPlusTheOneItDoesNotHave(AraCase):
         import importlib.util
         spec = importlib.util.spec_from_file_location(
             "ara_mod", os.path.join(os.path.dirname(os.path.dirname(
-                os.path.abspath(__file__))), "lifecycle", "scripts", "ara", "ara.py"))
+                os.path.abspath(__file__))), "scripts", "ara", "ara.py"))
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
         self.assertEqual(mod.classify("logs/train.log"), "evidence")
@@ -167,7 +167,7 @@ class AnArtifactWithoutItsInputIsABackup(AraCase):
 
 
 class ReproducibilityIsReadNotClaimed(AraCase):
-    """`lifecycle/references/run-mechanics.md` -> "Record integrity", the code
+    """`references/run-mechanics.md` -> "Record integrity", the code
     snapshot contract: `reproducible: false` means a differing file was not
     embedded, so `git checkout && git apply` rebuilds a DIFFERENT tree.
 
@@ -309,7 +309,7 @@ class AnArtifactNeedsNoMachine(AraCase):
 
 
 class AnArtifactIsADatedReadingNotAFile(AraCase):
-    """`lifecycle/references/layout.md` — `census/census_{ts}.json`,
+    """`references/layout.md` — `census/census_{ts}.json`,
     `evacuations/evac_{ts}/`, `retire/retire_{ts}.json`: everything in MLClaw
     that GOES AND LOOKS is dated and kept. And CLAUDE.md's reason, from
     `/conclude`: 「what was believed at the time is what explains the runs
