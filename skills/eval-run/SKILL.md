@@ -48,7 +48,16 @@ Follow `lifecycle/references/run-mechanics.md` "Run Skill Internal Dependencies"
 - Run synchronously, stream output.
 - On failure: diagnose, propose fix, ask "Apply and re-run?". On success: show debug metrics with caveat ("on N samples — expect different on full dataset"), ask "production / retry / inspect?"
 
-**Production mode** — ask local or server:
+**Production mode.** ‼️ **First the audit gate**, before asking local or server:
+
+```
+python <mlclaw_root>/lifecycle/scripts/data-audit/audit_gate.py check \
+    --project {PROJECT} --stage evaluation --mode production
+```
+
+Exit 1 is the answer. Route **by state, never generically**: `fatal` → whatever the audit's own suggestion said (a `/data-label` rework · a `/data-curate` conversion · `/data-freeze` for a corrected snapshot — never fix a label in place) · `never_audited` / `unverifiable` → run `/data-audit`, or just the missing layer · `stale` → re-audit the snapshot this run cites · `unresolved` → this run reads a path rather than a frozen snapshot, so no audit can have covered it. `--waive <id>` launches and stamps it into `run.json`.
+
+Then ask local or server:
 - **Local**: run in background (`run_in_background`), log to `{RUN_DIR}/logs/`. Return immediately so the user can continue working. They can check back with `/eval-run` again, or `/loop 5m /eval-run` for auto-polling.
 - **Remote**: resolve server from resources.json, use `python_path` from server entry. SCP config + run.sh to server, launch in tmux. Return immediately.
 

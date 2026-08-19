@@ -167,6 +167,17 @@ verdict, every finding with its file and record locator, the sample sizes, and w
 why. **A skipped check is a recorded field, never an absent one** — an audit missing its
 compatibility section reads identically to one that passed it.
 
+**The per-layer verdict is a fixed key, because a consumer reads it.** `audit.json -> layers` maps each
+layer to `{verdict, ...}`, and `verdict` is one of `FATAL` / `WARN` / `INFO` / `SKIP` — the same
+vocabulary the display below already prints. Also record `audited_at` (UTC, explicit offset) and
+`snapshot`, the snapshot this audit judged.
+
+Those three fields are what `audit_gate.py` reads before a production run, and the gate is why the
+`SKIP` rule above stops being advice: an audit with no `layers` map is ruled `unreadable`, and a layer
+that is `SKIP` or simply missing makes the dataset `unverifiable` — **never clean**. An audit whose
+`snapshot` differs from the one a run cites is `stale`: a verdict about different bytes. Everything
+else in this file is yours to shape per format; these three are not.
+
 ```
 Audit  boxes @ 260731   vs stages/training code
   [FATAL] compatibility : class list has 81 entries, model config says 80
@@ -179,7 +190,13 @@ Audit  boxes @ 260731   vs stages/training code
 The last two lines carry most of this skill's value and neither is a count: one connects a schema
 change to the fatal it caused, the other says what the audit did **not** look at.
 
-## Why there is no script
+## Why the AUDIT has no script — and why the GATE does
+
+`lifecycle/scripts/data-audit/` holds exactly one file, `audit_gate.py`, and it is not an
+auditor. It is the **consumer's** check: it reads the `layers` verdict map a finished audit
+wrote and refuses a production run whose data is `fatal` / `never_audited` / `unverifiable` /
+`stale` / `unreadable`. That is format-independent by construction — it never opens a sample.
+The argument below is about the checks themselves, and it still holds in full.
 
 Every other skill on this line calls one. This one writes its checks per audit, and the deviation is
 deliberate: the checks are a function of the format, and there is no format. COCO, YOLO, VOC, a

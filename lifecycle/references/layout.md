@@ -206,6 +206,8 @@ lifecycle/
       online.py                     ← declare / sample / status; uniform only, a reading nobody can retake
     data-check/
       census.py                     ← scan / show / snapshot / resolve / status; three states, never two
+    data-audit/
+      audit_gate.py                 ← check; the ONLY script on this skill, and it is the consumer's not the auditor's — five states, and `never_audited` is not `clean`
     data-curate/
       curate.py                     ← plan / register / trace; derived_from, checked against the run
     data-retire/
