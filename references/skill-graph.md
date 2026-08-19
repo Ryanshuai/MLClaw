@@ -109,7 +109,7 @@ level up: `skills/explore/references/experiment-graph.md` → TAKE.
 | `/train-run` | train-init done. **A fine-tune also requires an evaluation stage** — the base must be measured on this run's data before launch, and that is `/eval-run`'s to perform, not this skill's. No eval stage → route to `/eval-init`, never measure it by hand here | `/eval-run`, `/train-tune` |
 | `/train-tune` | train-init done, ≥1 prior train-run completed, **and the architecture settled** — the search varies `runtime_params` on a model that is no longer in question. If it still is, the search is `/explore`'s; see "`/train-tune` vs `/explore`" below | `/train-tune-report` (auto at close) |
 | `/explore` | project.json, code available, **a declared corpus** (`datasets/<id>/dataset.json` + a frozen snapshot). Calls `/eval-run` for the noise floor and `/discover` when sourcing a paper's code | `/train-run` or `/eval-run` (open an arm), then **`/train-tune` — after the architecture settles, never before**: tuning hyperparameters around a component you are about to remove spends the budget twice. A *scoped* tune inside one arm, to give a ported component a fair operating point, is not that and does not wait — it is part of the arm, its result belongs to the card rather than to the model, and the control arm gets the same budget |
-| `/train-tune-report` | a tune session with ≥1 run | (done) |
+| `/train-tune-report` | a tune session with ≥1 run | **`/conclude`, then `/ara`** — a tune session ends in a belief ("this axis is flat past 3e-4") as surely as an arm does, and its `chain.md` is a `trace/` record like any other. Without this edge the training line stopped at a rendered report and nothing ever assembled the round |
 | `/ara` | ≥1 finished run. `/conclude` first if the round produced a belief — an artifact with no `logic/` layer is a directory of runs with a cover page | (done). **`/explore` routes here at close**, after `/conclude` |
 | `/evacuate` | a machine with work on it, and somewhere durable to put it (`resources.json -> aws.s3_bucket`). **Runs BEFORE `/lease release` or `pool.py release`, never after** — after is not a workflow, it is an archaeology | `/lease` (release, now safe), `/conclude` (the bundle's `logic/` layer is its output) |
 | `/conclude` | ≥1 record worth citing — a completed run, a closed graph card, an audit. Nothing else: a conclusion cites, it does not produce | (done). **`/explore` routes here at close**, and so should any round that ended in a belief rather than a number |
@@ -190,6 +190,12 @@ around, and nothing in the record says so afterwards.
 | What holds still | code SHA + dataset + split + mode + scope — the comparability contract that makes trials one *series* | nothing by construction: each arm is judged against its own control and a measured noise floor |
 | Output | a config | a decision about what the model is — and a `/conclude` belief, because a winning arm is a result, not yet a conclusion |
 | Record | `tune_sessions/<id>/state.json` + `chain.md` | `stages/exploration/graph.json` |
+
+**They leave behind the same artifact.** Both records are `trace/` in `/ara`'s five layers, and
+an exploration simply fills that layer more heavily because it has more process to record —
+a graph of arms, a noise floor, a four-state audit. `/ara` knows no stage names: `classify()`
+reads a path and is the only thing that decides a file's layer. So both lines end the same way,
+`/conclude` then `/ara`, and a round is legible a year later whichever of the two produced it.
 
 **The test is not "parameters vs code."** Ask instead: **after this change, are the earlier
 runs still answers to the same question?** Yes → `/train-tune`; you are moving along a curve

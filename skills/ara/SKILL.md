@@ -26,10 +26,10 @@ an artifact another person can read.
 
 | Layer | What goes in it |
 |---|---|
-| `src/` | code snapshot, `config_snapshot.json`, `sources.json`, env. **In an architecture search the code IS the variable**, so this layer is not background — **it is the reproducibility claim itself** |
+| `src/` | code snapshot, `config_snapshot.json`, `sources.json`, env — **plus what each stage's `-init` declared**: its `config.json`, `artifacts.json`, `input.json`, `output.json`, `provenance.json`, `recipe.md`. **In an architecture search the code IS the variable**, so this layer is not background — **it is the reproducibility claim itself** |
 | `evidence/` | `stream.jsonl`, metrics, `tb/`, **the raw logs**. Logs belong here because MLClaw's grounding rule requires a number to cite the transcribed line it came from — **that line is the evidence** |
 | `logic/` | `knowledge/conclusions.json` — what `/conclude` produced |
-| `trace/` | `graph.json`, `findings.json`, `baseline.json` — `/explore`'s experiment graph. **This layer decides whether that ablation is still legible a year from now** |
+| `trace/` | every dated record of a multi-step process: `/explore`'s `graph.json`, `findings.json`, `baseline.json`, `audit.json` — **and a tune session's `state.json` + `chain.md`, a repro loop's `session.json`, an adaptation campaign's.** **This layer decides whether that ablation is still legible a year from now** |
 | **`weights/`** | **‼️ ARA does not have this layer.** Not an oversight: a paper's artifact is **knowledge**, and knowledge regrows from `src + evidence`. **A 4GB checkpoint does not.** It is the one layer that cannot be rebuilt |
 
 Plus one bucket that is deliberately **not** a layer: `unclassified` — whatever the rules did
@@ -52,8 +52,36 @@ A second round overwriting the first destroys the only record of *what the first
 believed at the time* — and that is precisely what makes the first round's runs legible.
 Rebuilding in place requires an explicit `--id <existing>`.
 
-`logic/` and `trace/` are **physically copied into** the artifact: they have to be readable
-without downloading the weights, and they are what survives when the weights are gone.
+## One artifact shape, two amounts of detail
+
+**A tune round's artifact and an exploration round's artifact are the same object.** Both are
+these five layers; an exploration simply fills `trace/` far more heavily, because it *has*
+more process to record — a graph of arms, a noise floor, a four-state audit. A tune session
+fills the same layer with its `state.json` and `chain.md`, and a project that has only ever
+trained fills it with nothing at all and is still an artifact.
+
+‼️ **Nothing here knows what a stage is called.** `classify()` decides a file's layer from its
+path, and it is the **only** thing that decides it. That was not always true: the copy step
+used to name `knowledge/` → `logic/` and `stages/exploration/` → `trace/` as literal
+directories, which made it a second author of a fact `classify()` already owned — and the two
+disagreed **in both directions at once**. `stages/exploration/config.json` was *counted*
+`unclassified` and *copied* into `trace/`; a tune session's `chain.md` was counted `trace` and
+copied nowhere. **An index that names a file the directory beside it does not hold** is the
+failure this skill exists to report, and it was doing it to itself.
+
+## What is copied, and what is in by reference
+
+Every `.json` / `.md` in the project **outside** `code/`, `artifacts/`, `data/`, `runs/` and
+`original/` is a **record**, and records are **physically copied into** the artifact — each
+into the layer `classify()` assigns it, keeping **its own path** (`src/stages/training/config.json`,
+`trace/stages/training/tune_sessions/s1/chain.md`). They have to be readable without
+downloading the weights, and they are what survives when the weights are gone. The path is
+kept whole rather than flattened to a basename because two stages both have a `config.json`,
+and flattening would have one silently overwrite the other **inside the artifact**.
+
+**Runs are in by reference, not by copy.** `runs/` is what `--root` already walks; copying it
+would duplicate every run record into every dated artifact and grow with the run count
+forever. A record the rules do not recognise still gets copied — into `unclassified/`, named.
 
 ## ‼️ What `check` catches: a frozen belief does not update itself
 

@@ -56,22 +56,52 @@ from handoff import iter_files                                  # noqa: E402
 CLASSES = ("src", "evidence", "logic", "trace", "weights", "unclassified")
 
 SRC_NAMES = ("config_snapshot.json", "sources.json", "environment.json",
-             "requirements.txt", "pixi.toml", "pixi.lock", "env_snapshot.json")
+             "requirements.txt", "pixi.toml", "pixi.lock", "env_snapshot.json",
+             # What a stage's `-init` declared: what it consumes, what it runs,
+             # what it is expected to produce, and how much of that was checked
+             # rather than guessed. `src` because ARA's `src` is the INPUT layer
+             # -- these are the files that say what the numbers were produced
+             # FROM, and an ablation read off an artifact without them cannot
+             # say what differed between its two arms.
+             #
+             # Recognised by NAME and not by position, so they are still found
+             # under `/evacuate`'s `--root`, where the tree is a machine's and
+             # not a project's. The cost is that a same-named file somewhere
+             # else lands in `src` rather than `unclassified` -- the cheap
+             # direction to be wrong in, since both keep the bytes and `src` is
+             # the layer whose ABSENCE gets an artifact named a backup.
+             "config.json", "artifacts.json", "input.json", "output.json",
+             "provenance.json", "plan.json", "recipe.md")
 SRC_EXT = (".py", ".yaml", ".yml", ".toml", ".cfg", ".sh", ".patch", ".diff")
 EVIDENCE_NAMES = ("run.json", "stream.jsonl", "stream_meta.json",
                   "retention_plan.json", "metrics.json")
 LOGIC_NAMES = ("conclusions.json", "conclusions.md")
+# `state.json` + `chain.md` are a tune session's, `graph.json` an exploration's,
+# `session.json` a repro loop's, a triage session's and an adaptation campaign's.
+# One kind of thing -- a dated record of a multi-step process, which is what
+# `trace` IS -- and not one of them is named after the stage it sits under.
 TRACE_NAMES = ("graph.json", "findings.json", "baseline.json", "audit.json",
-               "state.json", "chain.md")
+               "state.json", "chain.md", "session.json")
 WEIGHT_EXT = (".pt", ".pth", ".ckpt", ".safetensors", ".bin", ".onnx", ".engine")
 EVIDENCE_DIRS = ("logs", "tb")
 
+# ‼️ What is in the artifact BY REFERENCE rather than by copy. `code/` and
+# `original/` are git trees full of somebody else's `.md`; `data/` and
+# `artifacts/` are bulk; `runs/` is per-run and is already what `--root` walks,
+# so copying it would duplicate every run record once per dated artifact and
+# grow with the run count forever. Everything outside them is a RECORD.
+BULK_DIRS = ("code", "artifacts", "data", "runs", "original")
+RECORD_EXT = (".json", ".md")
+
 LAYER_BLURB = {
-    "src": "INPUT — code snapshot + training config. In an architecture search "
-           "the code is the variable, so this layer IS the reproducibility claim",
+    "src": "INPUT — code snapshot, plus what each stage declared it would run. "
+           "In an architecture search the code is the variable, so this layer "
+           "IS the reproducibility claim",
     "evidence": "the numbers, and the lines they were read from",
     "logic": "the conclusions: what is believed, on what, and what would overturn it",
-    "trace": "the exploration graph — which arms ran, which won, what killed the rest",
+    "trace": "the dated record of how the work went — an exploration's graph of "
+             "arms, a tune session's chain, a repro loop's session. Which ran, "
+             "which won, what killed the rest",
     "weights": "‼️ the one layer ARA has no equivalent for, because a paper's "
                "knowledge regenerates from src+evidence and a checkpoint does not",
     "unclassified": "matched no rule and was kept anyway",
@@ -145,12 +175,12 @@ def reproducibility(root):
             "reason": f"all {len(runs)} run(s) carry a reproducible code snapshot"}
 
 
-def layer_index(root, rels=None):
+def layer_index(root, rels=None, exclude=None):
     """-> ({class: count}, {class: bytes}, {class: [rel]})."""
     counts = {c: 0 for c in CLASSES}
     byte_totals = {c: 0 for c in CLASSES}
     members = {c: [] for c in CLASSES}
-    for rel in (rels if rels is not None else iter_files(root)):
+    for rel in (rels if rels is not None else iter_files(root, exclude=exclude)):
         c = classify(rel)
         counts[c] += 1
         members[c].append(rel)
@@ -159,6 +189,57 @@ def layer_index(root, rels=None):
         except OSError:
             pass
     return counts, byte_totals, members
+
+
+def record_files(project, skip=()):
+    """-> relative paths of the project's RECORDS: every `.json`/`.md` outside
+    `BULK_DIRS`. Sorted, forward slashes, dot-directories skipped.
+
+    ‼️ **It knows no stage names, and that is the whole point.** The two source
+    directories were once written here literally -- `knowledge/` and
+    `stages/exploration/` -- which made this function a SECOND author of a fact
+    `classify` already owned, and the two authors disagreed in both directions
+    at once: `stages/exploration/config.json` was counted `unclassified` and
+    copied into `trace/`, while a tune session's `chain.md` was counted `trace`
+    and copied nowhere at all. An index that names a file the directory beside
+    it does not hold is the exact failure this script exists to report, and it
+    was doing it to itself.
+
+    Reaching only `stages/*` would not have fixed it either: a repro session
+    lives at `repro/<id>/session.json` and an adaptation campaign at
+    `adaptation/`, both at project level. Hence a structural rule rather than a
+    wider list of places -- the layer a record belongs to is `classify`'s to
+    say, and where it happens to sit is not evidence about it.
+    """
+    project = os.path.abspath(project)
+    skipabs = {os.path.abspath(p) for p in skip}
+    out = []
+    for dirpath, dirnames, filenames in os.walk(project):
+        dirnames[:] = [d for d in sorted(dirnames)
+                       if not d.startswith(".") and d not in BULK_DIRS
+                       and os.path.abspath(os.path.join(dirpath, d)) not in skipabs]
+        for name in sorted(filenames):
+            if name.endswith(RECORD_EXT):
+                rel = os.path.relpath(os.path.join(dirpath, name), project)
+                out.append(rel.replace(os.sep, "/"))
+    return out
+
+
+def _excluded_under(root, *paths):
+    """-> [glob] for `iter_files`, naming only the paths that lie inside root.
+
+    What it keeps out is the artifact directory. Without it a second build
+    counts the FIRST build's `ARTIFACT.md` and `ara.json` as two more
+    `unclassified` files, and the noise grows by two per artifact -- a record
+    that describes itself describing itself, and reports the growth as content.
+    """
+    rootabs = os.path.abspath(root)
+    globs = []
+    for pth in paths:
+        pa = os.path.abspath(pth)
+        if pa.startswith(rootabs + os.sep):
+            globs.append(os.path.relpath(pa, rootabs).replace(os.sep, "/") + "/*")
+    return globs or None
 
 
 # ------------------------------------------------------------------ the index
@@ -181,12 +262,14 @@ def _snapshot_of(concs):
             for c in concs]
 
 
-def render(project, root, counts, byte_totals, repro, concs, title, extra=None):
+def render(project, root, counts, byte_totals, repro, concs, title, extra=None,
+           n_copied=0):
     MARK = {"yes": "✅", "no": "❌", "unknown": "❓"}
     L = [f"# {title}", "",
          "> Structure follows ARA (arXiv:2604.24658). **Input** is `src/` — the code",
          "> snapshot and the training config. **Output** is `evidence/` (the numbers),",
-         "> `logic/` (the conclusions), `trace/` (the ablation graph) and `weights/`.",
+         "> `logic/` (the conclusions), `trace/` (how the work went — an ablation",
+         "> graph, a tune chain, a repro session) and `weights/`.",
          "> `weights/` is MLClaw's fifth layer: ARA has none, because a paper's",
          "> knowledge regenerates from src + evidence and a checkpoint does not.", "",
          f"Assembled from `{root}` at {now_utc()}.", ""]
@@ -206,6 +289,13 @@ def render(project, root, counts, byte_totals, repro, concs, title, extra=None):
         if counts.get(c):
             L.append(f"| `{c}/` | {counts[c]} | {byte_totals[c]:,} | {LAYER_BLURB[c]} |")
     L.append("")
+    if n_copied:
+        L += [f"{n_copied} record file(s) are copied in **physically** — every "
+              "`.json`/`.md` outside `code/` `artifacts/` `data/` `runs/` "
+              "`original/`, each into the layer `classify()` assigns it, keeping "
+              "its own path. So the conclusions, the ablation graph, every tune "
+              "chain and every stage's declared config stay readable with the "
+              "weights gone. Runs are in **by reference**.", ""]
     if not counts.get("src"):
         L += ["‼️ **No `src/` layer.** Weights and numbers with no way to regenerate them",
               "is a BACKUP, not an artifact — and an ablation read off one cannot say what",
@@ -280,28 +370,32 @@ def cmd_build(a):
     out = resolve_out(project, a.id, a.out, create=True)
     os.makedirs(out, exist_ok=True)
 
-    counts, byte_totals, members = layer_index(root)
+    counts, byte_totals, members = layer_index(
+        root, exclude=_excluded_under(root, artifacts_dir(project), out))
     repro = reproducibility(root)
     concs = _conclusions(project)
 
-    # The two small layers are copied PHYSICALLY. They have to stay readable
+    # The project's RECORDS are copied PHYSICALLY. They have to stay readable
     # without pulling forty gigabytes of weights back down, and they are the
     # part that survives when the weights do not.
+    #
+    # ‼️ `classify` decides the layer and is the ONLY thing that decides it. The
+    # destination used to be written beside the source directory here, which
+    # made this loop a second author of a fact `classify` already owned -- see
+    # `record_files` for what the two of them disagreed about. The path under
+    # the layer is the record's own path in the project, kept whole: `src/` now
+    # holds a `config.json` from every stage, and flattening to a basename
+    # would have one silently overwrite another.
     copied, copied_from = [], []
-    for layer, src in (("logic", os.path.join(project, "knowledge")),
-                       ("trace", os.path.join(project, "stages", "exploration"))):
-        if not os.path.isdir(src):
-            continue
-        for name in sorted(os.listdir(src)):
-            if not name.endswith((".json", ".md")):
-                continue
-            origin = os.path.join(src, name)
-            dst = os.path.join(out, layer, name)
-            os.makedirs(os.path.dirname(dst), exist_ok=True)
-            with open(origin, "rb") as fa, open(dst, "wb") as fb:
-                fb.write(fa.read())
-            copied.append(f"{layer}/{name}")
-            copied_from.append((f"{layer}/{name}", origin))
+    for rel in record_files(project, skip=(artifacts_dir(project), out)):
+        layer = classify(rel)
+        origin = os.path.join(project, rel.replace("/", os.sep))
+        dst = os.path.join(out, layer, rel.replace("/", os.sep))
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        with open(origin, "rb") as fa, open(dst, "wb") as fb:
+            fb.write(fa.read())
+        copied.append(f"{layer}/{rel}")
+        copied_from.append((f"{layer}/{rel}", origin))
 
     # ‼️ The copied files ARE in the artifact, so they count toward its layers --
     # but ONLY the ones the walk did not already see. Counting the root alone
@@ -317,13 +411,15 @@ def cmd_build(a):
         layer = rel.split("/", 1)[0]
         counts[layer] += 1
         try:
-            byte_totals[layer] += os.path.getsize(os.path.join(out, rel))
+            byte_totals[layer] += os.path.getsize(
+                os.path.join(out, rel.replace("/", os.sep)))
         except OSError:
             pass
 
     title = a.title or f"{os.path.basename(os.path.abspath(project))} — research artifact"
     lines = render(project, root, counts, byte_totals, repro, concs, title,
-                   extra=(a.note.splitlines() if a.note else None))
+                   extra=(a.note.splitlines() if a.note else None),
+                   n_copied=len(copied))
     md = os.path.join(out, "ARTIFACT.md")
     with open(md, "w", encoding="utf-8") as fh:
         fh.write("\n".join(lines) + "\n")
@@ -336,7 +432,12 @@ def cmd_build(a):
 
     payload = {"ok": True, "artifact": md, "out": out,
                "id": os.path.basename(out), "layers": counts,
-               "reproducible": repro["verdict"], "copied": copied}
+               "reproducible": repro["verdict"],
+               "records_copied": len(copied), "copied": copied[:20]}
+    if len(copied) > 20:
+        # Named rather than trimmed in silence: a list that stops at twenty and
+        # says nothing reads as the whole set. `ara.json` holds all of them.
+        payload["copied_not_listed"] = len(copied) - 20
     if repro["verdict"] != "yes":
         payload["reproducibility"] = repro["reason"]
     if not counts["src"]:

@@ -111,14 +111,20 @@ class TheLayersAreARAsPlusTheOneItDoesNotHave(AraCase):
         spec.loader.exec_module(mod)
         self.assertEqual(mod.classify("logs/train.log"), "evidence")
 
-    def test_logic_and_trace_are_copied_in_physically(self):
+    def test_the_records_are_copied_in_physically(self):
         """They must stay readable without pulling the weights back down, and
-        they are what survives when the weights do not."""
+        they are what survives when the weights do not.
+
+        Each keeps its own path under the layer. Flattening to a basename was
+        survivable while only two directories were read and stops being so the
+        moment a second stage has a `config.json` -- one would silently
+        overwrite the other inside the artifact.
+        """
         out = self.build()
-        self.assertIn("logic/conclusions.json", out["copied"])
-        self.assertIn("trace/graph.json", out["copied"])
-        self.assertTrue(os.path.exists(self.path("proj", "ara", out["id"],
-                                                 "logic", "conclusions.json")))
+        self.assertIn("logic/knowledge/conclusions.json", out["copied"])
+        self.assertIn("trace/stages/exploration/graph.json", out["copied"])
+        self.assertTrue(os.path.exists(self.path(
+            "proj", "ara", out["id"], "logic", "knowledge", "conclusions.json")))
 
     def test_the_index_never_contradicts_the_directory_beside_it(self):
         """The counts must include what was copied in. Reporting "no logic
@@ -362,3 +368,103 @@ class AnArtifactIsADatedReadingNotAFile(AraCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TheArtifactDoesNotKnowWhatAStageIsCalled(AraCase):
+    """CLAUDE.md -> "Never silently": 「Never let a value have two authors.」
+
+    `classify()` says which layer a file belongs to. The copy loop used to say
+    it a second time, by naming `knowledge/` -> `logic/` and
+    `stages/exploration/` -> `trace/` as literal source directories -- and the
+    two authors disagreed in BOTH directions at once, which is the signature of
+    this failure rather than an unlucky instance of it:
+
+      · `stages/exploration/config.json` was COUNTED `unclassified` and COPIED
+        into `trace/`;
+      · a tune session's `chain.md` -- the same kind of record one stage over --
+        was counted `trace` and copied nowhere at all.
+
+    An index naming a file the directory beside it does not hold is precisely
+    what `AnArtifactWithoutItsInputIsABackup` and
+    `test_the_index_never_contradicts_the_directory_beside_it` exist to report,
+    and the script was doing it to itself. Every check here is the one-author
+    rule applied to the artifact's own layering.
+    """
+
+    def setUp(self):
+        super().setUp()
+        S = os.path.join("proj", "stages")
+        self.write_json(os.path.join(S, "training", "config.json"),
+                        {"entry_command": "python train.py"})
+        self.write_json(os.path.join(S, "training", "provenance.json"),
+                        {"source_mode": "swept"})
+        self.write(os.path.join(S, "training", "recipe.md"), "# recipe\n")
+        self.write_json(os.path.join(S, "exploration", "config.json"),
+                        {"corpus": "datasets/b@1"})
+        self.write_json(os.path.join(S, "training", "tune_sessions", "s1",
+                                     "state.json"), {"session_id": "s1"})
+        self.write(os.path.join(S, "training", "tune_sessions", "s1", "chain.md"),
+                   "# chain\n")
+
+    def test_a_tune_session_is_in_the_bundle_the_way_an_exploration_is(self):
+        """The user's framing, and it is the right one: a tune round's artifact
+        should BE a training round's artifact, with exploration recording more.
+        Both records are `trace`; only one of them used to arrive."""
+        out = self.build()
+        for rel in ("trace/stages/training/tune_sessions/s1/chain.md",
+                    "trace/stages/training/tune_sessions/s1/state.json"):
+            self.assertIn(rel, out["copied"])
+            self.assertTrue(os.path.exists(
+                self.path("proj", "ara", out["id"], *rel.split("/"))))
+
+    def test_a_stages_declared_config_is_src_not_unclassified(self):
+        """`src` is ARA's INPUT layer -- what the numbers were produced FROM.
+        A stage's `-init` output is exactly that, and while it was unclassified
+        an artifact could be named a BACKUP for want of a file it held."""
+        out = self.build()
+        for rel in ("src/stages/training/config.json",
+                    "src/stages/training/provenance.json",
+                    "src/stages/training/recipe.md",
+                    "src/stages/exploration/config.json"):
+            self.assertIn(rel, out["copied"])
+
+    def test_two_stages_same_named_config_do_not_overwrite_each_other(self):
+        base = os.path.join("proj", "ara", self.build()["id"], "src", "stages")
+        self.assertEqual(json.loads(self.read(base, "training", "config.json"))
+                         ["entry_command"], "python train.py")
+        self.assertEqual(json.loads(self.read(base, "exploration", "config.json"))
+                         ["corpus"], "datasets/b@1")
+
+    def test_every_path_the_index_names_is_on_disk(self):
+        """The whole point: `copied` is the index, the bundle is the directory,
+        and they may never disagree."""
+        out = self.build()
+        aid = self.path("proj", "ara", out["id"])
+        for rel in out["copied"]:
+            self.assertTrue(os.path.exists(os.path.join(aid, *rel.split("/"))),
+                            f"the index names {rel} and the directory has no such file")
+
+    def test_a_record_it_does_not_recognise_is_still_copied_and_named(self):
+        """CLAUDE.md: a sweep that keeps only what it recognises loses the file
+        nobody thought about, and reports success while doing it."""
+        self.write_json(os.path.join("proj", "nobody_thought_about_this.json"), {})
+        out = self.build()
+        self.assertIn("unclassified/nobody_thought_about_this.json", out["copied"])
+
+    def test_bulk_directories_are_in_by_reference_not_by_copy(self):
+        """A run's records are what `--root` already walks. Copying them would
+        duplicate every one of them into every dated artifact, forever."""
+        out = self.build()
+        self.assertFalse([r for r in out["copied"] if "/runs/" in r],
+                         "runs/ must be in the artifact by reference")
+
+    def test_an_artifact_is_not_counted_into_the_next_one(self):
+        """Two builds of an unchanged project must report the same layers. They
+        did not: `ARTIFACT.md` and `ara.json` were counted as two more
+        `unclassified` files each time, so the index grew while the round did
+        not -- a record describing itself describing itself."""
+        first = self.build()
+        second = self.build()
+        self.assertEqual(first["layers"], second["layers"])
+        self.assertFalse([r for r in second["copied"] if r.split("/")[1] == "ara"],
+                         "the artifact directory must not be copied into an artifact")

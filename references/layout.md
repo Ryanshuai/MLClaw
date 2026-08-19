@@ -334,17 +334,25 @@ evacuations/                        ← one directory per machine emptied before
                                       for what was supposed to arrive; computing completeness from
                                       what showed up is a tautology that passes every partial pull
     bundle/                         ← the readable artifact: ARTIFACT.md (ARA's PAPER.md) plus
-                                      logic/ and trace/ copied in physically, so the conclusions
-                                      and the ablation graph stay readable without pulling 40GB
-                                      of weights back down
+                                      the project's records copied in physically, so the
+                                      conclusions, the ablation graph and every tune chain stay
+                                      readable without pulling 40GB of weights back down
 ara/                                ← one directory per artifact, DATED and never overwritten:
   ara_{YYYYMMDD}_{HHmmss}/            round two building over round one destroys the record of
     ARTIFACT.md                       what was believed during round one, which is what makes
     ara.json                        ← round one's runs legible. Same rule as a settled conclusion
-    logic/ trace/                     not being edited. `ara.json` records what the artifact was
-                                      built out of, so `check` reports where the FROZEN copy
+    src/ logic/ trace/                not being edited. `ara.json` records what the artifact was
+    evidence/ unclassified/           built out of, so `check` reports where the FROZEN copy
                                       stopped agreeing with the live record — the copy people
-                                      read does not update when its evidence rots
+                                      read does not update when its evidence rots.
+                                      ‼️ Each copied record keeps ITS OWN PATH under the layer
+                                      (`src/stages/training/config.json`,
+                                      `trace/stages/training/tune_sessions/s1/chain.md`), because
+                                      two stages both have a `config.json` and a flattened
+                                      basename would have one overwrite the other. Which layer a
+                                      file lands in is `ara.py -> classify()`'s to say and ONLY
+                                      its — the copy step naming source directories was a second
+                                      author, and the two disagreed in both directions
 knowledge/                          ← what is now BELIEVED, as opposed to what happened. Project-level
   conclusions.json                    because a conclusion outlives the exploration that produced it and
                                       may come from an eval, a tune session or an audit just as easily.
