@@ -421,6 +421,23 @@ value. A schema that assumes one binding per environment will not survive the fi
   rules imply and the source enforced by memory: a `premise_share` must be measured on THIS
   corpus, and every result carries its tier.
 - **`/train-compare`** — side-by-side metrics / params / env diff across runs.
+- **An external run record — `run.json` for a run MLClaw did not execute.** ‼️ Do not build this
+  because the noise-floor case seems to ask for it: that one is closed, and it was closed at the
+  FLOOR rather than at the run (`baseline.json -> origin: external`, a `claim` that gates T2 and
+  never a T3). What is still open is the general form — somebody takes over a project and wants the
+  previous six months of training runs *in* MLClaw. The trap that makes the obvious implementation
+  wrong: `create_run.py` will happily mint a directory and a `run.json` for one, and every field
+  that makes a run comparable would then be **null while reading as recorded** — `mode`, `scope`,
+  `code.origin_commit`, `workload`. `list_runs.py` sorts leaderboards on `metrics.best`, keyed on
+  `mode` + `scope_key`; a hand-filled record with a plausible `mode` enters that population as a
+  peer of runs MLClaw actually watched. `retention.py` would rank a checkpoint against it. `/repro`
+  already anticipates the shape and says so in a comment — "an imported external run whose launch
+  script was edited without being committed" — so the *reading* side has partly been thought
+  through and nothing writes one. So: an `origin` field on `run.json` is the cheap half, and it is
+  worthless until `list_runs.py` refuses to mix origins in one comparable population by default,
+  the same way it already refuses to mix `mode`. Build the refusal first, the record second.
+  Otherwise the first imported run is indistinguishable from a measured one at exactly the moment
+  somebody is deciding which checkpoint to ship.
 - **Format conversion** — promoted out of this list; see **"Adaptation"** above, which is where the
   design now lives. The short version that used to sit here still holds: curate *records* a
   conversion and does not perform one, the reading half is built (`/data-audit` opens the file), and

@@ -1000,6 +1000,29 @@ class ASettledRoundLeavesSomethingToHandOver(GraphCase):
             self.assertEqual(f["severity"], "major",
                              "a missing artifact is a worklist item, not a refusal")
 
+    def test_a_round_with_arms_still_open_is_not_nagged(self):
+        """‼️ `SETTLED` is per-CARD, and this used to key on "some card settled" --
+        so it fired the moment the FIRST of five arms landed, telling a round that
+        is mid-flight to go build its handover document. Same defect as
+        `test_an_unsettled_round_is_not_nagged` guards against, one card later,
+        and the same cost: a gate that fires while the work is still running is a
+        gate people learn to skip."""
+        self._settled()
+        self.add_complete()
+        self.assertEqual(self._findings(), [])
+
+    def test_a_stale_artifact_mid_round_is_a_note_not_a_handover_item(self):
+        """Staleness is still true mid-round -- an artifact that reads as current
+        while a card settled past it is wrong NOW -- so it is said, at the
+        severity of a note. It becomes a handover item when the round closes."""
+        self._settled()
+        self.add_complete()
+        self._artifact("2020-01-01T00:00:00+00:00")
+        found = self._findings()
+        self.assertTrue(found, "a stale artifact is still worth saying")
+        for f in found:
+            self.assertEqual(f["severity"], "minor")
+
 class AnHonestNoiseFloorMustBeWritable(GraphCase):
     """lifecycle/exploration/baseline.json -> `_comment_value`, and CLAUDE.md ->
     "Never record a metric you did not read" through `graph.py -> _grounding`.
@@ -1431,6 +1454,132 @@ class AnEdgeSaysWhatItBlocks(GraphCase):
         self.assertEqual([x["card"] for x in f], [b])
         self.assertEqual(f[0]["severity"], "critical")
 
+
+class AFloorMeasuredBeforeMLClawMustBeWritable(GraphCase):
+    """`baseline.json -> _comment_origin`, and `SKILL.md -> 从哪儿进来`, whose own
+    heading is 用户基本不会从头开始: enter at any Stage, backfill what that Stage
+    owes. The row for 「跑完了，这个提升是真的吗」 says the backfill is Stage 0 --
+    the noise floor.
+
+    ‼️ There was no way to write one. `runs` was the only door and it takes
+    MLClaw run ids that `check` re-reads out of `stages/*/runs/<id>/run.json`,
+    which a project taken over last week does not have: the floor was measured on
+    a box since released, from a checkpoint on a powered-down disk, by a pipeline
+    that never wrote a `run.json`. Measured on the code, the three writable forms
+    ranked exactly backwards --
+
+        honest    value + sources, `runs: []`            2 criticals, check REFUSES
+        silent    value: null                            critical, every T2/T3 void
+        invented  `runs: [two ids that do not resolve]`  one major, floor USABLE
+
+    -- so the record layer paid for the invented one. The defect is not the
+    missing feature, it is the INVERTED incentive, and the fix has to close both
+    halves: an external floor is writable and worth what a claim is worth, and
+    invented ids buy nothing it does not.
+    """
+
+    RUN = {"mode": "production", "scope": {"samples": 500, "dataset": "boxes"}}
+    WHY = "measured on the released Nebius box before MLClaw; the ckpt disk is down"
+
+    def _floor(self, **over):
+        b = _template("baseline.json")
+        b.update({"value": 2.93, "unit": "AP", "metric": "mAP0.85",
+                  "measured_on": {"dataset_id": CORPUS["dataset_id"],
+                                  "snapshot": CORPUS["snapshot"]},
+                  "sources": [{"ref": "scripts/seed_floor.py", "command": "python x.py",
+                               "quote": "spread 2.93", "kind": "derived"}]})
+        b.update(over)
+        self.write_json(os.path.join("stages", "exploration", "baseline.json"), b)
+
+    def _external(self, **over):
+        over.setdefault("origin", "external")
+        over.setdefault("runs", [])
+        over.setdefault("unchecked", self.WHY)
+        self._floor(**over)
+
+    def _card(self, tier):
+        nid = self.add_complete()
+        self.run_it(nid)
+        self.fill(nid, tier=tier)
+        return nid
+
+    def _find(self):
+        rc, out, _ = self.g("check")
+        return {f["invariant"]: f for f in out["findings"]}
+
+    def test_an_external_floor_is_writable_and_gates_t2(self):
+        self._external()
+        self._card("T2")
+        f = self._find()
+        self.assertNotIn("hard_result_without_noise_floor", f,
+                         "an external floor that gates nothing is a door onto a wall")
+        self.assertNotIn("t3_on_an_unverified_floor", f)
+        self.assertEqual(f["noise_floor_is_a_claim"]["severity"], "minor",
+                         "legitimate, and said out loud -- not silent, not a defect")
+
+    def test_it_can_never_carry_a_t3(self):
+        """T3 is the last check before a full run and the one tier whose row makes
+        blind human review mandatory. A floor this pipeline did not measure on
+        itself cannot hold that line -- promoting a soft number across it is the
+        failure the whole ladder exists to stop."""
+        self._external()
+        self._card("T3")
+        f = self._find()
+        self.assertEqual(f["t3_on_an_unverified_floor"]["severity"], "critical")
+        self.assertIn("claim", f["t3_on_an_unverified_floor"]["detail"])
+
+    def test_without_unchecked_it_is_not_a_floor(self):
+        """The door is narrow on purpose: what earns it is the sentence saying
+        what nobody here could confirm and why it cannot be re-measured."""
+        self._external(unchecked=None)
+        self._card("T2")
+        f = self._find()
+        self.assertEqual(f["noise_floor_unusable"]["severity"], "critical")
+        self.assertIn("unchecked", f["noise_floor_unusable"]["detail"])
+        self.assertIn("hard_result_without_noise_floor", f)
+
+    def test_a_number_nobody_can_quote_still_cannot_be_written(self):
+        """‼️ `origin: external` is not an amnesty on grounding. The floor is the
+        last number that may be typed from memory, and `_grounding` is what says
+        so; an external door that also dropped `sources` would be the fabrication
+        route the check was built to close."""
+        self._external(sources=[])
+        self._card("T2")
+        self.assertIn("ungrounded_number", self._find())
+
+    def test_it_still_has_to_be_this_corpus(self):
+        """The corpus rule does NOT relax for an outside floor -- where a number
+        was measured is precisely what an outside floor is least able to prove."""
+        self._external(measured_on={"dataset_id": "boxes", "snapshot": "260601"})
+        self._card("T2")
+        f = self._find()
+        self.assertIn("RETIRED", f["noise_floor_unusable"]["detail"])
+        self.assertIn("hard_result_without_noise_floor", f)
+
+    def test_naming_runs_as_well_is_two_accounts(self):
+        self._external(runs=["run_a", "run_b"])
+        f = self._find()
+        self.assertEqual(f["noise_floor_unusable"]["severity"], "major")
+        self.assertIn("two accounts", f["noise_floor_unusable"]["detail"])
+
+    def test_invented_ids_buy_nothing_the_honest_door_does_not(self):
+        """‼️ The regression that matters, and the reason the fix is two halves.
+
+        This fixture -- `origin: mlclaw` with ids nothing can resolve -- was the
+        only form of a pre-MLClaw floor that `check` let through, and it gated T2
+        AND T3 on a single major while the honest form was refused outright.
+        Reading an unreadable run record as `major` rather than as a void floor is
+        still right (CLAUDE.md: 「Never report data you could not look at」 -- it is
+        not agreement, but it is not disagreement either). What is not right is it
+        outranking a declared external floor. It now gates exactly as far, and no
+        further."""
+        self._floor(runs=["wandb_run_aaa", "wandb_run_bbb"])
+        self._card("T3")
+        f = self._find()
+        self.assertEqual(f["noise_floor_unusable"]["severity"], "major")
+        self.assertIn("UNVERIFIED", f["noise_floor_unusable"]["detail"])
+        self.assertIn("t3_on_an_unverified_floor", f,
+                      "invented ids must not buy a tier the honest door cannot")
 
 if __name__ == "__main__":
     unittest.main()

@@ -310,43 +310,94 @@ def _run_json(project, target_stage, run_id):
         return None, "unreadable"
 
 
+# Where a floor came from, and therefore what may be asked of it.
+#
+# ‼️ `runs` used to be the ONLY door: two `/eval-run` ids, re-read from
+# `stages/*/runs/<id>/run.json`. That is right for a project MLClaw has owned
+# from the start, and it has no answer at all for the case `SKILL.md ->
+# 从哪儿进来` calls the normal one -- "用户基本不会从头开始", enter at Stage 6,
+# backfill Stage 0. A floor from before the takeover was measured on a box that
+# has since been released, from a checkpoint on a powered-down disk, by a
+# pipeline that never wrote a `run.json`. There was nowhere to write it down.
+#
+# What this code did to somebody in that position, measured on it:
+#
+#   honest    value + sources, `runs: []`               2 criticals, check REFUSES
+#   silent    value: null                               critical, every T2/T3 void
+#   invented  `runs: [two ids that do not resolve]`     one major, floor USABLE
+#
+# The record layer paid for the invented one. That -- not the missing feature,
+# the INVERTED incentive -- is the defect `origin` removes. An external floor is
+# writable, says out loud what nobody here could check, and is worth exactly what
+# it is: a `claim`, which is MLClaw's existing word for this. The same concept has
+# had a door in two other scripts all along (`conclude.py -> EVIDENCE_KINDS`,
+# `compare_baseline.py -> _external_side`); the floor was the one place without one.
+FLOOR_ORIGINS = ("mlclaw", "external")
+
+
+def _floor_status(void, unchecked):
+    """NOT MEASURED outranks could-not-look, which outranks confirmed."""
+    return "not_measured" if void else ("unverifiable" if unchecked else "verified")
+
+
 def _floor(baseline, corpus, project, stages):
-    """The noise floor, judged. -> ([(severity, detail)], usable).
+    """The noise floor, judged. -> ([(severity, detail)], status).
 
-    ‼️ `usable` is the point. Every other field of `baseline.json` had NO READER:
-    `runs` carried a written promise -- "`graph.py check` re-reads their `run.json`
-    and refuses a floor whose runs disagree on `mode`, `scope`, or dataset
-    identity" -- and no code anywhere did that. `measured_on` said "Must equal
-    `graph.json -> corpus`" and nothing compared them. `measured_at` was checked
-    for constants and not for the floor. So `check` asked exactly two things of
-    the number CLAUDE.md calls the one every later verdict rests on: is it
-    grounded, and is it null.
+    `status` is `verified` | `claim` | `unverifiable` | `not_measured`, and four
+    is the point. A bool could only say "gates or does not", which is what forced
+    an HONEST external floor and an ABSENT one into the same answer:
 
-    That is the worse half of the asymmetry. `_share_scope` treats a share
-    measured on another corpus as ABSENT and kills the card -- the 47%-vs-4.62%
-    rule -- while a FLOOR from another corpus was accepted in silence and went on
-    gating the wording of every result in the round. Same rule, one level up, and
-    the floor is the more expensive place to be wrong: the recorded failure is a
-    floor reported as 0.06 that was really 0.25, a "+0.30 is real" conclusion
-    built on it, and the whole thing withdrawn.
+      verified      this project measured it -- >=2 runs whose records resolve and
+                    agree on `mode`, `scope` and corpus.
+      claim         `origin: external`. Grounded by `sources` exactly like a
+                    measured one (so a number somebody remembered still cannot be
+                    written), and it states in `unchecked` what nobody here could
+                    confirm. Gates T2. Never carries a T3.
+      unverifiable  it claims to be this project's and the run records do not
+                    resolve. Gated identically to `claim` and reported as a major
+                    -- deliberately NOT better than the honest door, which is the
+                    half that stops invented ids from being the cheap path.
+      not_measured  null, out-of-corpus, retired, or the runs disagree about what
+                    they measured. Every T2/T3 in the round drops to `[T1 trend]`.
 
-    So an out-of-scope or stale floor is not a weak floor. It is NOT MEASURED --
-    which `retires_on: [..., dataset_snapshot]` already said in writing -- and
-    every T2/T3 result in the round drops to `[T1 trend]`, exactly as it would
-    with no floor at all.
+    ‼️ An out-of-scope or stale floor is not a WEAK floor, and `unverifiable` is
+    not a weak `verified`. `_share_scope` treats a share measured on another
+    corpus as ABSENT and kills the card -- the 47%-vs-4.62% rule -- and the floor
+    is the more expensive side to be wrong on, being what every later verdict
+    rests on: the recorded failure is a floor reported as 0.06 that was really
+    0.25, a "+0.30 is real" conclusion built on it, and the lot withdrawn.
+
+    History worth keeping: every field checked below once had NO READER. `runs`
+    carried a written promise -- "`graph.py check` re-reads their `run.json`" --
+    that no code kept, `measured_on` said "Must equal `graph.json -> corpus`" and
+    nothing compared them, and `check` asked the floor exactly two questions: is
+    it grounded, and is it null.
     """
     out = []
     if baseline.get("value") is None:
-        return out, False
-    usable = True
+        return out, "not_measured"
 
-    # 1. Which corpus. `_share_scope`'s rule, applied to the floor.
+    origin = baseline.get("origin") or "mlclaw"
+    if origin not in FLOOR_ORIGINS:
+        out.append(("major",
+                    "`origin` is %r -- it must be `mlclaw` (this project measured it) "
+                    "or `external` (measured where MLClaw cannot re-read it). Read as "
+                    "`mlclaw`, the stricter of the two" % (origin,)))
+        origin = "mlclaw"
+
+    void = False       # NOT MEASURED: the number does not describe this round
+    unchecked = False  # nobody could look: not agreement, and not disagreement
+
+    # 1. Which corpus. `_share_scope`'s rule, applied to the floor. It does NOT
+    #    relax for `origin: external` -- where a number was measured is precisely
+    #    what an outside floor is least able to prove, and a floor from another
+    #    corpus is not a floor whoever ran it.
     on = baseline.get("measured_on") or {}
     if not on.get("dataset_id"):
         out.append(("critical", "the floor has no `measured_on` -- a floor is a property "
                                 "of (weights x measurement x corpus), so one quoted from "
                                 "nowhere gates nothing. Treated as NOT MEASURED"))
-        usable = False
+        void = True
     elif (on.get("dataset_id") != corpus.get("dataset_id")
             or on.get("snapshot") != corpus.get("snapshot")):
         out.append(("critical",
@@ -355,7 +406,7 @@ def _floor(baseline, corpus, project, stages):
                     "RETIRED, not weak. Treated as NOT MEASURED"
                     % (on.get("dataset_id"), on.get("snapshot"),
                        corpus.get("dataset_id"), corpus.get("snapshot"))))
-        usable = False
+        void = True
 
     # 2. Staleness, symmetric with the constants scan below.
     declared = corpus.get("declared_at")
@@ -364,7 +415,25 @@ def _floor(baseline, corpus, project, stages):
                     "the floor was measured %s, before this corpus was declared %s"
                     % (baseline["measured_at"], declared)))
 
-    # 3. The two runs behind it. A spread needs two measurements, and they must
+    # 3. An external floor cannot be re-read, so what is asked of it is different:
+    #    not "do these two runs agree" -- nothing here can see them -- but "does
+    #    the record say, in the file, what nobody here confirmed".
+    if origin == "external":
+        if baseline.get("runs"):
+            out.append(("major",
+                        "an `external` floor also names `runs` -- two accounts of where "
+                        "this number came from and only one can be true. Drop `runs`, or "
+                        "set `origin: mlclaw` and let them be re-read"))
+        if not str(baseline.get("unchecked") or "").strip():
+            out.append(("critical",
+                        "an `external` floor must fill `unchecked`: what nobody in this "
+                        "project could confirm, and why it cannot simply be re-measured "
+                        "here. Without it this is a bare number wearing a floor's name, "
+                        "and the door is narrow on purpose. Treated as NOT MEASURED"))
+            void = True
+        return out, ("not_measured" if void else "claim")
+
+    # 4. The two runs behind it. A spread needs two measurements, and they must
     #    differ in NOTHING but the seed -- two ids that differ in anything else
     #    measure that difference and call it noise.
     runs = baseline.get("runs") or []
@@ -372,8 +441,11 @@ def _floor(baseline, corpus, project, stages):
         out.append(("critical",
                     "a floor is a SPREAD and %d run(s) cannot produce one. `runs` names "
                     "the repeat measurements it was computed from; without them nobody "
-                    "can re-check what was actually varied" % len(runs)))
-        return out, False
+                    "can re-check what was actually varied. ‼️ If this floor was measured "
+                    "before MLClaw -- the takeover, which `SKILL.md -> 从哪儿进来` calls "
+                    "the normal way in -- do NOT invent two ids: set `origin: external` "
+                    "and fill `unchecked`" % len(runs)))
+        return out, "not_measured"
 
     read, unread = [], []
     for rid in runs:
@@ -391,11 +463,14 @@ def _floor(baseline, corpus, project, stages):
         # and one whose record is corrupt are two facts, and neither is agreement.
         out.append(("major",
                     "could not read the run record for %s (searched %s) -- so `mode` and "
-                    "`scope` agreement is UNVERIFIED for this floor, not confirmed"
+                    "`scope` agreement is UNVERIFIED for this floor, not confirmed. ‼️ If "
+                    "these ids were never MLClaw runs, `origin: external` is the honest "
+                    "form of the same floor and gates exactly as far"
                     % (", ".join("%s [%s]" % (r, st) for r, st in unread),
                        "/".join(stages))))
+        unchecked = True
     if len(read) < 2:
-        return out, usable
+        return out, _floor_status(void, unchecked)
 
     modes = {r.get("mode") for _, r in read}
     if len(modes) > 1:
@@ -404,7 +479,7 @@ def _floor(baseline, corpus, project, stages):
                     "production spread are different quantities that share a name, and "
                     "the difference between them is not noise. Treated as NOT MEASURED"
                     % ", ".join(sorted(str(m) for m in modes))))
-        usable = False
+        void = True
     keys = {scope_key(r.get("scope")) for _, r in read}
     if keys == {UNSPECIFIED_SCOPE}:
         out.append(("major",
@@ -412,6 +487,7 @@ def _floor(baseline, corpus, project, stages):
                     "whether they measured the same thing. An unrecorded scope is not "
                     "evidence of an equal workload -- it is a gap, and it is why this "
                     "is reported rather than passed"))
+        unchecked = True
     elif len(keys) > 1:
         first = read[0]
         for rid, rec in read[1:]:
@@ -420,9 +496,9 @@ def _floor(baseline, corpus, project, stages):
                             "the floor's runs %s and %s were measured on non-equivalent "
                             "`scope` -- what that spread measures is the scope difference. "
                             "Treated as NOT MEASURED" % (first[0], rid)))
-                usable = False
+                void = True
                 break
-    return out, usable
+    return out, _floor_status(void, unchecked)
 
 
 def _delta(node, run, parent_run):
@@ -1342,16 +1418,16 @@ def cmd_check(a):
     # but a project may measure it in its target stage, so both are searched and
     # "absent" means neither had it.
     stages = ["evaluation"] + ([target] if target != "evaluation" else [])
-    floor_findings, floor_usable = _floor(baseline, corpus, a.project, stages)
+    floor_findings, floor_status = _floor(baseline, corpus, a.project, stages)
     for sev, detail in floor_findings:
         flag(sev, "noise_floor_unusable", None, detail)
 
     # The floor gates the WORDING of every result, not any arm.
-    # ‼️ Keyed on `floor_usable`, not on `value is not None`. A retired floor and
-    # an absent one gate identically because they ARE the same fact -- reading a
+    # ‼️ Keyed on the STATUS, not on `value is not None`. A retired floor and an
+    # absent one gate identically because they ARE the same fact -- reading a
     # present-but-void number as a measured floor is how the 0.06 that was really
     # 0.25 got quoted, and `retires_on` says so in the record itself.
-    if not floor_usable:
+    if floor_status == "not_measured":
         hard = [n["id"] for n in nodes
                 if n.get("tier") in ("T2", "T3") and n.get("result") is not None]
         if hard:
@@ -1361,6 +1437,25 @@ def cmd_check(a):
                  f"{hard} report at T2/T3 with {why}. Without one, "
                  f"'no significant improvement' is UNDECIDABLE, not negative -- "
                  f"those results are [T1 trend] at best")
+    elif floor_status in ("claim", "unverifiable"):
+        # A floor this pipeline did not measure on ITSELF still gates T2 -- that
+        # is the whole worth of the external door, and refusing it there would
+        # make the door open onto the same wall. It cannot gate T3: that is the
+        # last check before a full run, the one tier whose row in SKILL.md makes
+        # blind human review mandatory, and promoting a number across that line
+        # is exactly what the ladder exists to stop.
+        t3 = [n["id"] for n in nodes
+              if n.get("tier") == "T3" and n.get("result") is not None]
+        if t3:
+            flag("critical", "t3_on_an_unverified_floor", None,
+                 f"{t3} report at T3 against a floor that is `{floor_status}` -- nothing "
+                 f"in this project confirms the two measurements behind it differed only "
+                 f"in the seed. Report these at T2, or measure the floor here")
+        if floor_status == "claim":
+            flag("minor", "noise_floor_is_a_claim", None,
+                 "the floor is declared `external`: legitimate, grounded by its "
+                 "`sources`, and worth what a claim is worth. `unchecked` says what "
+                 "nobody here could confirm -- every result it gates carries that")
 
     order = {"critical": 0, "major": 1, "minor": 2}
     findings.sort(key=lambda f: order[f["severity"]])
@@ -1384,6 +1479,13 @@ def cmd_check(a):
             if h.get("to") in SETTLED and h.get("at"):
                 if settled_at is None or h["at"] > settled_at:
                     settled_at = h["at"]
+    # ‼️ Only once nothing is left open. `SETTLED` is per-CARD, so keying the nag
+    # on "some card settled" fired the moment the FIRST arm landed with four still
+    # running -- a handover item raised against a round that is mid-flight, which
+    # is the shape of gate people learn to skip. The comment above says "a round
+    # that CLOSED"; this is that sentence, computed.
+    open_cards = [n["id"] for n in nodes
+                  if _derive_state(n, by_id, corpus)[0] not in SETTLED]
     if settled_at:
         adir = os.path.join(a.project, "ara")
         built = None
@@ -1392,13 +1494,17 @@ def cmd_check(a):
             if rec.get("built_at") and (built is None or rec["built_at"] > built):
                 built = rec["built_at"]
         if built is None:
-            flag("major", "artifact", "-",
-                 "this round has settled cards and no artifact. The graph is a "
-                 "machine record -- `verdict: won` is not what anybody reads six "
-                 "weeks later, and it does not survive a handover. `/ara build` "
-                 "after `/conclude`")
+            if not open_cards:
+                flag("major", "artifact", "-",
+                     "this round has settled cards and no artifact. The graph is a "
+                     "machine record -- `verdict: won` is not what anybody reads six "
+                     "weeks later, and it does not survive a handover. `/ara build` "
+                     "after `/conclude`")
         elif built < settled_at:
-            flag("major", "artifact", "-",
+            # Staleness is worth saying mid-round too: an artifact that reads as
+            # current while a card has settled past it is wrong NOW, not at close.
+            # It is a note until the round closes, and a handover item after.
+            flag("major" if not open_cards else "minor", "artifact", "-",
                  f"the newest artifact was built at {built} and a card settled at "
                  f"{settled_at} -- it describes a different round. `/ara build` "
                  f"again; the old one stays, because it is the record of what was "

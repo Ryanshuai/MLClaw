@@ -218,6 +218,14 @@ python <mlclaw_root>/scripts/explore/graph.py new --project <P> [--since 12h]
 
 回补不等于重做全套：回补的是**那一张表 / 那一个数**，通常十几分钟。
 
+‼️ **噪声底是这里唯一的例外，而接手的人恰恰最容易撞上它。** 底是同权重同口径两次测量的差，
+补它要两次 `/eval-run` —— 要机器、要那个 ckpt 还在。接手一个已有项目时，这两样常常都没有：
+机器释放了，盘停了，当年那条流水线根本不写 `run.json`，所以 `runs` 里填不出任何东西。
+**这种情况不许编两个 run id 去糊弄 `check`**（那正是记录层曾经唯一放行的写法）。
+写 `baseline.json -> origin: "external"`，把数和它的 `sources` 照常写全，
+再用 `unchecked` 说清这儿为什么没法重测。它是个 `claim`：**照常挡 T2，永远不撑 T3**。
+等哪天 ckpt 回来了，两次 eval 把它换成 `verified` 的。
+
 ---
 
 ## 两个输入
@@ -298,6 +306,14 @@ python <mlclaw_root>/scripts/explore/graph.py new --project <P> [--since 12h]
 写一个小脚本 `stages/exploration/scripts/<name>.py`，读两个 run 的 metric 行、打印所有档位的差，
 把**它的 stdout** 当 quote，`kind: "derived"`，并带上 `command`；两条端点日志照常 `kind: "result"` 并列。
 这样换了权重是**重跑尺子**，不是手改 JSON。细则见 `baseline.json -> _comment_value`。
+
+‼️ **底测不了的时候，`null` 不是唯一诚实的答案。** 底有四态，写在 `origin` 上：
+本项目量的（`runs` 两条以上，`check` 会把它们的 `run.json` 读回来核 `mode`/`scope`）是
+`verified`；进 MLClaw 之前量的、或者在一台已经释放的机器上量的，写 `origin: "external"` +
+`unchecked`，是 `claim`；声称是本项目的、但 run 记录读不出来，是 `unverifiable`；
+剩下的才是 `not_measured`。**后三种里，只有最后一种会把全轮 T2/T3 打回 `[T1 趋势]`。**
+`claim` 和 `unverifiable` 挡 T2、不撑 T3 —— T3 是大跑前最后一道闸，撑不住一个本流水线
+没自己量过的底。四态的理由见 `references/experiment-graph.md -> §4`。
 
 顺带两条同源的规矩：
 - **跨源对比必须同口径。** 两边过滤门限不同源时，量到的是门限差，不是模型差。
