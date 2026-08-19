@@ -26,7 +26,7 @@ from helpers import REPO_ROOT
 # Every file that states the enum. Adding a fifth is a decision, and this list
 # failing to include it is the drift — grep for `match`: before adding one.
 DECLARES = [
-    ".claude/skills/train-init/references/schemas.md",
+    "skills/train-init/references/schemas.md",
     "lifecycle/training/input.json",
     "lifecycle/evaluation/input.json",
     "lifecycle/evaluation/artifacts.json",
@@ -104,7 +104,7 @@ class TheSchemaIsDocumentedOnceAndReferencedElsewhere(unittest.TestCase):
     it in.
     """
 
-    EVAL_SCHEMAS = ".claude/skills/eval-init/references/schemas.md"
+    EVAL_SCHEMAS = "skills/eval-init/references/schemas.md"
 
     def test_eval_init_points_at_the_canonical_candidates_schema(self):
         text = read(self.EVAL_SCHEMAS)

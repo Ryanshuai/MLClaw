@@ -150,7 +150,7 @@ frequency verb. Nothing in that list is blocked on a record any more.
 
 Not a skill. The gap it fills is the one path in MLClaw that every skill points at and none of them
 walks: the code wants COCO, the labels on disk are YOLO txt, and `/train-init` can say
-`mismatch  needs conversion` ([its candidates table](../../.claude/skills/train-init/SKILL.md)) with
+`mismatch  needs conversion` ([its candidates table](../../skills/train-init/SKILL.md)) with
 nothing downstream to hand it to. `/data-curate` *records* a conversion and executes nothing, so the
 most common thing a user actually does has a diagnosis and no action.
 
@@ -301,7 +301,7 @@ without it each can only name a file path.
 The data side has this and the model side does not. Data gets `identity` → census → a citable
 `datasets/<id>@<snapshot>` → `retire.py plan`, which excludes units a live snapshot still cites.
 A model gets one path in `run_dir/outputs.best_checkpoint` plus `retention.py`, which ranks by metric
-and — in its own words at `.claude/skills/repro/references/axes.md` — **"has no idea who cited
+and — in its own words at `skills/repro/references/axes.md` — **"has no idea who cited
 them."** So `/eval-init` cites `run:training/<run_id>`: an edge to a *run*, not to an artifact.
 Retention then deletes correctly by its own lights and the eval's parent dangles, which `/repro`
 reports afterwards as `not_reproducible`. The ten "Never silently" rules include *never delete data a

@@ -70,7 +70,7 @@ def sweep_result(units, checked=(), unreached=(), storage=None):
     the first would silently render as the second, which is the exact reading that lets
     residual billing go unmeasured while `reap` prints a total. See `sweep_storage_known`.
 
-    Contract: `.claude/skills/lease/references/contract.md` "Scope completeness" and
+    Contract: `skills/lease/references/contract.md` "Scope completeness" and
     "Storage is the second meter".
     """
     unreached = list(unreached)

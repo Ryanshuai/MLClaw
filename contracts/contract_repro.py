@@ -660,7 +660,7 @@ if __name__ == "__main__":
 
 class AFrameworkStagesCodeAxisIsNotAMissingTree(ReproCase):
     """`layout.md` -> "Code Source Resolution", the `framework` mode; and
-    `.claude/skills/repro/references/axes.md` -> "code".
+    `skills/repro/references/axes.md` -> "code".
 
     `probe_code` read a null `origin_commit` as "the tree that ran was never
     identified". For a stage whose `code_source` is `framework` there was never a
@@ -824,7 +824,7 @@ class AFrameworkStagesCodeAxisIsNotAMissingTree(ReproCase):
 
 
 class ReMeasuringAnArtifactIsNotReproducingAProcedure(ReproCase):
-    """`.claude/skills/repro/references/verdicts.md` -> "Final verdicts", the
+    """`skills/repro/references/verdicts.md` -> "Final verdicts", the
     `remeasured` pair; and `/discover` `references/searches.md` -> "Where the
     vocabulary breaks, and it is not cosmetic", which names this exact failure one
     domain over: "Two words, same spelling, opposite bars."
@@ -912,7 +912,7 @@ class ReMeasuringAnArtifactIsNotReproducingAProcedure(ReproCase):
 
 
 class TheDefaultPathCannotQuietlyAnswerAWeakerQuestion(ReproCase):
-    """`.claude/skills/repro/SKILL.md` -> Step 2, `measure_via`; and
+    """`skills/repro/SKILL.md` -> Step 2, `measure_via`; and
     `references/verdicts.md` -> "Re-measuring is not reproducing".
 
     Splitting the verdict words was half a fix. `measure_via` still DEFAULTED to
@@ -1246,7 +1246,7 @@ class AnAxisMayNotAssertACauseTheRecordDoesNotState(ReproCase):
 
 
 class ComparingAnOrderStatisticToItsOwnDrawsAnswersNothing(ReproCase):
-    """run-mechanics.md -> "Record integrity", and `.claude/skills/repro/references/
+    """run-mechanics.md -> "Record integrity", and `skills/repro/references/
     verdicts.md` -> "A band has a source".
 
     A best-checkpoint save is the MAX of a converged tail. Testing that max against

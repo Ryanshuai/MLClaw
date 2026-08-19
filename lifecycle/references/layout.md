@@ -89,7 +89,7 @@ code_dir = stages/<stage>/code/_source if exists else stages/<stage>/code
 
 ## File Layout
 
-**Skill directories are flat, one level, and the hyphen is the hierarchy.** `.claude/skills/<name>/` — never nested. `contract_docs.owned_by_a_skill()` is hardcoded to that one level, so a skill at `.claude/skills/data/collect/` would be classified as the `data` skill's *internal structure*, need no tree entry, and go invisible to this contract while it stayed green. The naming rule that replaces nesting: **a prefix means the skill belongs to one stage or line (`data-*`, `train-*`, `eval-*`, `infer-*`, `refactor-*`); no prefix means it is cross-cutting (`discover`, `repro`, `resources`, `lease`) or is itself the line's router (`data`).** Two names carry a hyphen that is *not* a family prefix — `ask-human` and `project-init` — which is the one real cost of encoding the tree in names.
+**Skill directories are flat, one level, and the hyphen is the hierarchy.** `skills/<name>/` — never nested. `contract_docs.owned_by_a_skill()` is hardcoded to that one level, so a skill at `skills/data/collect/` would be classified as the `data` skill's *internal structure*, need no tree entry, and go invisible to this contract while it stayed green. The naming rule that replaces nesting: **a prefix means the skill belongs to one stage or line (`data-*`, `train-*`, `eval-*`, `infer-*`, `refactor-*`); no prefix means it is cross-cutting (`discover`, `repro`, `resources`, `lease`) or is itself the line's router (`data`).** Two names carry a hyphen that is *not* a family prefix — `ask-human` and `project-init` — which is the one real cost of encoding the tree in names.
 
 ### MLClaw repo (`<wherever the MLClaw tool repo is cloned>`, e.g. `~/code/MLClaw`) — the tool
 
@@ -101,44 +101,44 @@ pixi.lock                       ← tracked on purpose; it is what makes that en
 CLAUDE.md                           ← routing + the always-loaded rules
 README.md                           ← what MLClaw is, and which stages are built
 .claude-plugin/
-  marketplace.json                  ← the catalog that makes this repo installable: one entry, source `./.claude`
-.claude/
-  .claude-plugin/plugin.json        ← the manifest that makes `.claude/` itself the plugin root, so `skills/` never moves
-  skills/                           ← one dir per skill; a skill's own `references/` is its business, not listed here
-    project-init/SKILL.md           ← /project-init
-    infer-init/SKILL.md             ← /infer-init
-    infer-run/SKILL.md              ← /infer-run
-    eval-init/SKILL.md              ← /eval-init
-    eval-run/SKILL.md               ← /eval-run
-    eval-report/SKILL.md            ← /eval-report
-    eval-triage/SKILL.md            ← /eval-triage (+ references/verdicts.md)
-    train-init/SKILL.md             ← /train-init
-    train-run/SKILL.md              ← /train-run
-    train-tune/SKILL.md             ← /train-tune
-    train-tune-report/SKILL.md      ← /train-tune-report
-    refactor-init/SKILL.md          ← /refactor-init
-    refactor-run/SKILL.md           ← /refactor-run
-    refactor-report/SKILL.md        ← /refactor-report
-    resources/SKILL.md              ← /resources
-    lease/SKILL.md                  ← /lease
-    data-label/SKILL.md             ← /data-label
-    ask-human/SKILL.md              ← /ask-human
-    data/SKILL.md                   ← /data
-    data-collect/SKILL.md           ← /data-collect
-    data-online-sample/SKILL.md     ← /data-online-sample
-    data-report/SKILL.md            ← /data-report
-    data-check/SKILL.md             ← /data-check
-    data-audit/SKILL.md             ← /data-audit (the only skill that opens a data file)
-    data-audit-report/SKILL.md      ← /data-audit-report
-    data-freeze/SKILL.md            ← /data-freeze
-    data-curate/SKILL.md            ← /data-curate
-    data-retire/SKILL.md            ← /data-retire
-    discover/SKILL.md               ← /discover
-    repro/SKILL.md                  ← /repro (+ references/axes.md, verdicts.md)
-    explore/SKILL.md                ← /explore (+ references/: experiment-graph, porting, run-card, cluster-ops, explore-or-stop, debate-roles, human-review — ported from the arch-transplant skill)
-    conclude/SKILL.md               ← /conclude
-    evacuate/SKILL.md               ← /evacuate
-    ara/SKILL.md                    ← /ara
+  plugin.json                       ← the manifest. Plugin root is the REPO root — install copies the plugin dir, so a plugin rooted at `.claude/` ships 34 skills and none of their scripts
+  marketplace.json                  ← the catalog that makes it installable: one entry, source `./`
+.claude/                            ← project settings only; NOT the plugin. The two were the same directory until that bug was found
+skills/                             ← one dir per skill; a skill's own `references/` is its business, not listed here
+  project-init/SKILL.md             ← /project-init
+  infer-init/SKILL.md               ← /infer-init
+  infer-run/SKILL.md                ← /infer-run
+  eval-init/SKILL.md                ← /eval-init
+  eval-run/SKILL.md                 ← /eval-run
+  eval-report/SKILL.md              ← /eval-report
+  eval-triage/SKILL.md              ← /eval-triage (+ references/verdicts.md)
+  train-init/SKILL.md               ← /train-init
+  train-run/SKILL.md                ← /train-run
+  train-tune/SKILL.md               ← /train-tune
+  train-tune-report/SKILL.md        ← /train-tune-report
+  refactor-init/SKILL.md            ← /refactor-init
+  refactor-run/SKILL.md             ← /refactor-run
+  refactor-report/SKILL.md          ← /refactor-report
+  resources/SKILL.md                ← /resources
+  lease/SKILL.md                    ← /lease
+  data-label/SKILL.md               ← /data-label
+  ask-human/SKILL.md                ← /ask-human
+  data/SKILL.md                     ← /data
+  data-collect/SKILL.md             ← /data-collect
+  data-online-sample/SKILL.md       ← /data-online-sample
+  data-report/SKILL.md              ← /data-report
+  data-check/SKILL.md               ← /data-check
+  data-audit/SKILL.md               ← /data-audit (the only skill that opens a data file)
+  data-audit-report/SKILL.md        ← /data-audit-report
+  data-freeze/SKILL.md              ← /data-freeze
+  data-curate/SKILL.md              ← /data-curate
+  data-retire/SKILL.md              ← /data-retire
+  discover/SKILL.md                 ← /discover
+  repro/SKILL.md                    ← /repro (+ references/axes.md, verdicts.md)
+  explore/SKILL.md                  ← /explore (+ references/: experiment-graph, porting, run-card, cluster-ops, explore-or-stop, debate-roles, human-review — ported from the arch-transplant skill)
+  conclude/SKILL.md                 ← /conclude
+  evacuate/SKILL.md                 ← /evacuate
+  ara/SKILL.md                      ← /ara
   settings.json
 contracts/                          ← executable form of this file's contracts; stdlib only
   helpers.py                        ← temp dirs, real git repos, script loading by path
@@ -158,7 +158,7 @@ contracts/                          ← executable form of this file's contracts
   contract_conclude.py              ← a belief may not outlive its evidence; the tier is the weakest one
   contract_ara.py                   ← the five layers, and a frozen belief that stopped agreeing with the record
   contract_evacuate.py              ← a file that exists is not a file that arrived; leaving one behind is a delete
-  contract_docs.py                  ← this file, README, and .claude/skills/ must agree
+  contract_docs.py                  ← this file, README, and skills/ must agree
 .github/workflows/ci.yml            ← contracts + compileall + JSON parse + no-credentials gate
 docs/                               ← README assets only; nothing here is read by a skill
 lifecycle/

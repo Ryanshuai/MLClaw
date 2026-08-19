@@ -8,7 +8,7 @@ sweep that rents rather than borrows. A single box needs none of this — `/leas
 Contract statements in this file are cited by checks in `contracts/` as
 `fleet.md ->` followed by the section heading in double quotes.
 
-Layering is the compute provider contract's (`.claude/skills/lease/references/contract.md`
+Layering is the compute provider contract's (`skills/lease/references/contract.md`
 "Where this sits — three layers"). This file is **layer 3 and only layer 3**: what a
 caller does with N leases once L2 can hand them out one at a time. Nothing here may
 mention a provider by name, and the moment something does, it belongs in an adapter.

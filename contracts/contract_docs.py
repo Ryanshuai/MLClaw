@@ -2,7 +2,7 @@
 
 Every drift found while hardening this repo lived on the unenforced side of the
 line: README said training was unbuilt while four training skills sat in
-`.claude/skills/`; CLAUDE.md's skill table listed `/data-check`, which has never
+`skills/`; CLAUDE.md's skill table listed `/data-check`, which has never
 existed; `/lease` existed and appeared in neither. None of that raises. Someone
 just reads the wrong thing and believes it.
 
@@ -29,7 +29,7 @@ import unittest
 
 from helpers import REPO_ROOT
 
-SKILLS_DIR = os.path.join(REPO_ROOT, ".claude", "skills")
+SKILLS_DIR = os.path.join(REPO_ROOT, "skills")
 CLAUDE_MD = os.path.join(REPO_ROOT, "CLAUDE.md")
 README = os.path.join(REPO_ROOT, "README.md")
 
@@ -57,7 +57,7 @@ def skills_on_disk():
 
     Same authority the layout check already defers to: `.gitignore` states what
     is not part of this project. Without it, a scaffolding tool that drops a
-    working skill under `.claude/skills/` turns this red with a message about
+    working skill under `skills/` turns this red with a message about
     CLAUDE.md's table, sending the reader at the document when the problem is a
     directory that was never going to be committed."""
     if not os.path.isdir(SKILLS_DIR):
@@ -98,7 +98,7 @@ def repo_tree_block(text):
 
 def declared_dirs(block):
     """-> repo-relative directories the tree names, including those implied by a
-    file entry (`skills/eval-run/SKILL.md` declares `.claude/skills/eval-run`) and
+    file entry (`skills/eval-run/SKILL.md` declares `skills/eval-run`) and
     every ancestor (`.github/workflows/ci.yml` declares `.github` too)."""
     dirs, parents = set(), {}
     for line in block.splitlines():
@@ -159,7 +159,7 @@ def actual_dirs(root):
         if not filenames:
             continue
         rel = os.path.relpath(dirpath, root).replace(os.sep, "/")
-        # Every ancestor too: `.claude/skills` and `lifecycle/scripts` hold only
+        # Every ancestor too: `skills` and `lifecycle/scripts` hold only
         # subdirectories, and they are real declared entries. What is being
         # excluded is a subtree with no file anywhere in it, not a container.
         while rel != ".":
@@ -169,10 +169,10 @@ def actual_dirs(root):
 
 
 def owned_by_a_skill(path):
-    """Anything strictly below `.claude/skills/<name>/` is that skill's internal
+    """Anything strictly below `skills/<name>/` is that skill's internal
     structure. The tree declares the skill dir; SKILL.md routes a reader inside."""
     parts = path.split("/")
-    return parts[:2] == [".claude", "skills"] and len(parts) > 3
+    return parts[:1] == ["skills"] and len(parts) > 2
 
 
 def citations_in(text):
@@ -389,7 +389,7 @@ class CitationsResolve(unittest.TestCase):
         reading a skill obeys the skill, so a stray `jq` here beats the doc.
         """
         offenders = []
-        for dp, _, fs in os.walk(os.path.join(REPO_ROOT, ".claude")):
+        for dp, _, fs in os.walk(os.path.join(REPO_ROOT, "skills")):
             for f in fs:
                 if not f.endswith(".md"):
                     continue
@@ -457,7 +457,7 @@ class ScriptPathsAreResolvedNotAssumed(unittest.TestCase):
 
     def _docs(self):
         for sub in ("*/SKILL.md", "*/references/*.md"):
-            yield from glob.glob(os.path.join(self.ROOT, ".claude", "skills", sub))
+            yield from glob.glob(os.path.join(self.ROOT, "skills", sub))
 
     def test_no_skill_invokes_a_script_by_a_cwd_relative_path(self):
         bad = []

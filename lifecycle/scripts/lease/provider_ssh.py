@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """provider_ssh — static-machine adapter for /lease.
 
-Implements the seven verbs of `.claude/skills/lease/references/contract.md` against
+Implements the seven verbs of `skills/lease/references/contract.md` against
 machines in `resources.json -> servers`. Rationale for treating an owned box as a
 provider, and for putting the claim marker on the target host, is in the contract
 ("Where this sits", static-box paragraph) — not repeated here.

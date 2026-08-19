@@ -8,12 +8,21 @@
   "plugins": [
     {
       "name": "mlclaw",
-      "source": "./.claude",
+      "source": "./",
       "description": "The 34 lifecycle skills: training, evaluation, inference, refactor, exploration, the data line, fleet/lease, discovery, and the record layer that holds them together.",
       "version": "0.1.0",
-      "author": { "name": "Shuai Yan" },
+      "author": {
+        "name": "Shuai Yan"
+      },
       "category": "workflow",
-      "tags": ["ml", "training", "evaluation", "experiment-tracking", "data", "gpu"]
+      "tags": [
+        "ml",
+        "training",
+        "evaluation",
+        "experiment-tracking",
+        "data",
+        "gpu"
+      ]
     }
   ]
 }

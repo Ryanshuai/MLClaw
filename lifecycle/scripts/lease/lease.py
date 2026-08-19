@@ -4,7 +4,7 @@ everything that must not depend on an agent remembering to do it.
 
   agent -> lease.py <verb> -> provider_<name>.py
 
-Adapters (`.claude/skills/lease/references/contract.md`) translate the seven verbs for
+Adapters (`skills/lease/references/contract.md`) translate the seven verbs for
 one provider each. They deliberately do NOT own the ledger, so the contract's money
 rules cannot live inside them:
 

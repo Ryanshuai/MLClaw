@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """provider_nebius — Nebius Cloud adapter for /lease.
 
-Contract: `.claude/skills/lease/references/contract.md`. Shape/price table:
+Contract: `skills/lease/references/contract.md`. Shape/price table:
 `machines_nebius.json`. Fleet-level rules this serves: `lifecycle/references/fleet.md`.
 
   machine_type   `<region>:<platform>/<preset>@<pool>`, e.g.

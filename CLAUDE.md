@@ -77,7 +77,7 @@ rules would be skimmed with it.
 |---|---|
 | **run any skill** — check its requirements, offer the next one, push/pop state, or write any record | `lifecycle/references/skill-graph.md` — node hierarchy, the requires/suggests table, requirement checks, workflow state protocol |
 | execute or finalize a run (`/train-run`, `/eval-run`, `/infer-run`, `/refactor-run`) | `lifecycle/references/run-mechanics.md` — step chain, launch contract, asset resolution, code snapshot, record integrity, checkpoint selection, retention, listing runs, path mapping |
-| run `/explore` — propose, port, ablate, or adjudicate an architecture change | `.claude/skills/explore/references/experiment-graph.md` — node schema, the seven states, the four operations, and what `graph.py check` enforces |
+| run `/explore` — propose, port, ablate, or adjudicate an architecture change | `skills/explore/references/experiment-graph.md` — node schema, the seven states, the four operations, and what `graph.py check` enforces |
 | **decide whether a search is `/train-tune`'s or `/explore`'s** — the user said "搜一下" and it is not obvious which | `lifecycle/references/skill-graph.md` — "`/train-tune` vs `/explore`". The test is not params-vs-code, and getting it backwards costs a whole tune session |
 | **hold more than one machine at a time** — `/train-tune` with `max_concurrent > 1`, any search that rents rather than borrows | `lifecycle/references/fleet.md` — slots vs machines, owned-before-rented, what a partial sweep is worth, preemptible as the search default, and why a preempted trial must never be read as a refuted hypothesis |
 | find code/data on disk, resolve a `${}` reference, or create a project | `lifecycle/references/layout.md` — workspace and tool-repo location, code-source resolution, full file layout, dataset identity and census records, `${}` syntax |
@@ -117,7 +117,7 @@ what, what is deliberately *not* a phase (Archive, Train), and how `/data` compo
 
 **Every skill below is written `/name`, and that is deliberate.** Installed as a plugin the
 invocable name is `mlclaw:<name>` — plugin skills are *always* namespaced, so that two
-marketplaces cannot collide. Loaded standalone from `.claude/skills/` it is the bare `/name`.
+marketplaces cannot collide. Loaded standalone from `skills/` it is the bare `/name`.
 Both forms resolve to the same `SKILL.md`, so the prose keeps the short one: there are ~1270
 skill references across this repo, and rewriting them would be wrong in whichever of the two
 modes it was not written for. ‼️ Read a bare `/train-run` as *"the train-run skill"*, and take

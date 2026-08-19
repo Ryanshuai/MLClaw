@@ -13,8 +13,8 @@ Contracts enforced:
   fleet.md -> "Owned before rented"
   fleet.md -> "A preempted trial is not a failed trial"
   fleet.md -> "Cost is reported before it is spent, once, by the caller"
-  `.claude/skills/lease/references/contract.md` -> "Scope completeness"
-  `.claude/skills/lease/references/contract.md` -> "Normalized enums"
+  `skills/lease/references/contract.md` -> "Scope completeness"
+  `skills/lease/references/contract.md` -> "Normalized enums"
 
 What is deliberately NOT checked: anything that needs a provider to answer. These run
 with no network and no credential, which is the only way they mean the same thing on
@@ -45,7 +45,7 @@ def capture(fn, *args, **kwargs):
 
 
 class SweepScope(unittest.TestCase):
-    """`.claude/skills/lease/references/contract.md` -> "Scope completeness".
+    """`skills/lease/references/contract.md` -> "Scope completeness".
 
     A host that did not answer holds an unknown number of claims; a host that answered
     and reported none holds zero. `sweep` used to return `[]` for both, and `reap` then
@@ -91,7 +91,7 @@ class SweepScope(unittest.TestCase):
 
 
 class LeaseMergesScope(TempDirCase):
-    """`.claude/skills/lease/references/contract.md` -> "Scope completeness", layer 2's half.
+    """`skills/lease/references/contract.md` -> "Scope completeness", layer 2's half.
 
     L2 merges several adapters. Two ways the merged answer can lie: an adapter that
     errored outright (its whole scope went unread, and `errors` is a field nobody reads
@@ -190,7 +190,7 @@ class ReapSaysWhetherItLooked(TempDirCase):
 
 
 class StoppedIsNotGone(unittest.TestCase):
-    """`.claude/skills/lease/references/contract.md` -> "Normalized enums".
+    """`skills/lease/references/contract.md` -> "Normalized enums".
 
     Compute billing stops on STOPPED and storage billing does not. Mapping it to `gone`
     closes the lease row, drops the box out of every "what am I paying for" report, and
@@ -513,7 +513,7 @@ class PreemptionIsNotEvidence(TempDirCase):
 
 
 class StorageIsTheSecondMeter(TempDirCase):
-    """`.claude/skills/lease/references/contract.md` -> "Storage is the second meter".
+    """`skills/lease/references/contract.md` -> "Storage is the second meter".
 
     Compute is the loud meter and it is the one that stops by itself: a dead-man switch
     fires, the instance halts, the large number goes to zero. Storage is the quiet one —
@@ -654,7 +654,7 @@ class StorageIsTheSecondMeter(TempDirCase):
 
 
 class OwnershipIsNeverTheClock(unittest.TestCase):
-    """`.claude/skills/lease/references/contract.md` -> "Ownership on a shared account".
+    """`skills/lease/references/contract.md` -> "Ownership on a shared account".
 
     Only bites on a sweep scoped wider than this tool's own tag — but that is exactly the
     sweep somebody runs to ask "what is burning money", and on a shared account the answer
@@ -764,7 +764,7 @@ class AnAuditEventIsParsedDeepEnough(unittest.TestCase):
 
 
 class EveryAdapterDeclaresItsLimits(unittest.TestCase):
-    """`.claude/skills/lease/references/contract.md` -> "The eight verbs", "What every
+    """`skills/lease/references/contract.md` -> "The eight verbs", "What every
     adapter declares", "Shape resolution: requirements → machine type is a lookup, not a
     translation".
 
@@ -863,7 +863,7 @@ class EveryAdapterDeclaresItsLimits(unittest.TestCase):
 
 
 class TableProvenance(unittest.TestCase):
-    """`.claude/skills/lease/references/contract.md` -> "Shape resolution: requirements → machine type is a lookup, not a translation".
+    """`skills/lease/references/contract.md` -> "Shape resolution: requirements → machine type is a lookup, not a translation".
 
     `arch` decides whether a job's kernels load at all, and price is what a human is
     quoted. Both are hand-written here, and a hand-written value that reads like a
@@ -1104,7 +1104,7 @@ class WhatARoundCostIsAFloorUnlessEverythingWasPriced(unittest.TestCase):
 
 
 class TheOnlyLambdaRentalPathRefusesAnImmortalBox(unittest.TestCase):
-    """`.claude/skills/lease/references/contract.md` -> Money rule 3; `provider_lambda`
+    """`skills/lease/references/contract.md` -> Money rule 3; `provider_lambda`
     docstring -> "The three places this provider is not Nebius" (3).
 
     These two assertions were free while a second implementation existed: the global

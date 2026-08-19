@@ -193,7 +193,7 @@ class Template(unittest.TestCase):
         """The check_sources/resolve_assets split, caught mechanically so it
         cannot come back."""
         import re
-        skills_dir = os.path.join(REPO_ROOT, ".claude", "skills")
+        skills_dir = os.path.join(REPO_ROOT, "skills")
         defined = set(self.t["steps"])
         for sub in self.t["steps"].values():
             if isinstance(sub, dict):

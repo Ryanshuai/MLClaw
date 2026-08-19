@@ -179,7 +179,7 @@ class TheTierIsTheWeakestEvidenceNotTheStrongest(ConcludeCase):
 
 
 class ARefutedPremiseContestsItsDependentsRatherThanErasingThem(ConcludeCase):
-    """`.claude/skills/explore/references/experiment-graph.md` §3.5 — two records
+    """`skills/explore/references/experiment-graph.md` §3.5 — two records
     may disagree without one being erased — and CLAUDE.md -> `/explore`, whose
     `graph.py check` 「reports, never repairs」.
 
