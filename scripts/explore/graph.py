@@ -102,6 +102,24 @@ DECLARED_STATES = ("running", "filled", "closed", "killed")
 # parent, while a port without one cannot attribute its delta to anything.
 KINDS = ("measurement", "port", "original", "task_driven")
 
+# The three kinds that WRITE CODE, and therefore the three that need a tree of
+# their own. A `measurement` card reads the corpus or a checkpoint that already
+# exists; the other three all end in an edit to the training repo, which is why
+# concurrency is a question about exactly these and not about the queue at large.
+#
+# ‼️ This is not a stylistic preference, it is forced by MLClaw's own layout.
+# `run-mechanics.md -> Code snapshot` resolves ONE path per stage --
+# `stages/<stage>/code/_source if exists else stages/<stage>/code` -- and for
+# `code_source.source: local` that path is a single external directory acting as
+# a soft link. So arms opened in parallel share a working tree BY CONSTRUCTION,
+# while `SKILL.md` Stage 3 says to compute the ready set and open all of it at
+# once. The two rules meet in `code_snapshot.py`, which reads that tree at launch.
+CODE_KINDS = ("port", "original", "task_driven")
+
+# An arm that has not closed. Compares greater than any ISO timestamp, so an open
+# arm overlaps everything that had not already ended when it started.
+OPEN_END = "\uffff"
+
 # Four deaths. Their revive_if are differently shaped, which is why the kind is
 # recorded rather than a free-text reason: written interchangeably they are the
 # same as not written.
@@ -817,6 +835,133 @@ def _share_scope(node, corpus):
     return None
 
 
+# ------------------------------------------------------------------ the tree
+#
+# ‼️ THE AXIS EVERY OTHER INVARIANT ON THIS LIST IS BLIND TO. The rest govern the
+# data axis (`_share_scope`), the config axis (`_delta`) and the record axis
+# (`_binding`). None of them can see the working tree an arm was written in, and
+# a contaminated tree breaks all three of their conclusions while satisfying
+# every one of their checks.
+#
+# The mechanism, end to end: two ports are half-written in one directory when arm
+# A launches. `code_snapshot.py` walks that directory, writes `code_dirty.patch`,
+# and the patch carries B's edits along with A's. It applies cleanly. It
+# reproduces exactly. `_delta` compares `runtime_params` + `workload` and sees
+# nothing, because an uncommitted edit to a model file moves neither. The record
+# is internally consistent, reproducible, and about a binary nobody described --
+# which is the RUBBER-STAMP shape SKILL.md's run-card chapter names: a guard
+# reporting the very conclusion it exists to exclude.
+#
+# What this costs is not one arm. Stage 6's "the control must be re-run on
+# today's code" has no referent once "today" differs per arm, so the whole
+# round's comparisons go with it.
+
+
+def _tree_shape(tree):
+    """-> [complaint]. The field's shape, checked where it is WRITTEN.
+
+    `set` is generic (`--set field=value`), so without this a malformed `tree`
+    lands silently and `check` reports it a round later -- by which time the
+    directory it describes has moved on. Same reason `depends_on` is parsed here
+    rather than left to `check`.
+    """
+    out = []
+    if not isinstance(tree, dict):
+        return ["`tree` must be an object: "
+                '{"branch": "explore/N07-cdn", "base": "<sha>", "head": "<sha>", '
+                '"path": "<worktree dir>"}']
+    unknown = sorted(set(tree) - {"branch", "base", "head", "path"})
+    if unknown:
+        out.append(f"`tree` has unknown key(s) {unknown} -- one of branch/base/head/path")
+    if not tree.get("branch"):
+        out.append("`tree.branch` is what makes an arm's edits its own; a tree with no "
+                   "branch is the shared directory under another name")
+    return out
+
+
+def _tree_scope(node, base):
+    """The code axis's scope guard -- `_share_scope`, one axis over.
+
+    A share measured on another corpus is not weak evidence, it is evidence about
+    another question. An arm branched off another base is not a weak comparison,
+    it is another experiment: the control is DEFINED by the base, so two arms on
+    two bases have no common control and their deltas may not be subtracted --
+    CLAUDE.md's "Never compare metrics across different `mode` or non-equivalent
+    `scope`", read on the code axis.
+
+    -> a complaint string, or None. Returns None when the round declared no base:
+    that is a round-level finding reported once, not a per-card one.
+    """
+    tree = node.get("tree")
+    if not isinstance(tree, dict):
+        return None
+    want = (base or {}).get("commit")
+    if not want:
+        return None
+    got = tree.get("base")
+    if not got:
+        return ("declares a branch and no `base` -- nothing says what its delta is "
+                "measured against, which is the whole reason the branch exists")
+    if got != want:
+        return (f"branched from {got[:12]}, this round's base is {want[:12]} -- the "
+                f"control is defined by the base, so this arm shares no control with "
+                f"the rest of the round. Rebase it onto the round's base, or say out "
+                f"loud that it belongs to a different round")
+    return None
+
+
+def _running_window(node, run, run_status, still_open):
+    """When this card's arm was actually open -> (start, end); either may be None.
+
+    ‼️ The RUN's clock first, the card's history second, and that order is the
+    same principle as `arm_tree_disagrees_with_run`: `started_at` + `duration_s`
+    were written by the thing that ran, while the card's history is written by
+    whoever was typing. The card is the fallback, not the source.
+
+    The window is needed for cards that have SINCE settled -- somebody asks six
+    weeks later why two numbers disagree, and by then both cards read `closed`.
+    A check that only looked at what is running now would be silent at exactly
+    the moment it is consulted.
+
+    `end is None` means the record does not say, and that is a THIRD state --
+    unknown, which is not "did not overlap". The one substitution made here is
+    for an arm that has not closed, whose end is not unknown but not yet.
+    """
+    start = end = None
+    if run_status == "ok" and run:
+        start = run.get("started_at")
+        dur = run.get("duration_s")
+        if start and isinstance(dur, (int, float)) and not isinstance(dur, bool):
+            try:
+                from datetime import datetime, timedelta
+                end = (datetime.fromisoformat(start)
+                       + timedelta(seconds=float(dur))).isoformat()
+            except (TypeError, ValueError):
+                end = None
+    hstart = hend = None
+    for h in node.get("history") or []:
+        to, at = h.get("to"), h.get("at")
+        if not at:
+            continue
+        if to == "running" and hstart is None:
+            hstart = at
+        elif hstart is not None and hend is None and to in ("filled", "closed", "killed"):
+            hend = at
+    start = start or hstart
+    end = end or hend
+    if end is None and still_open:
+        end = OPEN_END
+    return start, end
+
+
+def _overlap(wa, wb):
+    """-> True / False / None. None means the record cannot say, which is not False."""
+    (sa, ea), (sb, eb) = wa, wb
+    if sa is None or sb is None or ea is None or eb is None:
+        return None
+    return sa < eb and sb < ea
+
+
 # ---------------------------------------------------------------- ADD
 
 def cmd_add(a):
@@ -861,6 +1006,7 @@ def cmd_set(a):
     p = _paths(a.project, a.session)
     graph = _load(p["graph"], "graph")
     node = _node(graph, a.id)
+    declared_prev = node["state"]
     if node["state"] in SETTLED:
         refuse(f"card {a.id} is {node['state']} -- settled cards are not edited",
                fix="a conclusion that changed is a NEW card citing this one; "
@@ -893,12 +1039,41 @@ def cmd_set(a):
                 if b is None:
                     broke(f"depends_on entry {i!r}: `blocks` must be one of "
                           f"{list(DEP_BLOCKS)}. A bare id means `launch`.")
+        if k == "tree":
+            for msg in _tree_shape(node.get("tree")):
+                broke(msg)
+            # ‼️ A branch name is as unrecyclable as a queue number, and for the
+            # same reason: it is what a settled card's evidence resolves THROUGH.
+            # Pointing a second arm at an existing branch moves the ref, and the
+            # first card's `head` stops naming anything -- silently, because a
+            # card whose branch was reused and a card whose branch was never
+            # written read identically. `run-card.md` rule 4 is the same fact
+            # from the other side: a patch depends on that commit still existing,
+            # so after a force-push or a deleted branch `checkout` fails where a
+            # tarball would not.
+            want = (node.get("tree") or {}).get("branch")
+            for other in graph.get("nodes", []):
+                if other["id"] == node["id"]:
+                    continue
+                if ((other.get("tree") or {}).get("branch")) == want:
+                    broke(f"branch {want!r} already belongs to card {other['id']} -- "
+                          f"two arms on one branch cannot be told apart, and moving "
+                          f"the ref destroys whichever of them settles first. Give "
+                          f"this arm its own")
     missing = _missing_fields(node)
     corpus = graph.get("corpus") or {}
     scope = _share_scope(node, corpus)
     if scope:
         missing.append("premise_share (" + scope + ")")
-    prev = node["state"]
+    # ‼️ Captured BEFORE the set loop, and it used to be captured after. A
+    # `--set state=running` writes the label itself, so reading `prev` afterwards
+    # compared `running` against `running` and appended nothing -- which left the
+    # card recording when it became `ready` and when it was `filled`, and NOT when
+    # its arm opened. Invariant 17 needs exactly that instant (two arms in one tree
+    # is a question about overlap), and more generally a state somebody DECLARED is
+    # the one a history is for; a derived one can be recomputed from the card at
+    # any time.
+    prev = declared_prev
     # Write the DERIVED state forward, all three of them. This used to stop at
     # draft -> blocked, which is why `ready` was in the vocabulary and unreachable:
     # a complete card with no dependencies sat in `blocked` -- contradicting that
@@ -1529,6 +1704,101 @@ def cmd_check(a):
                  "the floor is declared `external`: legitimate, grounded by its "
                  "`sources`, and worth what a claim is worth. `unchecked` says what "
                  "nobody here could confirm -- every result it gates carries that")
+
+    # 17. MLClaw add -- the tree each arm was written in, and whether two arms
+    #     were ever written in the same one at the same time. The rationale is on
+    #     `_tree_scope` / `_running_window`; the short form is that this is the one
+    #     axis invariants 8, 13 and 15 are structurally blind to, and a tree two
+    #     arms shared satisfies every one of them while making all three wrong.
+    base = graph.get("base") or {}
+    code_arms = [n for n in nodes if n.get("kind") in CODE_KINDS and n.get("run_id")]
+    if code_arms and not base.get("commit"):
+        flag("major", "round_base_undeclared", None,
+             f"{len(code_arms)} arm(s) here write code and `base.commit` is null. "
+             f"Nothing says what any of them branched FROM, so `arm_base_drift` "
+             f"cannot be evaluated at all -- the same shape as a `premise_share` "
+             f"with no `measured_on`, and it is absence, not a pass")
+    windows = {}
+    for n in code_arms:
+        nid = n["id"]
+        dst = _derive_state(n, by_id, corpus)[0]
+        arm_run, arm_st = _run_json(a.project, target, n["run_id"])
+        windows[nid] = _running_window(n, arm_run, arm_st, dst == "running")
+        tree = n.get("tree")
+        if not isinstance(tree, dict) or not tree.get("branch"):
+            flag("major", "arm_tree_unrecorded", nid,
+                 "an arm that writes code, with no `tree`. Its code identity exists "
+                 "only in the run's snapshot -- which was read off whatever the shared "
+                 "`code_dir` happened to hold at launch. That is a record of a moment, "
+                 "not a record of an arm")
+            continue
+        sc = _tree_scope(n, base)
+        if sc:
+            flag("critical", "arm_base_drift", nid, sc)
+        if arm_st != "ok":
+            continue
+        code = arm_run.get("code") or {}
+        rb, rh = code.get("branch"), code.get("origin_commit")
+        # ‼️ Both ends, exactly as invariant 13 does it -- and here the two ends
+        # have DIFFERENT authors, which is the point. The card is written from
+        # intent, before the arm opens. The snapshot is read off a disk, at
+        # launch. When they disagree, the disk is right and the card is a
+        # description of a run that did not happen.
+        if rb and tree.get("branch") and rb != tree["branch"]:
+            flag("critical", "arm_tree_disagrees_with_run", nid,
+                 f"the card says this arm was written on {tree['branch']!r}; its run "
+                 f"snapshot was taken on {rb!r}. One of these two records is about a "
+                 f"different piece of code, and only one of them was read off a disk")
+        if rh and tree.get("head") and rh != tree["head"]:
+            flag("critical", "arm_tree_disagrees_with_run", nid,
+                 f"the card's head {tree['head'][:12]} is not the snapshot's "
+                 f"{rh[:12]}. Believe the tree and fix the card")
+    # Two arms, one tree. ‼️ Severity does NOT reward silence: a pair that names
+    # one shared branch and a pair that names none are both critical once the
+    # overlap is proven. The floor's four states were forced by exactly the
+    # opposite arrangement -- writing the truth cost two criticals while inventing
+    # a reference cost one major -- and a record layer that pays a bonus to the
+    # least honest route gets what it pays for. What clears this finding is two
+    # DISTINCT branches, which is also the only thing that fixes the underlying
+    # problem.
+    for i, n in enumerate(code_arms):
+        for m in code_arms[i + 1:]:
+            tn = (n.get("tree") or {}).get("branch")
+            tm = (m.get("tree") or {}).get("branch")
+            if tn and tm and tn != tm:
+                continue
+            ov = _overlap(windows[n["id"]], windows[m["id"]])
+            if ov is False:
+                continue
+            named = (f"one branch ({tn})" if tn or tm else
+                     "no branch either of them names -- and MLClaw resolves ONE "
+                     "`code_dir` per stage, so unless something moved them they are "
+                     "the same directory")
+            if ov is None:
+                flag("major", "concurrent_arms_one_tree", n["id"],
+                     f"{n['id']} and {m['id']} sit on {named}, and `history` does not "
+                     f"record when either arm was open. Whether they overlapped is "
+                     f"UNKNOWN, which is a third answer and not a no")
+                continue
+            dirty = 0
+            for c in (n, m):
+                r, st_ = _run_json(a.project, target, c["run_id"])
+                if st_ == "ok":
+                    dirty = max(dirty, (r.get("code") or {}).get("dirty_files_count") or 0)
+            if dirty:
+                flag("critical", "concurrent_arms_one_tree", n["id"],
+                     f"{n['id']} and {m['id']} were open AT THE SAME TIME on {named}, "
+                     f"and a snapshot was taken over {dirty} uncommitted file(s). "
+                     f"Nothing can show that patch holds only its own arm's edits -- "
+                     f"and it applies cleanly and reproduces exactly either way, so "
+                     f"the failure leaves no trace anywhere else in this record")
+            else:
+                flag("critical", "concurrent_arms_one_tree", n["id"],
+                     f"{n['id']} and {m['id']} were open AT THE SAME TIME on {named}. "
+                     f"Both snapshots are clean commits, so WHAT RAN is pinned -- but "
+                     f"in one tree the later commit contains the earlier arm's "
+                     f"technique, and no field here says which one that is. A "
+                     f"two-technique arm reported as a single-key delta")
 
     order = {"critical": 0, "major": 1, "minor": 2}
     findings.sort(key=lambda f: order[f["severity"]])

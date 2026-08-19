@@ -138,9 +138,10 @@ stages/<target_stage>/runs/   ← arms live here, not under exploration
 **`graph.json` is the half a machine reads; `config.json -> design_doc` points at the half a
 person reads.** They are not copies of each other: `graph.py check` reads the first, a person
 reads the second. The original put both in one section of `model_design.md`, and that is
-precisely why those seven invariants said "scan periodically" while nobody ever scanned.
+precisely why the original's seven invariants said "scan periodically" while nobody ever
+scanned.
 
-### Those seven invariants now have an executor
+### Those invariants now have an executor
 
 ```bash
 python <mlclaw_root>/scripts/explore/graph.py <verb> --project <PROJECT>
@@ -153,14 +154,21 @@ python <mlclaw_root>/scripts/explore/graph.py <verb> --project <PROJECT>
 | `ready` | compute the ready set. Empty set + non-empty queue = **deadlock**, and it says whether that is a cycle or one shared predecessor |
 | `fill` | results onto the card, **plus a list of what this result may have voided** (whatever depends on it, whatever cites it in prose, the constants that came from this run) |
 | `close` | a verdict, or one of the four deaths |
-| `check` | ‼️ **those seven invariants plus MLClaw's two additions. Reports, never repairs** |
+| `check` | ‼️ **every invariant in `references/experiment-graph.md` → §4. Reports, never repairs** |
 | `status` | a one-screen summary. ⬜🟨🟩 are **computed live** (the same function as `ready`), and a stored label lagging the derivation is reported separately as `state_drift` |
 
 **`check`'s exit code follows CLAUDE.md "Script Integration": a critical finding exits 1 — the
 script worked and the answer is no. That is not a failure, so do not fall back and work around
 it by hand.**
 
-MLClaw's two additions are two rules the original executed from memory:
+‼️ **No count anywhere on this page, deliberately.** The one that used to be here said *seven
+plus two* while `check` emitted more than twenty, and it had already been wrong for several
+rounds — a number with two authors, drifting exactly the way `/agent-refactor` calls a double
+protocol, in the one direction that reads as reassuring. **The list is §4's table**; whichever of
+the two you change, change both.
+
+Two of MLClaw's additions are worth reading here, because they are rules the original executed
+from memory:
 
 - **`premise_share`'s `measured_on` must equal this graph's `corpus`.** A share quoted from
   elsewhere is not weak evidence; it is evidence about a different question — so it is treated as
@@ -480,6 +488,21 @@ A linear queue **serialises things that could have run at once**, which is pure 
 card carries a `depends_on: [entry ids]` field, and the first action of any working session is:
 **compute every entry whose dependencies are met (the ready set) and open all of them in parallel,
 within capacity.**
+
+#### ‼️ Parallel arms share a working tree BY CONSTRUCTION — give each one its own
+
+The sentence above is the one that creates the problem, so it is answered here. MLClaw resolves
+**one** code path per stage (`run-mechanics.md → Code snapshot`), and `code_snapshot.py` reads
+that directory at launch. Two ports half-written in it, and arm A's `code_dirty.patch` carries
+arm B's edits — **it applies, it reproduces exactly, and nothing raises**: `graph.py check`'s
+delta guard compares `runtime_params` + `workload`, and an uncommitted edit to a model file moves
+neither. A clean record of a run that did not happen.
+
+One `git worktree add ../arms/N07 -b explore/N07-cdn <round base>` per code-writing arm, recorded
+in the card's `tree` and checked by `graph.py check`. Freeze `graph.json → base.commit` when the
+round opens, and **do not merge a winner while another arm is in flight** — that redefines the
+control under everything still running. Mechanics, the four keys, and what may not be thrown
+away: `references/experiment-graph.md → §1.5`.
 
 #### ‼️ An edge answers "what does it block" before "does it exist"
 
@@ -825,7 +848,11 @@ disagree are what to watch.**
   cycle is long. At the end, mechanically re-check that every hunk carries a citation (this is a
   check, not a debate).
 - **One technique, one branch, gated by a flag, defaulting to off.** Then an ablation is one flag
-  flip and the control is the same binary.
+  flip and the control is the same binary. ‼️ **"Branch" here is an `if`, not a git branch — and
+  the git one is a separate requirement, not an alternative.** Write the flag in this arm's own
+  worktree (`references/experiment-graph.md → §1.5`); the flag is what makes the *ablation*
+  controlled, the worktree is what keeps the *record* of two concurrent ports from being one
+  record twice.
 - ‼️ **The most frequent porting bug is "a config item was added but never passed down", and it
   never raises.** A real case this round: `infer_9dof.py` gained `voxel_size` / `thin_cloud` while
   neither dataset construction site passed them, so weights trained on 145k deduplicated points were
@@ -1046,6 +1073,15 @@ Two hard constraints:
   one thing at a time").
 - **No refactor before this round's conclusions are fully written back**, and none while a large run is
   in flight — otherwise the code that ran and the record of it do not match.
+- ‼️ **A merge is a code change between two experiments, so it obeys both rules above.** The
+  winning arms land at **close-out, not on winning**: `graph.json → base.commit` is frozen for the
+  round, and moving it under an arm still running voids that arm's control by exactly the
+  criterion this stage is judged on. Merge them **one at a time, each re-verified with every new
+  flag off** — two winners from one round is a flag combination nobody ran, which is this
+  section's third bullet arriving by a different door. The losing branches are not tidied up in
+  the same pass: a `killed` card's `revive_if` means going back to that code, and `run-card.md`
+  rule 4 says what a patch is worth once its commit has been GC'd. `/ara build` is what makes
+  them survive; a branch is not a retention policy.
 
 ### The definition of a round ending
 

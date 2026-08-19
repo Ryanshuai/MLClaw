@@ -21,6 +21,9 @@ from helpers import TempDirCase, run_script
 SCRIPT = "explore/graph.py"
 CORPUS = {"dataset_id": "boxes", "snapshot": "260731",
           "declared_at": "2026-08-01T00:00:00+00:00"}
+BASE_SHA = "a" * 40
+BASE = {"commit": BASE_SHA, "repo_subdir": None,
+        "declared_at": "2026-08-01T00:00:00+00:00"}
 HERE = os.path.dirname(os.path.abspath(__file__))
 TEMPLATES = os.path.join(os.path.dirname(HERE), "lifecycle", "exploration")
 
@@ -37,6 +40,7 @@ class GraphCase(TempDirCase):
         super().setUp()
         g = _template("graph.json")
         g["corpus"] = dict(CORPUS)
+        g["base"] = dict(BASE)
         self.write_json(os.path.join("stages", "exploration", "graph.json"), g)
         for n in ("baseline.json", "state.json", "config.json"):
             self.write_json(os.path.join("stages", "exploration", n), _template(n))
@@ -64,6 +68,14 @@ class GraphCase(TempDirCase):
         self.g("set", "--id", nid, "--set", "premise=p",
                "--set", "premise_share=" + json.dumps(share),
                "--set", "oracle_ceiling=1.2")
+        # ‼️ The fixture models the discipline rather than a violation of it: a
+        # `port` card gets its own branch off the round's base, because that is
+        # what a correct round looks like and an incorrect one must be built
+        # deliberately by the test that is about it. A shared fixture that quietly
+        # breaks an invariant leaves every OTHER test reading a critical it did
+        # not ask for, which is how a suite stops saying anything.
+        self.g("set", "--id", nid, "--set", "tree=" + json.dumps(
+            {"branch": "explore/" + nid, "base": BASE_SHA}))
         return nid
 
     def run_it(self, nid, run_id="run_20260817_000000"):
@@ -1688,6 +1700,186 @@ class AConditionIsRetiredOnTheRecord(GraphCase):
         rc, out, _ = self.g("reread", "--id", b, "--condition", a, "--note", "n")
         self.assertEqual(self.card(b)["verdict"], "won")
         self.assertIn("dispute", out["note"])
+
+
+class TwoArmsMayNotShareAWorkingTree(GraphCase):
+    """references/experiment-graph.md -> §1.5 and §4, and CLAUDE.md -> "Never let a
+    value have two authors" read on the code axis.
+
+    SKILL.md Stage 3 says to compute the ready set and open all of it at once,
+    while run-mechanics.md resolves ONE `code_dir` per stage. So parallel arms
+    share a working tree by construction, and `code_snapshot.py` reads that tree
+    at launch: with two ports half-written in it, arm A's `code_dirty.patch`
+    carries arm B's edits.
+
+    ‼️ Every other check on this graph is blind to it. `_delta` compares
+    `runtime_params` + `workload`, and an uncommitted edit to a model file moves
+    neither -- so the declared single-key delta is honoured, the patch applies,
+    the run reproduces exactly, and the number belongs to a binary nobody
+    described. That is the rubber-stamp shape: a guard reporting the conclusion
+    it exists to exclude.
+    """
+
+    def _run(self, nid, started, dur=3600, dirty=0, branch=None, head=None):
+        rec = {"run_id": "run_" + nid, "status": "completed",
+               "started_at": started, "duration_s": dur,
+               "code": {"branch": branch or ("explore/" + nid),
+                        "origin_commit": head or ("c" * 40),
+                        "dirty_files_count": dirty}}
+        self.write_json(os.path.join("stages", "training", "runs",
+                                     "run_" + nid, "run.json"), rec)
+
+    def _two_arms(self):
+        a, b = self.add_complete(), self.add_complete()
+        self.run_it(a, run_id="run_" + a)
+        self.run_it(b, run_id="run_" + b)
+        return a, b
+
+    def _hand_write_tree(self, ids, tree):
+        """‼️ By hand, because `set` REFUSES to write two arms onto one branch --
+        the collision is caught where it is written, which is better than
+        reporting it a round later. `check` is the backstop for the graph that
+        was edited around the tool, exactly as it is for `depends_on`, and that
+        is the state this constructs."""
+        g = self.graph()
+        for n in g["nodes"]:
+            if n["id"] in ids:
+                if tree is None:
+                    n.pop("tree", None)
+                else:
+                    n["tree"] = dict(tree)
+        self.write_json(os.path.join("stages", "exploration", "graph.json"), g)
+
+    def test_distinct_branches_off_the_round_base_are_clean(self):
+        a, b = self._two_arms()
+        self._run(a, "2026-08-17T01:00:00+00:00")
+        self._run(b, "2026-08-17T01:30:00+00:00")
+        rc, out, _ = self.g("check")
+        names = [f["invariant"] for f in out["findings"]]
+        self.assertNotIn("concurrent_arms_one_tree", names)
+        self.assertNotIn("arm_tree_unrecorded", names)
+
+    def test_overlapping_arms_on_one_branch_are_critical(self):
+        a, b = self._two_arms()
+        self._hand_write_tree((a, b), {"branch": "explore/shared", "base": BASE_SHA})
+        self._run(a, "2026-08-17T01:00:00+00:00", branch="explore/shared")
+        self._run(b, "2026-08-17T01:30:00+00:00", branch="explore/shared")
+        rc, out, _ = self.g("check")
+        self.assertEqual(rc, 1)
+        self.assertIn("concurrent_arms_one_tree",
+                      [f["invariant"] for f in out["findings"]])
+
+    def test_silence_is_not_cheaper_than_the_truth(self):
+        """‼️ The severity may not reward not writing the field down. The noise
+        floor's four states were forced by exactly the opposite arrangement --
+        the honest form cost two criticals and an invented reference cost one
+        major -- and a record layer that pays a bonus to the least honest route
+        gets what it pays for. Two arms naming one branch and two arms naming
+        none are the same finding at the same severity; what clears it is two
+        DISTINCT branches, which is also the only thing that fixes the round.
+        """
+        a, b = self._two_arms()
+        self._hand_write_tree((a, b), None)
+        self._run(a, "2026-08-17T01:00:00+00:00", branch=None)
+        self._run(b, "2026-08-17T01:30:00+00:00", branch=None)
+        rc, out, _ = self.g("check")
+        self.assertEqual(rc, 1, "not recording the tree must not be the cheap route")
+        sev = {f["invariant"]: f["severity"] for f in out["findings"]}
+        self.assertEqual(sev.get("concurrent_arms_one_tree"), "critical")
+
+    def test_arms_that_did_not_overlap_are_not_flagged(self):
+        """One tree used SERIALLY is how this pipeline has always worked and is not
+        a defect. The finding is about overlap, not about the directory."""
+        a, b = self._two_arms()
+        self.g("fill", "--id", a, "--result", '{"x":1}', "--tier", "T1")
+        self.g("fill", "--id", b, "--result", '{"x":1}', "--tier", "T1")
+        self._hand_write_tree((a, b), {"branch": "explore/shared", "base": BASE_SHA})
+        self._run(a, "2026-08-17T01:00:00+00:00", dur=3600, branch="explore/shared")
+        self._run(b, "2026-08-17T03:00:00+00:00", dur=3600, branch="explore/shared")
+        rc, out, _ = self.g("check")
+        self.assertNotIn("concurrent_arms_one_tree",
+                         [f["invariant"] for f in out["findings"]])
+
+    def test_an_unknown_overlap_is_a_third_answer(self):
+        """A run record that is not here cannot say when the arm was open, and
+        `unknown` is not `did not overlap` -- the same discipline `census.py`
+        keeps between `gone` and `unreachable`."""
+        a, b = self._two_arms()
+        for nid in (a, b):
+            self.g("fill", "--id", nid, "--result", '{"x":1}', "--tier", "T1")
+        self._hand_write_tree((a, b), {"branch": "explore/shared", "base": BASE_SHA})
+        g = self.graph()
+        for n in g["nodes"]:            # no run record, and no `running` history
+            n["history"] = [h for h in n["history"] if h.get("to") != "running"]
+        self.write_json(os.path.join("stages", "exploration", "graph.json"), g)
+        rc, out, _ = self.g("check")
+        sev = {f["invariant"]: f["severity"] for f in out["findings"]}
+        self.assertEqual(sev.get("concurrent_arms_one_tree"), "major")
+
+    def test_an_arm_off_another_base_shares_no_control(self):
+        """Stage 6: the control must be re-run on today's code. Once "today"
+        differs per arm the sentence has no referent -- so this is `_share_scope`
+        one axis over, and the same verdict: not weak evidence, a different
+        question."""
+        a = self.add_complete()
+        self.run_it(a, run_id="run_" + a)
+        self.g("set", "--id", a, "--set",
+               'tree={"branch":"explore/x","base":"' + "b" * 40 + '"}')
+        rc, out, _ = self.g("check")
+        self.assertEqual(rc, 1)
+        self.assertIn("arm_base_drift", [f["invariant"] for f in out["findings"]])
+
+    def test_the_card_and_the_snapshot_must_agree(self):
+        """Both ends, as invariant 13 does it -- and here the two ends have
+        different authors. The card is written from intent before the arm opens;
+        the snapshot is read off a disk at launch. When they disagree the disk is
+        right, and the card describes a run that did not happen."""
+        a = self.add_complete()
+        self.run_it(a, run_id="run_" + a)
+        self._run(a, "2026-08-17T01:00:00+00:00", branch="explore/somewhere-else")
+        rc, out, _ = self.g("check")
+        self.assertEqual(rc, 1)
+        self.assertIn("arm_tree_disagrees_with_run",
+                      [f["invariant"] for f in out["findings"]])
+
+    def test_a_branch_name_is_as_unrecyclable_as_a_queue_number(self):
+        """It is what a settled card's evidence resolves THROUGH. Pointing a
+        second arm at it moves the ref, and the first card's `head` stops naming
+        anything -- silently, because a reused branch and one never written read
+        identically."""
+        a, b = self.add_complete(), self.add_complete()
+        rc, out, err = self.g("set", "--id", b, "--set",
+                              'tree={"branch":"explore/' + a + '","base":"'
+                              + BASE_SHA + '"}')
+        self.assertNotEqual(rc, 0)
+        self.assertEqual((self.card(b).get("tree") or {}).get("branch"),
+                         "explore/" + b)
+
+    def test_a_measurement_card_needs_no_tree_of_its_own(self):
+        """It reads the corpus or a checkpoint that already exists. Requiring a
+        branch of it would put a second SHA into the round for nothing to
+        reconcile."""
+        rc, out, _ = self.g("add", "--title", "count the premise share",
+                            "--kind", "measurement", "--criterion", "share",
+                            "--guardrail", "n", "--kill-condition", "n/a")
+        nid = out["id"]
+        self.g("set", "--id", nid, "--set", "oracle_ceiling=1.2")
+        self.run_it(nid, run_id="run_" + nid)
+        rc, out, _ = self.g("check")
+        self.assertNotIn(nid, [f["card"] for f in out["findings"]
+                               if f["invariant"] == "arm_tree_unrecorded"])
+
+    def test_a_declared_transition_lands_in_the_history(self):
+        """‼️ `prev` used to be read AFTER the set loop, so `--set state=running`
+        compared `running` against `running` and appended nothing. The card then
+        recorded when it became `ready` and when it was `filled`, and never when
+        its ARM OPENED -- which is precisely the instant the overlap question is
+        about."""
+        a = self.add_complete()
+        self.run_it(a, run_id="run_" + a)
+        tos = [h.get("to") for h in self.card(a)["history"]]
+        self.assertIn("running", tos)
+
 
 
 if __name__ == "__main__":

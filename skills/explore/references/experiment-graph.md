@@ -48,7 +48,69 @@ Every node is a card. **A node missing any field may not enter `ready`.**
 | `oracle ceiling` | mandatory whenever it can be measured at zero cost (rule 2.6) | you may be running an arm whose ceiling is zero |
 | `kill_condition` | what result counts as this being dead | a proposal that cannot state a kill condition is itself unfit (rule 6) |
 | `run id` | written on entering `running`, including the code snapshot hash | afterwards there is no way to confirm several arms ran the same code |
+| ‼️ `tree` | `{branch, base, head, path}` — **which working tree this arm's code was written in**. Required of the three kinds that write code (`port` / `original` / `task_driven`), never of a `measurement` | see §1.5. Two arms edited in one directory produce two records that are internally consistent, reproducible, and about the same binary — and **nothing else on this list can see it** |
 | **the other end** | that run's `run.json -> verifies` must point back at this card and carry `falsified_if` | ‼️ **a one-way pointer reads exactly like a binding**, until somebody follows it. `check` verifies both ends |
+
+---
+
+### 1.5 The tree an arm is written in
+
+**Every other field on this card describes an experiment. This one describes the directory it
+was typed into**, and it is here because MLClaw's own layout makes parallel arms share one.
+
+`run-mechanics.md → Code snapshot` resolves **one** code path per stage —
+`stages/<stage>/code/_source if exists else stages/<stage>/code`, and for
+`code_source.source: local` that is a single external directory acting as a soft link.
+SKILL.md Stage 3 says to compute the ready set and **open all of it at once**. So two ports get
+written into one directory, and `code_snapshot.py` reads that directory at launch.
+
+‼️ **What that produces is not a broken record. It is a clean one about a run that did not
+happen.** Arm A's `code_dirty.patch` carries arm B's half-written port. It applies. It
+reproduces exactly. `check`'s invariant 13 compares `runtime_params` + `workload` and sees
+nothing, because an uncommitted edit to a model file moves neither — so the declared single-key
+delta is honoured, the binding resolves both ways, and the number belongs to a binary nobody
+described. **That is the rubber-stamp shape** SKILL.md's run-card chapter names: a guard
+reporting the very conclusion it exists to exclude.
+
+The isolation is one line of git per arm:
+
+```bash
+git worktree add ../arms/N07 -b explore/N07-cdn <round base sha>
+```
+
+‼️ **Then launch the arm FROM that worktree, not from the shared directory** — otherwise the
+worktree bought nothing. `run-card.md` measured what this looks like when it is got wrong: the
+training machines are populated by `rsync --exclude '.git'` and therefore **have no `.git` at
+all**, so a snapshot's file list must come from a filesystem walk either way. What the worktree
+changes is *which* directory gets walked and rsynced. Point `code_dir` (or the rsync source) at
+`../arms/N07`, and record where it was in `tree.path`.
+
+**The record of it is this field, and the record is the half nothing could hold before.** Four
+keys: `branch` (the arm's own, never another card's), `base` (the sha it forked from, which must
+be the round's), `head` (what actually ran — compared against the run's snapshot), `path` (where
+the worktree is, so somebody else can find it).
+
+#### The round's `base`, and why it is frozen
+
+`graph.json → base.commit` is the twin of `corpus`: that one pins what every `premise_share` was
+measured on, this one pins **what every arm's delta is measured against**. Stage 6's *"the
+control must be re-run on today's code"* has no referent the moment "today" differs per arm —
+which is what a winner merged mid-round does to every arm still running.
+
+So: **the winner does not merge when it wins. It merges when the round closes**, and the merge is
+governed by Stage 8's technical-debt gate rather than by this file — a merge is a code change
+between two experiments, with the same acceptance criterion (*every new flag off, bit-exact with
+the pre-merge state*) and the same rule about flag combinations. Two winners merged from one
+round is a combination nobody ran.
+
+#### What may not be thrown away
+
+A `killed` card carries `revive_if`, and reviving means going back to that code. The branch is a
+convenience; **the evidence is `tree.head` plus the run's snapshot**, and `run-card.md` rule 4 is
+blunt about what that is worth on its own — a patch depends on that commit still existing, so
+after a force-push, a deleted branch or a GC, `checkout` fails where a tarball would not. For a
+round you intend to cite, `/ara build` is what makes the losing arms survive; a branch is not a
+retention policy.
 
 ---
 
@@ -324,6 +386,9 @@ experiment does". The graph is the same:
 | ‼️ **Every 🟪 has somebody responsible for pushing it to ✅** | 🟪 piling up = a pile of results nobody has explained, while the queue keeps running |
 | ‼️ Every cited **constant** still holds in `state.json` | that file opens by saying "change the weights, the frame sampling or the metric and this entire file is void". `check` compares `measured_at` against `corpus.declared_at` |
 | ‼️ **Every card's `premise_share.measured_on` equals this graph's `corpus`** | MLClaw's addition. A share quoted from elsewhere is treated as **having no premise** — the other face of CLOSE's "never kill a proposal with another corpus's number", on the justification side |
+| ‼️ **No two arms were open at once in one working tree** (`concurrent_arms_one_tree`) | MLClaw's addition, and the axis the rest of this table is blind to — see §1.5. ‼️ **Severity does not reward silence**: two arms naming one branch and two arms naming none are the same finding at the same level, because the floor's four states were forced by exactly the opposite arrangement — the honest form cost two criticals and an invented reference cost one major. What clears it is two DISTINCT branches, which is also the only thing that fixes the round. Overlap is computed from `run.json → started_at` + `duration_s`, and when the record cannot say, that is **unknown** and reported as such — never as "did not overlap" |
+| ‼️ **Every code-writing arm has a `tree`, and its `base` is the round's** (`arm_tree_unrecorded` / `arm_base_drift` / `round_base_undeclared`) | MLClaw's addition. `arm_base_drift` is `premise_share`'s scope guard one axis over, with the same verdict: an arm off another base is not a weak comparison, it shares **no control** with the round. And with `base.commit` null the axis is simply unmeasured — reported at round level, once, as absence rather than as a pass |
+| ‼️ **The card's tree and the run's snapshot agree** (`arm_tree_disagrees_with_run`) | MLClaw's addition, and the two ends here have **different authors**: the card is written from intent before the arm opens, the snapshot is read off a disk at launch. When they disagree the disk is right and the card describes a run that did not happen |
 | ‼️ **Every result carries a tier** | MLClaw's addition. A number with no tier gets promoted into a hard conclusion, which is exactly where a false noise floor comes from |
 | **With no noise floor, there are no T2/T3 results** | MLClaw's addition. With no floor, "no significant improvement" is **undecidable**, not negative |
 | ‼️ **When the floor is `external`, there are no T3 results** | MLClaw's addition. An external floor supports T2 — not supporting that would be a door opening onto a wall; it does not support T3, because T3 is the last gate before a large run and the tier at which blind human review is mandatory. A soft number being promoted into a hard conclusion is the whole reason the tier ladder exists |
