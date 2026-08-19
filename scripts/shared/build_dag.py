@@ -26,11 +26,19 @@ DEFAULT_COLOR = {"accent": "#b0b0b0", "bg": "#252525", "border": "rgba(176,176,1
 
 
 def load_runs(project_root):
-    """Scan for run.json and manifest.json, return list of run dicts."""
-    runs = []
+    """-> (run dicts, [paths that could not be read]).
+
+    A run.json this cannot read is not a run that is not there. Dropping it
+    silently draws a board with a hole in it that looks exactly like a board of
+    everything -- and the board is what somebody reads to decide which run fed
+    which. So the paths come out and the caller says so, the same split
+    `census.py` draws between a machine that did not answer and a directory
+    that is genuinely empty.
+    """
+    runs, unreadable = [], []
     stages_dir = os.path.join(project_root, "stages")
     if not os.path.isdir(stages_dir):
-        return runs
+        return runs, unreadable
 
     for stage_name in sorted(os.listdir(stages_dir)):
         runs_dir = os.path.join(stages_dir, stage_name, "runs")
@@ -48,14 +56,21 @@ def load_runs(project_root):
             if not os.path.isfile(run_file):
                 continue
 
-            with open(run_file, encoding="utf-8") as f:
-                run = json.load(f)
+            try:
+                with open(run_file, encoding="utf-8") as f:
+                    run = json.load(f)
+            except (OSError, ValueError):
+                unreadable.append(run_file)
+                continue
+            if not isinstance(run, dict):
+                unreadable.append(run_file)
+                continue
 
             run.setdefault("stage", stage_name)
             run.setdefault("run_id", run_name)
             runs.append(run)
 
-    return runs
+    return runs, unreadable
 
 
 def build_graph(runs):
@@ -403,9 +418,12 @@ def main():
             project_name = json.load(f).get("name", project_name)
 
     # Build
-    runs = load_runs(project_root)
+    runs, unreadable = load_runs(project_root)
     if not runs:
         print(f"No runs found in {project_root}/stages/*/runs/")
+        if unreadable:
+            print(f"  ‼️ {len(unreadable)} run record(s) could not be READ, which is "
+                  f"not the same as there being none: " + ", ".join(unreadable))
         sys.exit(1)
 
     nodes, cross_edges, fork_edges = build_graph(runs)
@@ -415,6 +433,11 @@ def main():
         f.write(html_content)
 
     print(f"DAG written to {output_path} ({len(nodes)} nodes, {len(cross_edges)} lineage edges, {len(fork_edges)} forks)")
+    if unreadable:
+        # A board missing a node looks exactly like a board of everything.
+        print(f"  ‼️ INCOMPLETE: {len(unreadable)} run record(s) could not be read and "
+              f"are not on the graph: " + ", ".join(unreadable))
+    sys.exit(1 if unreadable else 0)
 
 
 if __name__ == "__main__":
