@@ -16,6 +16,11 @@ TWO CHECKS, AND THEY CATCH DIFFERENT SHAPES.
                This is the one reachability, zero-reference and coverage are all blind to
                -- it is not a symbol, and a prose copy is never executed.
 
+‼️ THIS FILE IS IN ITS OWN SCOPE, and the first thing it caught after being committed
+was ITSELF: three places where this docstring and these reasons spelled the values they
+forbid spelling. They now name the symbols instead. A ratchet exempt from its own rule is
+the shape the rule exists to stop.
+
 ‼️ THE SCANNER READS EACH VALUE FROM ITS AUTHOR AND HARD-CODES NONE OF THEM. A check
 carrying its own copy of the value would be the worst kind of second author: one that
 always reports agreement.
@@ -25,7 +30,7 @@ a lie:
 
   * `.md` prose. A specification document naming the format it specifies is the
     declaration, not a copy -- `skills/lease/references/contract.md` writing
-    `mlclaw-<lease_id>` is where that convention is stated. `/agent-refactor` Step 5b
+    `<TAG_PREFIX><lease_id>` is where that convention is stated. `/agent-refactor` Step 5b
     sweeps prose once per round, by hand, against the value read from the author.
   * Values too common to attribute: short strings and small integers. `2` and `255` match
     over a thousand lines apiece, and a check whose output is noise is a check people
@@ -73,15 +78,16 @@ ALLOWED = {
         "IS the check; importing it would delete what the assertion is for -- the same "
         "reason `contract_triage_verifier.VERDICTS` restates `triage.VERDICTS`.",
     ("contracts/contract_ara.py", "CENSUS_PREFIX"):
-        "a docstring CITING `references/layout.md`'s declared filename format "
-        "(`census/census_{ts}.json`). Same carve-out as `.md` prose, which lands inside a "
+        "a docstring CITING `references/layout.md`'s declared census filename format. "
+        "Same carve-out as `.md` prose, which lands inside a "
         "`.py` here: code must import the name, documentation may name the format it "
         "declares. What this does not excuse is `census.py` BUILDING an id from a literal, "
         "which is what this check just caught.",
     ("scripts/lease/provider_ssh.py", "TAG_PREFIX"):
-        "`ControlPath=~/.ssh/mlclaw-%C` is an ssh control-socket path, not a lease tag. "
-        "One string, two concepts: `sweep` filters on the `mlclaw_tag` label and never on "
-        "this. Renaming the tag namespace must NOT move the socket path.",
+        "its ssh `ControlPath` happens to start with the same string, and is a control-"
+        "socket path rather than a lease tag. One string, two concepts: `sweep` filters on "
+        "the `mlclaw_tag` label and never on this, so renaming the tag namespace must NOT "
+        "move the socket path.",
 }
 
 # Below these, a literal matches too much of the repo to attribute to anyone.
@@ -130,6 +136,35 @@ def attributable(value):
     if isinstance(value, int):
         return abs(value) >= MIN_INT_ABS
     return False
+
+
+class OneListIsASubsetOfTheOtherOrReproCannotSeeIt(unittest.TestCase):
+    """CLAUDE.md -> "Never silently": *Never let a value have two authors*, in the one
+    shape that rule's usual fix would break.
+
+    `repro.py -> KEY_PACKAGES` and `capture_env.py -> DEFAULT_ML_PACKAGES` are a
+    DELIBERATE second author: the second decides which package versions get recorded, the
+    first the narrower set whose drift moves a verdict to `drifted` rather than merely
+    `also_changed`. Merging them would destroy that -- `repro.py:93` argues it directly
+    ("a verdict that fires on a pandas patch bump gets ignored, and the torch bump gets
+    ignored along with it").
+
+    What the two DO owe each other is containment, and nothing was checking it. `repro`
+    can only judge drift on a package `capture_env` actually captured, so a name added to
+    `KEY_PACKAGES` and not to `DEFAULT_ML_PACKAGES` is a package whose version silently
+    changes what the model computes and which `/repro` can never see. It holds today; it
+    held by luck.
+    """
+
+    def test_every_key_package_is_one_capture_env_records(self):
+        key = module_constants("scripts/repro/repro.py").get("KEY_PACKAGES")
+        captured = module_constants("scripts/shared/capture_env.py").get("DEFAULT_ML_PACKAGES")
+        self.assertTrue(key, "KEY_PACKAGES not found at its author")
+        self.assertTrue(captured, "DEFAULT_ML_PACKAGES not found at its author")
+        uncaptured = sorted(set(key) - set(captured))
+        self.assertEqual(uncaptured, [],
+                         "these decide a `drifted` verdict but capture_env never records "
+                         "their version, so /repro can never see them move")
 
 
 class EveryRegisteredValueHasOneAuthor(unittest.TestCase):
