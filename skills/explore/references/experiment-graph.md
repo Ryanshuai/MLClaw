@@ -211,6 +211,7 @@ ready = { n | n 的卡填全 且 premise_share 在本 corpus 上 且 n.依赖 �
 | ‼️ **每张卡的 `premise_share.measured_on` 等于本图的 `corpus`** | MLClaw 加的。引自别处的份额按**没有前提**处理 —— 这是本文件 CLOSE 那条「不许用另一个语料的数去杀一个提案」的另一面，立项侧 |
 | ‼️ **每个结果带档位** | MLClaw 加的。没档位的数会被提拔成硬结论，那正是一个假噪声底的来路 |
 | **没有噪声底时，没有 T2/T3 结果** | MLClaw 加的。没有底，「没有显著提升」是**不可判定**，不是否定 |
+| ‼️ **噪声底本身**：`measured_on` 等于本图 corpus · `runs` 至少两条且 `mode`/`scope` 一致 · `measured_at` 不早于 corpus 声明 | MLClaw 加的。这三个字段**原来一个读者都没有**（而 `_comment_runs` 写着 check 会去读 run.json）。于是 `_share_scope` 会因为一个外来份额**杀掉一张卡**，而一个外来的**底**却被静默接受，继续管着全轮所有结果的措辞 —— 底是更贵的那一侧。‼️ 出了范围/过期的底按**没测**处理（它自己的 `retires_on` 就写着 `dataset_snapshot`），T2/T3 全部掉回 `[T1 趋势]`；而**读不到 run 记录**是第三种事实，报 major、不当作作废 |
 
 这几条要**每轮重查**，不是一次性检查：`state.json` 里的数带着 `measured_at` 那一列，
 就是为了让这次扫描能做。全部由 `graph.py check` 执行 —— 对应的契约在

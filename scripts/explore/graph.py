@@ -59,6 +59,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(
 from _records import (atomic_write_json, broke, digits as _digits,  # noqa: E402
                       emit, now_utc, read_json, refuse)
 from _vocab import PROVENANCE, TIERS  # noqa: E402
+from compare import scope_key, scopes_equivalent, UNSPECIFIED_SCOPE  # noqa: E402
 
 # Seven, and the load-bearing split is `filled` vs `closed`: 有结果 != 有结论.
 # A card whose numbers are in but whose verdict is not is `filled`. Collapsing
@@ -307,6 +308,121 @@ def _run_json(project, target_stage, run_id):
             return json.load(f), "ok"
     except (OSError, json.JSONDecodeError):
         return None, "unreadable"
+
+
+def _floor(baseline, corpus, project, stages):
+    """The noise floor, judged. -> ([(severity, detail)], usable).
+
+    ‼️ `usable` is the point. Every other field of `baseline.json` had NO READER:
+    `runs` carried a written promise -- "`graph.py check` re-reads their `run.json`
+    and refuses a floor whose runs disagree on `mode`, `scope`, or dataset
+    identity" -- and no code anywhere did that. `measured_on` said "Must equal
+    `graph.json -> corpus`" and nothing compared them. `measured_at` was checked
+    for constants and not for the floor. So `check` asked exactly two things of
+    the number CLAUDE.md calls the one every later verdict rests on: is it
+    grounded, and is it null.
+
+    That is the worse half of the asymmetry. `_share_scope` treats a share
+    measured on another corpus as ABSENT and kills the card -- the 47%-vs-4.62%
+    rule -- while a FLOOR from another corpus was accepted in silence and went on
+    gating the wording of every result in the round. Same rule, one level up, and
+    the floor is the more expensive place to be wrong: the recorded failure is a
+    floor reported as 0.06 that was really 0.25, a "+0.30 is real" conclusion
+    built on it, and the whole thing withdrawn.
+
+    So an out-of-scope or stale floor is not a weak floor. It is NOT MEASURED --
+    which `retires_on: [..., dataset_snapshot]` already said in writing -- and
+    every T2/T3 result in the round drops to `[T1 trend]`, exactly as it would
+    with no floor at all.
+    """
+    out = []
+    if baseline.get("value") is None:
+        return out, False
+    usable = True
+
+    # 1. Which corpus. `_share_scope`'s rule, applied to the floor.
+    on = baseline.get("measured_on") or {}
+    if not on.get("dataset_id"):
+        out.append(("critical", "the floor has no `measured_on` -- a floor is a property "
+                                "of (weights x measurement x corpus), so one quoted from "
+                                "nowhere gates nothing. Treated as NOT MEASURED"))
+        usable = False
+    elif (on.get("dataset_id") != corpus.get("dataset_id")
+            or on.get("snapshot") != corpus.get("snapshot")):
+        out.append(("critical",
+                    "the floor was measured on %s@%s, this graph's corpus is %s@%s -- "
+                    "its own `retires_on` lists `dataset_snapshot`, so this floor is "
+                    "RETIRED, not weak. Treated as NOT MEASURED"
+                    % (on.get("dataset_id"), on.get("snapshot"),
+                       corpus.get("dataset_id"), corpus.get("snapshot"))))
+        usable = False
+
+    # 2. Staleness, symmetric with the constants scan below.
+    declared = corpus.get("declared_at")
+    if declared and baseline.get("measured_at") and baseline["measured_at"] < declared:
+        out.append(("major",
+                    "the floor was measured %s, before this corpus was declared %s"
+                    % (baseline["measured_at"], declared)))
+
+    # 3. The two runs behind it. A spread needs two measurements, and they must
+    #    differ in NOTHING but the seed -- two ids that differ in anything else
+    #    measure that difference and call it noise.
+    runs = baseline.get("runs") or []
+    if len(runs) < 2:
+        out.append(("critical",
+                    "a floor is a SPREAD and %d run(s) cannot produce one. `runs` names "
+                    "the repeat measurements it was computed from; without them nobody "
+                    "can re-check what was actually varied" % len(runs)))
+        return out, False
+
+    read, unread = [], []
+    for rid in runs:
+        rec, st = None, "absent"
+        for stage in stages:
+            rec, st = _run_json(project, stage, rid)
+            if st == "ok":
+                break
+        if st == "ok":
+            read.append((rid, rec))
+        else:
+            unread.append((rid, st))
+    if unread:
+        # ‼️ Never report data you could not look at. A run whose record is absent
+        # and one whose record is corrupt are two facts, and neither is agreement.
+        out.append(("major",
+                    "could not read the run record for %s (searched %s) -- so `mode` and "
+                    "`scope` agreement is UNVERIFIED for this floor, not confirmed"
+                    % (", ".join("%s [%s]" % (r, st) for r, st in unread),
+                       "/".join(stages))))
+    if len(read) < 2:
+        return out, usable
+
+    modes = {r.get("mode") for _, r in read}
+    if len(modes) > 1:
+        out.append(("critical",
+                    "the floor's runs disagree on `mode` (%s). A debug spread and a "
+                    "production spread are different quantities that share a name, and "
+                    "the difference between them is not noise. Treated as NOT MEASURED"
+                    % ", ".join(sorted(str(m) for m in modes))))
+        usable = False
+    keys = {scope_key(r.get("scope")) for _, r in read}
+    if keys == {UNSPECIFIED_SCOPE}:
+        out.append(("major",
+                    "none of the floor's runs recorded a `scope`, so nothing can tell "
+                    "whether they measured the same thing. An unrecorded scope is not "
+                    "evidence of an equal workload -- it is a gap, and it is why this "
+                    "is reported rather than passed"))
+    elif len(keys) > 1:
+        first = read[0]
+        for rid, rec in read[1:]:
+            if not scopes_equivalent(first[1].get("scope"), rec.get("scope")):
+                out.append(("critical",
+                            "the floor's runs %s and %s were measured on non-equivalent "
+                            "`scope` -- what that spread measures is the scope difference. "
+                            "Treated as NOT MEASURED" % (first[0], rid)))
+                usable = False
+                break
+    return out, usable
 
 
 def _delta(node, run, parent_run):
@@ -913,7 +1029,13 @@ def cmd_resolve(a):
 # ---------------------------------------------------------------- CHECK
 
 def cmd_check(a):
-    """The seven invariants, plus the two MLClaw adds. Reports; repairs nothing.
+    """Every invariant this record can be held to. Reports; repairs nothing.
+
+    ‼️ No count in this sentence, deliberately. It said "the seven invariants,
+    plus the two MLClaw adds" while `flag()` emitted twenty-one distinct names --
+    a number with two authors, drifting exactly the way `/agent-refactor` calls
+    双协议. The list is the numbered blocks below and the human-facing table in
+    `references/experiment-graph.md`; whichever of those you change, change both.
 
     Cited by contracts/contract_explore.py. Every finding names the card and what
     the breakage means -- a check whose output does not say which side to change
@@ -1070,13 +1192,28 @@ def cmd_check(a):
                  f"before this corpus was declared {declared} -- state.json's own "
                  f"header voids it")
 
+    # 16. MLClaw add -- the floor itself, and it had no reader but `_grounding`.
+    # Stages: the floor's runs are `/eval-run`'s per `baseline.json -> _comment_runs`,
+    # but a project may measure it in its target stage, so both are searched and
+    # "absent" means neither had it.
+    stages = ["evaluation"] + ([target] if target != "evaluation" else [])
+    floor_findings, floor_usable = _floor(baseline, corpus, a.project, stages)
+    for sev, detail in floor_findings:
+        flag(sev, "noise_floor_unusable", None, detail)
+
     # The floor gates the WORDING of every result, not any arm.
-    if baseline.get("value") is None:
+    # ‼️ Keyed on `floor_usable`, not on `value is not None`. A retired floor and
+    # an absent one gate identically because they ARE the same fact -- reading a
+    # present-but-void number as a measured floor is how the 0.06 that was really
+    # 0.25 got quoted, and `retires_on` says so in the record itself.
+    if not floor_usable:
         hard = [n["id"] for n in nodes
                 if n.get("tier") in ("T2", "T3") and n.get("result") is not None]
         if hard:
+            why = ("no measured floor" if baseline.get("value") is None
+                   else "a floor that does not hold here (see `noise_floor_unusable`)")
             flag("critical", "hard_result_without_noise_floor", None,
-                 f"{hard} report at T2/T3 with no measured floor. Without one, "
+                 f"{hard} report at T2/T3 with {why}. Without one, "
                  f"'no significant improvement' is UNDECIDABLE, not negative -- "
                  f"those results are [T1 trend] at best")
 

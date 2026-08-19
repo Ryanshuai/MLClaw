@@ -1189,6 +1189,134 @@ class AnArmIsItsRunIdNotItsLabel(GraphCase):
         self.assertEqual(status["counts"]["filled"], 1)
         self.assertEqual(status["counts"]["running"], 0)
 
+class AFloorFromAnotherCorpusIsNotAFloor(GraphCase):
+    """`baseline.json -> _comment_measured_on` ("Must equal `graph.json -> corpus`"),
+    `_comment_runs` ("`graph.py check` re-reads their `run.json` and refuses a floor
+    whose runs disagree on `mode`, `scope`, or dataset identity") and CLAUDE.md ->
+    "Never silently": 「Never let a share measured somewhere else stand for this
+    corpus」, one level up.
+
+    ‼️ Every one of those was written and NONE was enforced: `runs`, `measured_on`
+    and `measured_at` had no reader anywhere, so `check` asked the floor exactly
+    two questions — is it grounded, and is it null. The asymmetry is the defect:
+    `_share_scope` kills a CARD whose share came from another corpus, while a
+    FLOOR from another corpus was accepted in silence and went on gating the
+    wording of every result in the round. The floor is the more expensive side to
+    be wrong on, being the thing every later verdict rests on.
+
+    A retired floor gates identically to an absent one because it IS the same
+    fact, which `retires_on: [..., dataset_snapshot]` already said in the record.
+    """
+
+    RUN = {"mode": "production", "scope": {"samples": 500, "dataset": "boxes"}}
+
+    def _floor(self, **over):
+        b = _template("baseline.json")
+        b.update({"value": 2.93, "unit": "AP", "metric": "mAP0.85",
+                  "runs": ["run_a", "run_b"],
+                  "measured_on": {"dataset_id": CORPUS["dataset_id"],
+                                  "snapshot": CORPUS["snapshot"]},
+                  "sources": [{"ref": "scripts/seed_floor.py", "command": "python x.py",
+                               "quote": "spread 2.93", "kind": "derived"}]})
+        b.update(over)
+        self.write_json(os.path.join("stages", "exploration", "baseline.json"), b)
+
+    def _runs(self, a=None, b=None):
+        for rid, rec in (("run_a", a), ("run_b", b)):
+            if rec is not None:
+                self.write_json(os.path.join("stages", "evaluation", "runs", rid,
+                                             "run.json"), rec)
+
+    def _t2(self):
+        nid = self.add_complete()
+        self.run_it(nid)
+        self.fill(nid, tier="T2")
+
+    def _find(self):
+        rc, out, _ = self.g("check")
+        return {f["invariant"]: f for f in out["findings"]}
+
+    def test_a_matching_corpus_with_two_agreeing_runs_is_clean(self):
+        self._floor()
+        self._runs(dict(self.RUN), dict(self.RUN))
+        self._t2()
+        f = self._find()
+        self.assertNotIn("noise_floor_unusable", f)
+        self.assertNotIn("hard_result_without_noise_floor", f)
+
+    def test_a_floor_from_another_snapshot_is_treated_as_not_measured(self):
+        self._floor(measured_on={"dataset_id": "boxes", "snapshot": "260601"})
+        self._runs(dict(self.RUN), dict(self.RUN))
+        self._t2()
+        f = self._find()
+        self.assertEqual(f["noise_floor_unusable"]["severity"], "critical")
+        self.assertIn("RETIRED", f["noise_floor_unusable"]["detail"])
+        self.assertIn("hard_result_without_noise_floor", f,
+                      "a retired floor must gate exactly like an absent one")
+
+    def test_a_floor_with_no_corpus_at_all_is_treated_as_not_measured(self):
+        self._floor(measured_on={"dataset_id": None, "snapshot": None})
+        self._runs(dict(self.RUN), dict(self.RUN))
+        self._t2()
+        self.assertIn("hard_result_without_noise_floor", self._find())
+
+    def test_one_run_cannot_produce_a_spread(self):
+        self._floor(runs=["run_a"])
+        self._runs(dict(self.RUN))
+        self._t2()
+        f = self._find()
+        self.assertEqual(f["noise_floor_unusable"]["severity"], "critical")
+        self.assertIn("SPREAD", f["noise_floor_unusable"]["detail"])
+
+    def test_runs_disagreeing_on_mode_are_not_measuring_noise(self):
+        self._floor()
+        self._runs(dict(self.RUN), dict(self.RUN, mode="debug"))
+        self._t2()
+        f = self._find()
+        self.assertEqual(f["noise_floor_unusable"]["severity"], "critical")
+        self.assertIn("mode", f["noise_floor_unusable"]["detail"])
+        self.assertIn("hard_result_without_noise_floor", f)
+
+    def test_runs_disagreeing_on_scope_are_not_measuring_noise(self):
+        self._floor()
+        self._runs(dict(self.RUN), dict(self.RUN, scope={"samples": 20,
+                                                        "dataset": "boxes"}))
+        self._t2()
+        f = self._find()
+        self.assertEqual(f["noise_floor_unusable"]["severity"], "critical")
+        self.assertIn("scope", f["noise_floor_unusable"]["detail"])
+
+    def test_a_run_record_that_could_not_be_read_is_its_own_fact(self):
+        """‼️ CLAUDE.md -> "Never silently": 「Never report data you could not look
+        at」. Unverified agreement is not agreement — but it is not a disagreement
+        either, so it is a major that names what went unchecked, and the floor
+        still stands."""
+        self._floor()
+        self._runs(dict(self.RUN))
+        self._t2()
+        f = self._find()
+        self.assertEqual(f["noise_floor_unusable"]["severity"], "major")
+        self.assertIn("run_b", f["noise_floor_unusable"]["detail"])
+        self.assertIn("UNVERIFIED", f["noise_floor_unusable"]["detail"])
+        self.assertNotIn("hard_result_without_noise_floor", f,
+                         "could-not-look must not be reported as a void floor")
+
+    def test_two_unrecorded_scopes_are_a_gap_not_a_verdict(self):
+        self._floor()
+        self._runs(dict(self.RUN, scope={}), dict(self.RUN, scope={}))
+        self._t2()
+        f = self._find()
+        self.assertEqual(f["noise_floor_unusable"]["severity"], "major")
+        self.assertNotIn("hard_result_without_noise_floor", f)
+
+    def test_a_floor_older_than_the_corpus_is_stale(self):
+        self._floor(measured_at="2026-07-01T00:00:00+00:00")
+        self._runs(dict(self.RUN), dict(self.RUN))
+        f = self._find()
+        self.assertEqual(f["noise_floor_unusable"]["severity"], "major")
+        self.assertIn("before this corpus was declared",
+                      f["noise_floor_unusable"]["detail"])
+
 
 if __name__ == "__main__":
     unittest.main()
