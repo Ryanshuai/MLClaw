@@ -44,7 +44,7 @@ class Fixture(TempDirCase):
     def rundir(self, name, run):
         d = self.path(name)
         os.makedirs(d, exist_ok=True)
-        with open(os.path.join(d, "run.json"), "w") as fh:
+        with open(os.path.join(d, "run.json"), "w", encoding="utf-8") as fh:
             json.dump(run, fh)
         return d
 
@@ -259,7 +259,7 @@ class ItDoesNotReimplementWhatEvalAlreadyOwns(Fixture):
         self.assertIn("compare_baseline.py", rep["note"])
 
     def test_it_has_no_direction_handling(self):
-        with open(os.path.join(os.path.dirname(bd.__file__), "baseline_delta.py")) as fh:
+        with open(os.path.join(os.path.dirname(bd.__file__), "baseline_delta.py"), encoding="utf-8") as fh:
             src = fh.read()
         for owned_elsewhere in ("maximize", "minimize", "primary_metric"):
             self.assertNotIn('"%s"' % owned_elsewhere, src,

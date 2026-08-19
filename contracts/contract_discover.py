@@ -538,7 +538,7 @@ class TheCredentialFreeFamilyIsProbedWithoutAKey(DiscoverCase):
         for i in range(n):
             d = self.path(rel, f"run-{i}")
             os.makedirs(d, exist_ok=True)
-            open(os.path.join(d, f"events.out.tfevents.{i}.h.0"), "w").close()
+            open(os.path.join(d, f"events.out.tfevents.{i}.h.0"), "w", encoding="utf-8").close()
         return self.path(rel)
 
     def test_tfevents_on_disk_verify_with_no_credential_present(self):

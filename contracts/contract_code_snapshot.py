@@ -271,7 +271,7 @@ class RecordStatesEachFactOnce(GitRepoCase):
         path = self.path(*run, "code_dirty.patch")
         if not os.path.exists(path):
             return 0
-        with open(path) as f:
+        with open(path, encoding="utf-8") as f:
             return sum(1 for line in f if line.startswith("diff --git "))
 
     def test_count_matches_the_patch_it_describes(self):

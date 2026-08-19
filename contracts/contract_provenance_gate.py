@@ -138,7 +138,7 @@ class TheGateFailsLoudNotOpen(unittest.TestCase):
 
     def test_unreadable_json_is_exit_2_not_a_clear(self):
         d = project([], write=False)
-        with open(os.path.join(d, "stages", "training", "provenance.json"), "w") as f:
+        with open(os.path.join(d, "stages", "training", "provenance.json"), "w", encoding="utf-8") as f:
             f.write("{not json")
         rc, out = gate(d, "production")
         self.assertEqual(rc, 2)
@@ -147,7 +147,7 @@ class TheGateFailsLoudNotOpen(unittest.TestCase):
 
     def test_unresolved_of_the_wrong_type_is_exit_2(self):
         d = project([], write=False)
-        with open(os.path.join(d, "stages", "training", "provenance.json"), "w") as f:
+        with open(os.path.join(d, "stages", "training", "provenance.json"), "w", encoding="utf-8") as f:
             json.dump({"unresolved": {"key": "x"}}, f)
         self.assertEqual(gate(d, "production")[0], 2)
 

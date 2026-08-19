@@ -43,7 +43,7 @@ def main():
         sys.exit(2)
 
     try:
-        with open(run_json_path) as f:
+        with open(run_json_path, encoding="utf-8") as f:
             run = json.load(f)
     except (OSError, json.JSONDecodeError) as e:
         sys.stderr.write(f"finalize_run: cannot read {run_json_path}: {e}\n")
@@ -93,7 +93,7 @@ def main():
             warnings.append(f"status=failed but no {stderr_path} — error field left as-is")
 
     try:
-        with open(run_json_path, "w") as f:
+        with open(run_json_path, "w", encoding="utf-8") as f:
             json.dump(run, f, indent=2)
     except OSError as e:
         sys.stderr.write(f"finalize_run: cannot write {run_json_path}: {e}\n")

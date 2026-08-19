@@ -412,7 +412,7 @@ class ABandIsMeasuredNotGuessed(ReproCase):
         sid, band = self.session_with_band()
         self.assertIsNotNone(band["declared_tolerance_note"])
         self.assertIn("WIDER", band["declared_tolerance_note"])
-        s = json.load(open(os.path.join(self.project, "repro", sid, "session.json")))
+        s = json.load(open(os.path.join(self.project, "repro", sid, "session.json"), encoding="utf-8"))
         self.assertTrue(any("WIDER" in c for c in s["caveats"]))
 
 
@@ -499,7 +499,7 @@ class TheProbeIsTheStrongerCheck(ReproCase):
 
     def test_null_predictions_agree_does_not_read_as_true(self):
         sid, _ = self.session_with_band((48.42, 48.55, 48.48), *self.PROBE)
-        s = json.load(open(os.path.join(self.project, "repro", sid, "session.json")))
+        s = json.load(open(os.path.join(self.project, "repro", sid, "session.json"), encoding="utf-8"))
         self.assertIsNone(s["predictions_agree"],
                           "no probe run is a third state, not agreement")
 
@@ -629,7 +629,7 @@ class TimestampsAreUTCWithAnOffset(ReproCase):
 
     def test_every_written_timestamp_carries_an_offset(self):
         sid, _ = self.session_with_band()
-        s = json.load(open(os.path.join(self.project, "repro", sid, "session.json")))
+        s = json.load(open(os.path.join(self.project, "repro", sid, "session.json"), encoding="utf-8"))
         stamps = [s["opened_at"]] + [t["at"] for t in s["trials"]]
         stamps.append(s["band"]["measured_at"])
         for value in stamps:
@@ -1146,7 +1146,7 @@ class ABandsSourceDecidesWhichWayItCanAnswer(ReproCase):
         joined = " ".join(out["caveats_added"])
         self.assertIn("best-checkpoint pick", joined)
         self.assertIn("bias always runs that way", joined)
-        s = json.load(open(os.path.join(self.project, "repro", sid, "session.json")))
+        s = json.load(open(os.path.join(self.project, "repro", sid, "session.json"), encoding="utf-8"))
         self.assertTrue(any("best-checkpoint pick" in c for c in s["caveats"]),
                         "and it has to reach `caveats`, where the verdict is read")
 

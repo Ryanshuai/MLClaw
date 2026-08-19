@@ -578,7 +578,7 @@ class TheCensusRecordsTheContractItWasTakenUnder(TempDirCase):
                                    project, "--dataset", "ds", "--json")
         self.assertEqual(rc, 0, err)
         cdir = os.path.join(project, "datasets", "ds", "census")
-        rec = json.load(open(os.path.join(cdir, sorted(os.listdir(cdir))[-1])))
+        rec = json.load(open(os.path.join(cdir, sorted(os.listdir(cdir))[-1]), encoding="utf-8"))
         self.assertIn("taken_under", rec)
         self.assertEqual(rec["taken_under"]["identity"]["unit_glob"], "*/*")
         self.assertEqual(rec["taken_under"]["completeness"]["marker"], "DONE")

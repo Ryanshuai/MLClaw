@@ -478,7 +478,10 @@ def http_json(url, payload=None, token=None, timeout=20.0, headers=None):
         body = ""
         try:
             body = (e.read() or b"")[:300].decode("utf-8", "replace")
-        except Exception:
+        except (OSError, ValueError):
+            # The status code is already the answer; the body is only a nicer
+            # message. `ValueError` is the closed-stream case. Narrowed to match
+            # the sibling handlers below rather than catching a bug in them.
             pass
         return e.code, None, body or str(e)
     except urllib.error.URLError as e:

@@ -40,7 +40,7 @@ class AskCase(TempDirCase):
                           "--id", aid, "--says", says, *extra)
 
     def record(self, aid):
-        with open(os.path.join(self.project, "asks", f"{aid}.json")) as f:
+        with open(os.path.join(self.project, "asks", f"{aid}.json"), encoding="utf-8") as f:
             return json.load(f)
 
     def status(self, *extra):

@@ -187,7 +187,7 @@ def load_inputs(output_json_path, jsonl_path, run_dir=None):
     has exactly one answer per call. Pass it to `unnormalized_finding`.
     """
     try:
-        with open(output_json_path) as f:
+        with open(output_json_path, encoding="utf-8") as f:
             output_json = json.load(f)
     except (OSError, json.JSONDecodeError) as e:
         raise StreamError(f"cannot read {output_json_path}: {e}")

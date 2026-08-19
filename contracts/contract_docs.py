@@ -625,10 +625,10 @@ class AProjectCarriesAPointerBackToTheRules(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             root = os.path.join(d, "demo")
             os.makedirs(root)
-            with open(os.path.join(root, "CLAUDE.md"), "w") as fh:
+            with open(os.path.join(root, "CLAUDE.md"), "w", encoding="utf-8") as fh:
                 fh.write("mine\n")
             out = self._make(root)
-            with open(os.path.join(root, "CLAUDE.md")) as fh:
+            with open(os.path.join(root, "CLAUDE.md"), encoding="utf-8") as fh:
                 self.assertEqual(fh.read(), "mine\n")
             self.assertIn("already exists", out.stderr)
 

@@ -55,7 +55,7 @@ class HandoffCase(TempDirCase):
         return run_script(SCRIPT, "close", "--project", self.project, "--id", hid, *extra)
 
     def record(self, hid):
-        with open(os.path.join(self.project, "handoffs", hid, "handoff.json")) as f:
+        with open(os.path.join(self.project, "handoffs", hid, "handoff.json"), encoding="utf-8") as f:
             return json.load(f)
 
 
@@ -85,7 +85,7 @@ class CompletenessIsComputed(HandoffCase):
         it, or send a rework round that carries the right deficit."""
         hid = self.send()["handoff_id"]
         out = self.receive(hid, self.ret_dir(["00001", "00002", "00003", "00004"]))
-        with open(out["reconciliation"]) as f:
+        with open(out["reconciliation"], encoding="utf-8") as f:
             recon = json.load(f)
         self.assertEqual([m["item"] for m in recon["missing"]], ["images/00005.jpg"])
 
@@ -229,7 +229,7 @@ class TheManifestIsTheOnlyAuthority(HandoffCase):
     def test_the_manifest_pins_every_item(self):
         hid = self.send()["handoff_id"]
         path = os.path.join(self.project, "handoffs", hid, "manifest.jsonl")
-        with open(path) as f:
+        with open(path, encoding="utf-8") as f:
             lines = [json.loads(l) for l in f if l.strip()]
         header, items = lines[0]["_manifest"], lines[1:]
         self.assertEqual(header["count"], 5)
@@ -246,7 +246,7 @@ class TheManifestIsTheOnlyAuthority(HandoffCase):
         snap = os.path.join(self.project, "handoffs", hid, rec["spec"]["path"])
         self.assertTrue(os.path.isfile(snap))
         self.write("spec.md", "COMPLETELY DIFFERENT RULES\n")
-        with open(snap) as f:
+        with open(snap, encoding="utf-8") as f:
             self.assertIn("label every visible box", f.read())
 
     def test_a_missing_spec_must_be_deliberate(self):
@@ -268,7 +268,7 @@ class TheManifestIsTheOnlyAuthority(HandoffCase):
         self.assertEqual(out["count"], 2)
         self.assertEqual(out["round"], 2)
         path = os.path.join(self.project, "handoffs", out["handoff_id"], "manifest.jsonl")
-        with open(path) as f:
+        with open(path, encoding="utf-8") as f:
             items = [json.loads(l)["item"] for l in f if '"item"' in l]
         self.assertEqual(sorted(items), ["images/00004.jpg", "images/00005.jpg"])
 

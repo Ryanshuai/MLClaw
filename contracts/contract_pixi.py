@@ -69,7 +69,7 @@ class TheManifestExists(unittest.TestCase):
                         "describes an environment, it does not reproduce one")
 
     def test_the_materialised_env_is_not_committed_but_the_lock_is(self):
-        with open(GITIGNORE) as fh:
+        with open(GITIGNORE, encoding="utf-8") as fh:
             ignored = fh.read()
         self.assertRegex(ignored, r"(?m)^\.pixi/?$",
                          ".pixi/ must be gitignored — it is ~200 directories of "
@@ -87,7 +87,7 @@ class TheDefaultEnvironmentDeclaresNothing(unittest.TestCase):
     """
 
     def setUp(self):
-        with open(PIXI_TOML) as fh:
+        with open(PIXI_TOML, encoding="utf-8") as fh:
             self.tables = toml_tables(fh.read())
 
     def test_dependencies_holds_the_interpreter_and_nothing_else(self):
@@ -127,6 +127,64 @@ class TheDefaultEnvironmentDeclaresNothing(unittest.TestCase):
         self.assertIn("unittest discover", task)
         self.assertIn("-p", task)
         self.assertIn("contract_*.py", task)
+
+
+class EveryTextFileIsOpenedAsUtf8(unittest.TestCase):
+    """`pixi.toml -> platforms` declares `win-64`, and that declaration is what makes
+    this a defect rather than a style note.
+
+    Python's `open()` with no `encoding=` uses the locale encoding, which on a
+    Windows box is cp1252, not UTF-8. Every record MLClaw writes carries non-ASCII --
+    the `‼️` key, the `·` separators, a Chinese path -- so an unpinned `open` there is
+    two silent failures on the platform this repo says it supports: reading a record
+    written by the Linux half raises `UnicodeDecodeError` or mojibake, and WRITING one
+    produces a cp1252 file that every other machine then misreads. `lease.py`'s money
+    ledger had already been found written as `GPU \\u673a\\u623f` for the sibling
+    reason (`ensure_ascii`), which is what makes this the same defect one layer down.
+
+    Binary modes are exempt: `encoding=` is a TypeError there.
+    """
+
+    def test_pixi_still_declares_a_platform_where_this_matters(self):
+        """If win-64 ever leaves `platforms`, this check's premise is gone and the
+        honest move is to delete it rather than let it stand on a dead reason."""
+        text = open(PIXI_TOML, encoding="utf-8").read()
+        self.assertIn("win-64", text,
+                      "no non-UTF-8-locale platform is declared any more; re-argue "
+                      "this check or remove it")
+
+    def test_no_tracked_python_opens_a_text_file_without_an_encoding(self):
+        import ast
+        import subprocess
+        out = subprocess.run(["git", "ls-files", "*.py"], cwd=REPO_ROOT,
+                             capture_output=True, text=True, encoding="utf-8")
+        offenders = []
+        for rel in out.stdout.split():
+            path = os.path.join(REPO_ROOT, rel)
+            if not os.path.isfile(path):
+                continue
+            try:
+                tree = ast.parse(open(path, encoding="utf-8").read())
+            except (OSError, SyntaxError):
+                continue
+            for node in ast.walk(tree):
+                if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                        and node.func.id == "open"):
+                    continue
+                mode = None
+                if len(node.args) > 1 and isinstance(node.args[1], ast.Constant):
+                    mode = node.args[1].value
+                kwargs = {k.arg for k in node.keywords}
+                for k in node.keywords:
+                    if k.arg == "mode" and isinstance(k.value, ast.Constant):
+                        mode = k.value.value
+                if (isinstance(mode, str) and "b" in mode) or "encoding" in kwargs:
+                    continue
+                offenders.append(f"{rel}:{node.lineno}")
+        self.assertEqual(sorted(offenders), [],
+                         'add encoding="utf-8". The locale default is cp1252 on the '
+                         "win-64 platform pixi.toml declares, and every record here "
+                         "carries non-ASCII")
 
 
 class EveryThirdPartyImportIsOptional(unittest.TestCase):

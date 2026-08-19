@@ -156,7 +156,7 @@ class TheGateFailsLoudNotOpen(unittest.TestCase):
     def test_unreadable_audit_json_is_exit_2(self):
         d = project()
         p = os.path.join(d, "datasets", "boxes", "audits", "audit_20260818", "audit.json")
-        open(p, "w").write("{not json")
+        open(p, "w", encoding="utf-8").write("{not json")
         self.assertEqual(gate(d)[0], 2)
 
 

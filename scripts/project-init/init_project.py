@@ -475,7 +475,7 @@ def main():
 
     portableize_project(project)
     project["created"] = datetime.now().isoformat()
-    with open(os.path.join(root, "project.json"), "w") as f:
+    with open(os.path.join(root, "project.json"), "w", encoding="utf-8") as f:
         json.dump(project, f, indent=2)
 
     tracked = ["project.json", ".gitignore"] + list(PROJECT_TEMPLATES)
@@ -498,7 +498,7 @@ def main():
                  stages_created=created_stages, stage_failed=stage)
         created_stages.append(stage)
 
-    with open(os.path.join(root, ".gitignore"), "w") as f:
+    with open(os.path.join(root, ".gitignore"), "w", encoding="utf-8") as f:
         f.write(GITIGNORE)
 
     # Never over an existing one: a project root may predate this invocation and

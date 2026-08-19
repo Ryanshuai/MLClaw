@@ -72,7 +72,7 @@ MT_RE = re.compile(r"^(?P<region>[a-z0-9-]+):(?P<platform>[a-z0-9-]+)/"
 # --- config -------------------------------------------------------------------
 
 def table():
-    with open(TABLE) as fh:
+    with open(TABLE, encoding="utf-8") as fh:
         return json.load(fh)
 
 
@@ -397,7 +397,7 @@ def cloud_init(cfg, ttl_s):
     """
     key_path = os.path.expanduser(cfg.get("ssh_public_key_path") or "~/.ssh/id_ed25519.pub")
     try:
-        with open(key_path) as fh:
+        with open(key_path, encoding="utf-8") as fh:
             pubkey = fh.read().strip()
     except OSError:
         die("permission", f"cannot read ssh public key at {key_path}",

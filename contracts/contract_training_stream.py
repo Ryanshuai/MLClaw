@@ -92,7 +92,7 @@ class Fixture(TempDirCase):
 
     def make_ckpts(self, epochs=ACCS, size=1000):
         for e in epochs:
-            with open(os.path.join(self.out_dir, f"checkpoint-{e}.pt"), "w") as f:
+            with open(os.path.join(self.out_dir, f"checkpoint-{e}.pt"), "w", encoding="utf-8") as f:
                 f.write("w" * size)
 
     def codes(self, findings):
@@ -283,7 +283,7 @@ class SelectCheckpoint(Fixture):
 
     def test_script_saved_best_that_disagrees_is_surfaced(self):
         self.make_ckpts()
-        with open(os.path.join(self.out_dir, "best.pt"), "w") as f:
+        with open(os.path.join(self.out_dir, "best.pt"), "w", encoding="utf-8") as f:
             f.write("w")
         r = sc.select(output_json(), stream_records(), self.out_dir)
         self.assertIn("script_saved_best_differs", {f["code"] for f in r["findings"]})
@@ -427,7 +427,7 @@ class RetentionApply(Fixture):
     def test_modified_file_blocks_the_whole_apply(self):
         """Drift means the ranking may no longer describe what is on disk."""
         plan = self.ready_plan()
-        with open(os.path.join(self.out_dir, "checkpoint-2.pt"), "a") as f:
+        with open(os.path.join(self.out_dir, "checkpoint-2.pt"), "a", encoding="utf-8") as f:
             f.write("more")
 
         report, code = rt.apply_plan(plan, plan["confirm_token"])
@@ -558,7 +558,7 @@ class Ingest(Fixture):
     def test_meta_sidecar_records_what_was_inferred(self):
         self.ing.write_stream(self.run_dir, [{"step": 1}],
                               {"group_by": "step", "inferred": [{"field": "type"}]})
-        with open(os.path.join(self.run_dir, "stream_meta.json")) as f:
+        with open(os.path.join(self.run_dir, "stream_meta.json"), encoding="utf-8") as f:
             meta = json.load(f)
         self.assertEqual(meta["records"], 1)
         self.assertEqual(meta["group_by"], "step")

@@ -33,7 +33,7 @@ def load_all_runs(project_root):
     runs = {}
     pattern = os.path.join(project_root, "stages", "*", "runs", "*", "run.json")
     for path in glob(pattern):
-        with open(path) as f:
+        with open(path, encoding="utf-8") as f:
             run = json.load(f)
         stage = run.get("stage", "")
         run_id = run.get("run_id", "")
@@ -75,7 +75,7 @@ def add_tag(run_data, tag, tag_type="local_tags"):
 
 
 def save_run(path, run_data):
-    with open(path, "w") as f:
+    with open(path, "w", encoding="utf-8") as f:
         json.dump(run_data, f, indent=2)
 
 

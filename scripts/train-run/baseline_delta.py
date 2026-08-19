@@ -89,7 +89,7 @@ def emit_verdict(report):
 def load_run(path):
     """Accept a run dir or a run.json."""
     p = path if str(path).endswith(".json") else os.path.join(path, "run.json")
-    with open(p) as fh:
+    with open(p, encoding="utf-8") as fh:
         return json.load(fh), p
 
 
@@ -303,7 +303,7 @@ def cmd_protocol(a):
                 "the same thing, not what the difference between them is.",
     }
     if a.output_json:
-        with open(a.output_json, "w") as fh:
+        with open(a.output_json, "w", encoding="utf-8") as fh:
             json.dump(report, fh, indent=2, default=str)
     return emit_verdict(report)
 

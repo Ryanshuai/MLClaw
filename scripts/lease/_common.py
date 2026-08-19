@@ -140,7 +140,7 @@ def _from_claude_md():
     # .../<repo>/scripts/lease/_common.py -> <repo>
     repo = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
     try:
-        with open(os.path.join(repo, "CLAUDE.md")) as fh:
+        with open(os.path.join(repo, "CLAUDE.md"), encoding="utf-8") as fh:
             for line in fh:
                 if line.startswith("workspace_root:"):
                     root = line.split(":", 1)[1].strip()
@@ -154,7 +154,7 @@ def _from_claude_md():
 
 def load_resources(path):
     try:
-        with open(path) as fh:
+        with open(path, encoding="utf-8") as fh:
             return json.load(fh)
     except FileNotFoundError:
         die("permission", f"resources.json not found: {path}")

@@ -100,7 +100,7 @@ class RetireCase(TempDirCase):
 
     def apply(self, plan_path, token=None, *extra):
         if token is None:
-            with open(plan_path) as fh:
+            with open(plan_path, encoding="utf-8") as fh:
                 token = json.load(fh)["confirm_token"]
         return run_script(SCRIPT, "apply", "--plan", plan_path,
                           "--confirm", token, *extra)
@@ -290,11 +290,11 @@ class OnlyACensusListedPathIsDeletable(RetireCase):
 
     def test_an_escaping_unit_path_aborts_the_whole_apply(self):
         p = self.prepared(("260731/s000", "260731/s001"))
-        with open(p) as fh:
+        with open(p, encoding="utf-8") as fh:
             plan = json.load(fh)
         plan["delete"][0]["unit"] = "../../../etc"
         # re-token, so this tests the containment guard rather than the token
-        with open(p, "w") as fh:
+        with open(p, "w", encoding="utf-8") as fh:
             json.dump(plan, fh)
         rc, out, _ = self.apply(p, token=plan["confirm_token"])
         self.assertEqual(rc, 1)
@@ -305,10 +305,10 @@ class OnlyACensusListedPathIsDeletable(RetireCase):
         """The token digests exactly the unit list that was ranked, so a unit
         appended by hand was never put through the exclusion checks."""
         p = self.prepared()
-        with open(p) as fh:
+        with open(p, encoding="utf-8") as fh:
             plan = json.load(fh)
         plan["delete"].append({"unit": "260731/s999"})
-        with open(p, "w") as fh:
+        with open(p, "w", encoding="utf-8") as fh:
             json.dump(plan, fh)
         rc, out, _ = self.apply(p, token=plan["confirm_token"])
         self.assertEqual(rc, 1)

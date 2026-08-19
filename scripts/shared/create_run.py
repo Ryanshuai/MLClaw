@@ -57,7 +57,7 @@ def main():
     template_path = os.path.abspath(os.path.expanduser(sys.argv[2]))
 
     try:
-        with open(template_path) as f:
+        with open(template_path, encoding="utf-8") as f:
             run_json = json.load(f)
     except (OSError, json.JSONDecodeError) as e:
         sys.stderr.write(f"create_run: cannot read run template {template_path}: {e}\n")
@@ -86,7 +86,7 @@ def main():
 
     run_json_path = os.path.join(run_dir, "run.json")
     try:
-        with open(run_json_path, "w") as f:
+        with open(run_json_path, "w", encoding="utf-8") as f:
             json.dump(run_json, f, indent=2)
     except OSError as e:
         sys.stderr.write(f"create_run: cannot write {run_json_path}: {e}\n")

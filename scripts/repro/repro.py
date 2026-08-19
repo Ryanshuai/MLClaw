@@ -1147,7 +1147,7 @@ def read_history_values(spec):
     """
     raw = spec
     if os.path.exists(os.path.expanduser(spec)):
-        with open(os.path.expanduser(spec)) as fh:
+        with open(os.path.expanduser(spec), encoding="utf-8") as fh:
             raw = fh.read()
     try:
         vals = json.loads(raw)

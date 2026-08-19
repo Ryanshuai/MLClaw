@@ -290,7 +290,7 @@ def main(argv=None):
         plan = build_plan(output_json, records, args.output_dir)
         dest = args.plan or os.path.join(args.output_dir, "retention_plan.json")
         try:
-            with open(dest, "w") as f:
+            with open(dest, "w", encoding="utf-8") as f:
                 json.dump(plan, f, indent=2)
         except OSError as e:
             sys.stderr.write(f"retention: cannot write plan to {dest}: {e}\n")
@@ -310,7 +310,7 @@ def main(argv=None):
         return code
 
     try:
-        with open(args.plan) as f:
+        with open(args.plan, encoding="utf-8") as f:
             plan = json.load(f)
     except (OSError, json.JSONDecodeError) as e:
         sys.stderr.write(f"retention: cannot read plan {args.plan}: {e}\n")

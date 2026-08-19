@@ -94,7 +94,7 @@ def extract_from_file(file_path, key):
     if not os.path.isfile(file_path):
         return None, _err("file_not_found", file_path)
     try:
-        with open(file_path) as f:
+        with open(file_path, encoding="utf-8") as f:
             parsed = json.load(f)
     except json.JSONDecodeError as e:
         return None, _err("file_not_json", file_path, str(e))
@@ -169,7 +169,7 @@ def main():
 
     output_json, run_dir = sys.argv[1], sys.argv[2]
     try:
-        with open(output_json) as f:
+        with open(output_json, encoding="utf-8") as f:
             output_spec = json.load(f)
     except (OSError, json.JSONDecodeError) as e:
         sys.stderr.write(f"extract_metrics: cannot read {output_json}: {e}\n")

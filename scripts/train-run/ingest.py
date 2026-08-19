@@ -436,7 +436,7 @@ def write_tb(run_dir, records, source_format):
     sent = 0
     if os.path.isfile(mark_path):
         try:
-            with open(mark_path) as f:
+            with open(mark_path, encoding="utf-8") as f:
                 sent = int((json.load(f) or {}).get("records") or 0)
         except (OSError, ValueError, json.JSONDecodeError):
             sent = 0
@@ -475,7 +475,7 @@ def write_tb(run_dir, records, source_format):
     finally:
         writer.close()
 
-    with open(mark_path, "w") as f:
+    with open(mark_path, "w", encoding="utf-8") as f:
         json.dump({"records": len(records)}, f)
     return {"rendered": True, "warn_code": None, "appended": len(points),
             "watermark": len(records), "reset": reset, "logdir": tb_dir}
@@ -495,7 +495,7 @@ def main(argv=None):
     report = {"findings": [], "verdict": "ok", "stream": None, "records": 0,
               "meta": {}, "tail": None}
     try:
-        with open(args.output_json) as f:
+        with open(args.output_json, encoding="utf-8") as f:
             output_json = json.load(f)
         records, meta, findings = collect(output_json, args.run_dir)
     except Refusal as e:

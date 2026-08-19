@@ -607,7 +607,7 @@ def cmd_snapshot(a) -> None:
 
     units = c["units"]
     if a.units_from:
-        with open(a.units_from) as f:
+        with open(a.units_from, encoding="utf-8") as f:
             wanted = [ln.strip() for ln in f if ln.strip()]
         missing = [u for u in wanted if u not in units]
         if missing:
@@ -644,7 +644,7 @@ def cmd_snapshot(a) -> None:
     manifest = os.path.join(sdir, "manifest.jsonl")
     os.makedirs(sdir, exist_ok=True)
     manifest_tmp = manifest + ".tmp"
-    with open(manifest_tmp, "w") as f:
+    with open(manifest_tmp, "w", encoding="utf-8") as f:
         f.write(json.dumps({"_manifest": {
             "count": len(sel), "frozen_at": now_utc(),
             "census_id": c["census_id"], "pins": "membership, not bytes"}}) + "\n")
@@ -774,7 +774,7 @@ def cmd_resolve(a) -> None:
                 f"missing there, it was never supposed to be there")
 
     rows, missing, head = [], [], {}
-    with open(mpath) as f:
+    with open(mpath, encoding="utf-8") as f:
         for ln in f:
             ln = ln.strip()
             if not ln:
@@ -851,7 +851,7 @@ def cmd_resolve(a) -> None:
                 f"Write it beside the run that consumes it.")
         os.makedirs(os.path.dirname(dest) or ".", exist_ok=True)
         dest_tmp = dest + ".tmp"
-        with open(dest_tmp, "w") as f:
+        with open(dest_tmp, "w", encoding="utf-8") as f:
             f.write("\n".join(lines) + "\n")
         os.replace(dest_tmp, dest)
 

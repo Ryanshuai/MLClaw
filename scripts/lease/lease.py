@@ -86,7 +86,7 @@ def ledger_path(res_path):
 
 def read_ledger(res_path):
     try:
-        with open(ledger_path(res_path)) as fh:
+        with open(ledger_path(res_path), encoding="utf-8") as fh:
             return json.load(fh)
     except (FileNotFoundError, json.JSONDecodeError):
         return {"leases": []}

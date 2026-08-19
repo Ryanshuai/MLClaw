@@ -872,7 +872,7 @@ class TableProvenance(unittest.TestCase):
 
     def setUp(self):
         with open(os.path.join(REPO_ROOT, "scripts", "lease",
-                               "machines_nebius.json")) as fh:
+                               "machines_nebius.json"), encoding="utf-8") as fh:
             self.table = json.load(fh)
 
     def test_every_platform_declares_arch_and_how_sure_it_is(self):

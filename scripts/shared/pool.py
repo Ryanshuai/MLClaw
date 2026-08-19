@@ -94,7 +94,7 @@ def pool_path(session):
 
 def read_pool(session):
     try:
-        with open(pool_path(session)) as fh:
+        with open(pool_path(session), encoding="utf-8") as fh:
             return json.load(fh)
     except FileNotFoundError:
         fail(f"no pool.json in {session}",

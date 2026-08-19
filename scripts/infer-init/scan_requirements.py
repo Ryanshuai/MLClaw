@@ -7,7 +7,7 @@ import sys
 
 def parse_requirements_txt(path):
     pkgs = {}
-    with open(path) as f:
+    with open(path, encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if not line or line.startswith("#") or line.startswith("-"):
@@ -25,7 +25,7 @@ def parse_pyproject_toml(path):
     """Extract dependencies from pyproject.toml (basic parsing, no toml lib needed)."""
     pkgs = {}
     in_deps = False
-    with open(path) as f:
+    with open(path, encoding="utf-8") as f:
         for line in f:
             stripped = line.strip()
             if stripped in ("[project.dependencies]", "dependencies = ["):
@@ -45,7 +45,7 @@ def parse_pyproject_toml(path):
 def parse_setup_py(path):
     """Extract install_requires from setup.py (regex-based, best effort)."""
     pkgs = {}
-    with open(path) as f:
+    with open(path, encoding="utf-8") as f:
         content = f.read()
     match = re.search(r'install_requires\s*=\s*\[(.*?)\]', content, re.DOTALL)
     if match:
@@ -60,7 +60,7 @@ def parse_conda_yaml(path):
     """Extract pip dependencies from conda environment.yaml."""
     pkgs = {}
     in_pip = False
-    with open(path) as f:
+    with open(path, encoding="utf-8") as f:
         for line in f:
             stripped = line.strip()
             if stripped == "- pip:":
@@ -85,12 +85,15 @@ def scan_imports(code_dir):
             if not f.endswith(".py"):
                 continue
             try:
-                with open(os.path.join(root, f)) as fh:
+                with open(os.path.join(root, f), encoding="utf-8") as fh:
                     for line in fh:
                         match = re.match(r'^(?:import|from)\s+([a-zA-Z0-9_]+)', line)
                         if match:
                             imports.add(match.group(1))
-            except Exception:
+            except (OSError, UnicodeDecodeError):
+                # A file this cannot read contributes no imports, and that is the
+                # honest outcome -- but `Exception` also swallowed a bug in the
+                # regex loop, which would have left the whole scan silently short.
                 continue
     # Map common import names to pip package names
     import_to_pip = {
