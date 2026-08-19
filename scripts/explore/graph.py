@@ -870,7 +870,8 @@ def _tree_shape(tree):
         return ["`tree` must be an object: "
                 '{"branch": "explore/N07-cdn", "base": "<sha>", "head": "<sha>", '
                 '"path": "<worktree dir>"}']
-    unknown = sorted(set(tree) - {"branch", "base", "head", "path"})
+    unknown = sorted(set(tree) - {"branch", "base", "head", "path",
+                                  "claimed_by", "claimed_at"})
     if unknown:
         out.append(f"`tree` has unknown key(s) {unknown} -- one of branch/base/head/path")
     if not tree.get("branch"):
@@ -1131,6 +1132,104 @@ def cmd_set(a):
     emit({"id": a.id, "state": node["state"], "was": prev, "missing": missing})
 
 
+# ---------------------------------------------------------------- CLAIM
+
+def cmd_claim(a):
+    """Take a card into a tree of its own -- BEFORE a line of its code is written.
+
+    ‼️ THE `run_id` GATE IS TOO LATE FOR THE CASE IT WAS BUILT FOR, and this verb
+    is the correction. `run_id` is set at LAUNCH; the contamination happens in the
+    hours before it, while two agents are each editing for one card in one
+    directory. The refusal then arrives after both have already written into it,
+    and declaring a tree at that point does not unmix the directory. The claim has
+    to come first, because taking the work and taking the tree are the same act.
+
+    ‼️ It is also the only mechanism that survives the two agents being dispatched
+    SEPARATELY -- no orchestrator handing out worktrees, no shared context,
+    nothing in common but this file. Which is equally its limit, and the limit
+    should be said out loud rather than discovered: TWO AGENTS THAT NEVER CALL
+    `graph.py` CANNOT BE PROTECTED BY `graph.py`. What this buys is that the
+    discipline sits at the one place both of them must pass through to take work,
+    instead of in prose that one of them may never read.
+
+    Creates nothing on disk. It allocates the branch, records the claim, and
+    prints the `git worktree add` to run -- the same boundary every other verb
+    here keeps, and the reason `/explore` executes nothing.
+    """
+    p = _paths(a.project, a.session)
+    graph = _load(p["graph"], "graph")
+    node = _node(graph, a.id)
+    by_id = {n["id"]: n for n in graph.get("nodes", [])}
+    corpus = graph.get("corpus") or {}
+    base = (graph.get("base") or {}).get("commit")
+
+    if node.get("kind") not in CODE_KINDS:
+        refuse(f"card {a.id} is a {node.get('kind')} -- it writes no code, so there is "
+               f"nothing to isolate. Open it directly with `set --set run_id=`",
+               fix="only port / original / task_driven cards need a tree")
+    dst, why = _derive_state(node, by_id, corpus)
+    if dst != "ready":
+        refuse(f"card {a.id} is {dst}, not ready -- a claim on a card that cannot be "
+               f"taken reserves a tree for work that may never start", **(why or {}))
+    if not base:
+        refuse("`base.commit` is null -- freeze this round's base before claiming "
+               "anything. It is what every arm's delta is measured against, and "
+               "Stage 6's 'the control must be re-run on today's code' has no "
+               "referent once 'today' differs per arm",
+               fix='set `graph.json -> base` to the sha this round forks from')
+
+    held = node.get("tree") or {}
+    if held.get("claimed_by") and held["claimed_by"] != (a.by or held["claimed_by"]):
+        refuse(f"card {a.id} was claimed by {held['claimed_by']!r} at "
+               f"{held.get('claimed_at')} -- it is somebody else's arm",
+               tree=held,
+               fix="take another card from `ready`, or agree with them who has it. "
+                   "‼️ Do not take it over silently: they may be mid-port in that "
+                   "worktree, and nothing here can see their working directory")
+
+    branch = a.branch or ("explore/" + a.id)
+    for other in graph.get("nodes", []):
+        if other["id"] != a.id and ((other.get("tree") or {}).get("branch")) == branch:
+            refuse(f"branch {branch!r} already belongs to card {other['id']}",
+                   fix=f"pass --branch, or take the default explore/{a.id}")
+
+    # ‼️ Somebody working in the shared directory right now is exactly the
+    # collision this verb exists to prevent, so a second claim while one is
+    # outstanding is refused rather than merely noted. The fix names the other
+    # card, because the honest repair is to give THAT one a tree too -- not to
+    # wait for it.
+    loose = [o["id"] for o in graph.get("nodes", [])
+             if o["id"] != a.id and o.get("kind") in CODE_KINDS
+             and o.get("state") not in SETTLED
+             and (o.get("run_id") or (o.get("tree") or {}).get("claimed_by"))
+             and not (o.get("tree") or {}).get("branch")]
+    if loose:
+        refuse(f"{loose} is unsettled and names no tree -- it is being written in the "
+               f"shared `code_dir` right now, which is the directory this claim would "
+               f"put a second port into",
+               fix=f"give {loose} a tree first (`claim`, or `set --set tree=...` if its "
+                   f"arm is already open), then claim this one")
+
+    path = a.path or ("../arms/" + a.id)
+    node["tree"] = {"branch": branch, "base": base, "path": path,
+                    "claimed_by": a.by, "claimed_at": now_utc()}
+    node.setdefault("history", []).append(
+        {"at": now_utc(), "to": node["state"],
+         "note": f"claimed {branch} at {path}" + (f" by {a.by}" if a.by else "")})
+    graph["updated_at"] = now_utc()
+    atomic_write_json(p["graph"], graph)
+    emit({"id": a.id, "tree": node["tree"],
+          "cmd": f"git worktree add {path} -b {branch} {base}",
+          "then": ("point this arm's `code_dir` (and the rsync source, if it runs on "
+                   "another machine) at %s. The training boxes are populated with "
+                   "`--exclude '.git'` and have no repo at all, so what the worktree "
+                   "changes is WHICH directory gets walked and copied -- not how the "
+                   "snapshot is taken." % path),
+          "at_launch": ("record `tree.head` alongside `run_id`; `check` compares it "
+                        "against the run snapshot's `origin_commit`, and believes "
+                        "the snapshot")})
+
+
 # ---------------------------------------------------------------- READY
 
 def cmd_ready(a):
@@ -1150,8 +1249,15 @@ def cmd_ready(a):
         if st in DECLARED_STATES:
             continue
         if st == "ready":
+            # ‼️ A claimed card is still READY -- claiming takes a tree, not a
+            # slot. But two agents both reading this list and both seeing N07
+            # unmarked is the coordination hole the claim exists to close, so it
+            # is annotated rather than filtered.
+            t = n.get("tree") or {}
             ready.append({"id": n["id"], "title": n["title"], "kind": n["kind"],
                           "tier": n.get("tier"),
+                          "claimed_by": t.get("claimed_by"),
+                          "branch": t.get("branch"),
                           "offline": n.get("kind") == "measurement"})
         else:
             blocked.append(dict({"id": n["id"], "state": st}, **why))
@@ -1186,6 +1292,7 @@ def cmd_ready(a):
     code_ready = [r for r in ready if r["kind"] in CODE_KINDS]
     code_open = [i for i, st in states.items()
                  if st in ("running", "filled") and by_id[i].get("kind") in CODE_KINDS]
+    unclaimed = [r for r in code_ready if not r.get("branch")]
     if code_ready:
         out["trees"] = [
             {"id": r["id"],
@@ -1194,7 +1301,7 @@ def cmd_ready(a):
              "declared": bool((by_id[r["id"]].get("tree") or {}).get("branch")),
              "cmd": "git worktree add ../arms/%s -b explore/%s %s"
                     % (r["id"], r["id"], base or "<declare base.commit first>")}
-            for r in code_ready]
+            for r in unclaimed]
         if not base:
             out["base_undeclared"] = (
                 "`base.commit` is null and %d ready card(s) write code. Freeze the "
@@ -2112,6 +2219,19 @@ def main():
                          "the same reason `dispute --note` is: the verdict does not say "
                          "WHY, and why is the only part the next round can re-check")
     rr.set_defaults(fn=cmd_reread)
+
+    cl = sub.add_parser("claim", help="take a card into a tree of its own, BEFORE "
+                                      "any of its code is written")
+    common(cl)
+    cl.add_argument("--id", required=True)
+    cl.add_argument("--branch", help="default explore/<id>")
+    cl.add_argument("--path", help="where the worktree goes. Default ../arms/<id>")
+    cl.add_argument("--by", help="who is taking it -- a session name, a person, "
+                                 "anything another agent would recognise. Optional, "
+                                 "and worth passing whenever more than one agent is "
+                                 "working this graph: it is what makes `ready` say "
+                                 "N07 IS TAKEN instead of handing it out twice")
+    cl.set_defaults(fn=cmd_claim)
 
     r = sub.add_parser("ready", help="the ready set, and deadlocks")
     common(r)

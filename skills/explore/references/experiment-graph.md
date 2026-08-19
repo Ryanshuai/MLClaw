@@ -93,9 +93,24 @@ number cannot be attributed to anything. So the discipline arrives at two earlie
 
 | When | What happens |
 |---|---|
-| `graph.py ready` — **where parallel arms are handed out** | the ready set comes back with a `trees` block: one `git worktree add` line per code-writing card, already carrying the round's base. Plus `base_undeclared` if the base is not frozen yet, and `parallel_arms` when more than one would be open at once |
-| `graph.py set --set run_id=…` — **the moment an arm opens** | refused, at **exit 1**, when another code-writing arm is already open and this card names no `tree`. ‼️ It cannot fire on a serial round — one arm at a time reaches it with nothing else open, which is how this pipeline has always worked and is not a defect. It fires on the *second concurrent* arm, and one `--set tree=…` clears it |
-| `graph.py check` | the backstop: `concurrent_arms_one_tree` and the rest of §4 |
+| `graph.py ready` — **where parallel arms are handed out** | the ready set comes back with a `trees` block: one `git worktree add` line per **unclaimed** code-writing card, already carrying the round's base. Every ready entry also carries `claimed_by` — an unmarked list is what hands the same card to two agents. Plus `base_undeclared` if the base is not frozen, and `parallel_arms` when more than one would be open at once |
+| ‼️ `graph.py claim --id N07 --by <who>` — **before a line of its code is written** | allocates the branch, records the claim, prints the `git worktree add`. **This is the real gate**; the two below are backstops |
+| `graph.py set --set run_id=…` — the moment an arm launches | refused, at exit 1, when another code-writing arm is already open and this card names no `tree`. It cannot fire on a serial round — one arm at a time reaches it with nothing else open |
+| `graph.py check` | `concurrent_arms_one_tree` and the rest of §4 |
+
+‼️ **Why the claim exists at all, when `run_id` was already gated: `run_id` is set at LAUNCH, and
+the contamination happens in the hours before it.** Two agents each editing for one card, in one
+directory, for an afternoon — and the refusal arrives after both have written into it, at which
+point declaring a tree does not unmix the directory. **Taking the work and taking the tree are
+one act**, so they are one verb.
+
+It is also the only one of the three that survives the two agents being **dispatched
+separately** — no orchestrator handing out worktrees, no shared context, nothing in common but
+this file. ‼️ **And its limit belongs in the same breath: two agents that never call `graph.py`
+cannot be protected by `graph.py`.** What the claim buys is that the discipline sits at the one
+place both of them must pass through to take work, instead of in prose one of them may never
+read. A `claim` creates nothing on disk — it prints the command, exactly as every other verb here
+executes nothing.
 
 ‼️ **Exit 1 and not exit 2, and the difference is the whole point.** CLAUDE.md's fallback rule
 says exit 2 means the script broke and the skill does the same work **by hand** — which for a
@@ -103,10 +118,11 @@ refusal means opening the arm anyway. A safety check whose refusal routes into t
 is a safety check that fires and is then walked around. Policy refusals here are 1; a malformed
 `--set` argument stays 2.
 
-**The record of it is this field, and the record is the half nothing could hold before.** Four
-keys: `branch` (the arm's own, never another card's), `base` (the sha it forked from, which must
-be the round's), `head` (what actually ran — compared against the run's snapshot), `path` (where
-the worktree is, so somebody else can find it).
+**The record of it is this field, and the record is the half nothing could hold before.**
+`branch` (the arm's own, never another card's), `base` (the sha it forked from, which must be
+the round's), `head` (what actually ran — compared against the run's snapshot), `path` (where
+the worktree is, so somebody else can find it), and `claimed_by` / `claimed_at` (who is in it —
+the field that makes `ready` say *taken* instead of handing the card out twice).
 
 #### The round's `base`, and why it is frozen
 

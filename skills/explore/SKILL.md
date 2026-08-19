@@ -150,6 +150,7 @@ python <mlclaw_root>/scripts/explore/graph.py <verb> --project <PROJECT>
 | verb | What it does |
 |---|---|
 | `add` | a one-line idea → a card (`draft`). A card missing fields cannot enter the ready set |
+| ‼️ `claim` | **take a card into a tree of its own, before any of its code is written.** Allocates the branch, records who has it, prints the `git worktree add`. Creates nothing on disk |
 | `set` | complete or amend a card. ‼️ **A closed card refuses edits** — a changed conclusion means a new card citing the old one. Also refuses (exit 1) a **second concurrent arm into an unnamed tree**, and a branch name another card already owns |
 | `ready` | compute the ready set. Empty set + non-empty queue = **deadlock**, and it says whether that is a cycle or one shared predecessor. ‼️ Also hands out **one `git worktree add` per code-writing card** — this is where parallel arms are given out, so it is where the isolation belongs |
 | `fill` | results onto the card, **plus a list of what this result may have voided** (whatever depends on it, whatever cites it in prose, the constants that came from this run) |
@@ -498,10 +499,14 @@ arm B's edits — **it applies, it reproduces exactly, and nothing raises**: `gr
 delta guard compares `runtime_params` + `workload`, and an uncommitted edit to a model file moves
 neither. A clean record of a run that did not happen.
 
-One `git worktree add ../arms/N07 -b explore/N07-cdn <round base>` per code-writing arm, recorded
-in the card's `tree`. **`ready` hands you those lines with the ready set, and `set --set run_id=`
-refuses the second concurrent arm that has no tree** — `check` is the backstop, not the gate,
-because by the time it runs the hours are spent. Freeze `graph.json → base.commit` when the
+**`graph.py claim --id N07 --by <who>` before writing a line of that card's code** — it allocates
+the branch off the frozen base, records who has it, and prints the `git worktree add` to run.
+‼️ **Not at launch: `run_id` is set hours later, and the contamination happens in between.** The
+claim is also the only thing that works when you dispatched the two agents **separately** —
+there is no orchestrator then, and nothing in common but `graph.json`. Its limit belongs with it:
+an agent that never calls `graph.py` cannot be protected by it. `ready` marks what is already
+taken, `set --set run_id=` refuses a second nameless concurrent arm, and `check` is the backstop —
+not the gate, because by the time it runs the hours are spent. Freeze `graph.json → base.commit` when the
 round opens, and **do not merge a winner while another arm is in flight** — that redefines the
 control under everything still running. Mechanics, the four keys, and what may not be thrown
 away: `references/experiment-graph.md → §1.5`.

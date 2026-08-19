@@ -1871,6 +1871,82 @@ class TwoArmsMayNotShareAWorkingTree(GraphCase):
         self.assertNotIn(nid, [f["card"] for f in out["findings"]
                                if f["invariant"] == "arm_tree_unrecorded"])
 
+    def test_the_claim_comes_before_a_line_of_code_not_at_launch(self):
+        """‼️ The `run_id` gate is too late for the case it was built for. `run_id`
+        is set at LAUNCH; the contamination happens in the hours before it, while
+        two agents each edit for one card in one directory. A refusal then arrives
+        after both have written into it, and declaring a tree at that point does
+        not unmix the directory. Taking the work and taking the tree are one act.
+        """
+        a = self.add_complete()
+        self._hand_write_tree((a,), None)
+        rc, out, _ = self.g("claim", "--id", a, "--by", "agent-A")
+        self.assertEqual(rc, 0)
+        self.assertIn("git worktree add", out["cmd"])
+        self.assertEqual(self.card(a)["tree"]["claimed_by"], "agent-A")
+        self.assertIsNone(self.card(a).get("run_id"), "a claim is not a launch")
+
+    def test_a_second_agent_is_told_the_card_is_taken(self):
+        """The case an orchestrator cannot cover: two agents dispatched
+        SEPARATELY, with no shared context and nothing in common but this file.
+        ‼️ Its limit is worth stating with it -- two agents that never call
+        `graph.py` cannot be protected by `graph.py`. What this buys is that the
+        discipline sits at the one place both must pass through to take work."""
+        a = self.add_complete()
+        self._hand_write_tree((a,), None)
+        self.g("claim", "--id", a, "--by", "agent-A")
+        rc, out, _ = self.g("claim", "--id", a, "--by", "agent-B")
+        self.assertEqual(rc, 1)
+        self.assertIn("agent-A", out["refused"])
+        rc, ready, _ = self.g("ready")
+        taken = {r["id"]: r["claimed_by"] for r in ready["ready"]}
+        self.assertEqual(taken[a], "agent-A",
+                         "an unmarked ready set hands the same card out twice")
+
+    def test_a_claim_while_somebody_is_in_the_shared_dir_is_refused(self):
+        """A second claim while one code-writing card is unsettled and nameless is
+        exactly the collision, so it is refused rather than noted. The fix names
+        the other card, because the repair is to give THAT one a tree too."""
+        a, b = self.add_complete(), self.add_complete()
+        self._hand_write_tree((a, b), None)
+        self.run_it(a, run_id="run_" + a)
+        rc, out, _ = self.g("claim", "--id", b, "--by", "agent-B")
+        self.assertEqual(rc, 1)
+        self.assertIn(a, out["refused"])
+        self.assertIn(a, out["fix"])
+
+    def test_a_claim_needs_the_round_base_frozen(self):
+        """This is the point where the base actually starts mattering: the
+        worktree forks FROM it."""
+        g = self.graph()
+        g["base"] = {"commit": None, "repo_subdir": None, "declared_at": None}
+        self.write_json(os.path.join("stages", "exploration", "graph.json"), g)
+        a = self.add_complete()
+        self._hand_write_tree((a,), None)
+        rc, out, _ = self.g("claim", "--id", a)
+        self.assertEqual(rc, 1)
+        self.assertIn("base.commit", out["refused"])
+
+    def test_a_measurement_card_is_refused_a_tree_rather_than_given_one(self):
+        rc, out, _ = self.g("add", "--title", "count it", "--kind", "measurement",
+                            "--criterion", "share", "--guardrail", "n",
+                            "--kill-condition", "n/a")
+        nid = out["id"]
+        self.g("set", "--id", nid, "--set", "oracle_ceiling=1.2")
+        rc, out, _ = self.g("claim", "--id", nid)
+        self.assertEqual(rc, 1)
+        self.assertIn("writes no code", out["refused"])
+
+    def test_a_card_that_is_not_ready_cannot_be_claimed(self):
+        """A claim on a card nobody can take reserves a tree for work that may
+        never start -- and the branch name is unrecyclable."""
+        rc, out, _ = self.g("add", "--title", "half a card", "--kind", "port",
+                            "--criterion", "c", "--guardrail", "g",
+                            "--kill-condition", "k")
+        rc, out, _ = self.g("claim", "--id", out["id"])
+        self.assertEqual(rc, 1)
+        self.assertIn("not ready", out["refused"])
+
     def test_the_second_concurrent_arm_is_refused_at_the_moment_it_opens(self):
         """‼️ `check` reports this correctly and reports it LATE -- by then the GPU
         hours are spent and the number cannot be attributed to anything. The gate
@@ -1901,8 +1977,8 @@ class TwoArmsMayNotShareAWorkingTree(GraphCase):
     def test_the_ready_set_hands_out_the_isolation_with_the_work(self):
         """The ready set is WHERE PARALLEL ARMS ARE HANDED OUT, so it is where the
         instruction belongs. At `check` time it arrives after the contamination."""
-        self.add_complete()
-        self.add_complete()
+        a, b = self.add_complete(), self.add_complete()
+        self._hand_write_tree((a, b), None)      # nothing claimed yet
         rc, out, _ = self.g("ready")
         self.assertEqual(len(out["trees"]), 2)
         self.assertIn("git worktree add", out["trees"][0]["cmd"])
@@ -1913,7 +1989,8 @@ class TwoArmsMayNotShareAWorkingTree(GraphCase):
         g = self.graph()
         g["base"] = {"commit": None, "repo_subdir": None, "declared_at": None}
         self.write_json(os.path.join("stages", "exploration", "graph.json"), g)
-        self.add_complete()
+        a = self.add_complete()
+        self._hand_write_tree((a,), None)
         rc, out, _ = self.g("ready")
         self.assertIn("base_undeclared", out)
         self.assertIn("declare base.commit first", out["trees"][0]["cmd"])
