@@ -67,6 +67,7 @@ Determine:
 - **Outputs** -> prediction files, annotated images, JSON results, visualizations
 - **Metrics** -> performance values the code reports (FPS, latency, throughput), with extraction patterns
 - **Required packages**: run `python <mlclaw_root>/scripts/infer-init/scan_requirements.py <code_dir>`. If it fails, check requirements.txt manually.
+  **Read `source` before writing the result down.** `file` means a declared dependency file was parsed and `files` names which; `imports` means nothing declared anything and the list was inferred from import statements — a guess, with no versions, blind to an optional or dynamic import. That is the `guessed` status `provenance.json` carries, so record it as one rather than as a read value. `unreadable` names a dependency file that could not be parsed, which is not a file that declared nothing.
 
 For metrics: after identifying them, ask the user which ones to track across runs. Their selection goes into `output.json -> metrics.watch`. Inference metrics are typically performance-oriented (FPS, latency, throughput) rather than accuracy metrics, which belong in the evaluation stage.
 

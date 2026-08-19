@@ -33,7 +33,7 @@ Ensure `{WORKSPACE}/resources.json` exists (workspace root, shared across projec
 
 Discover from `~/.ssh/config` (Host, HostName, User, IdentityFile) and `~/.ssh/known_hosts`.
 
-Run `python <mlclaw_root>/scripts/resources/parse_ssh_config.py`. **Fallback**: manually read `~/.ssh/config`.
+Run `python <mlclaw_root>/scripts/resources/parse_ssh_config.py`. It returns `{servers, sources, warnings, complete}` — **read `complete` before treating `servers` as the list of machines**: it follows `Include` directives, so `sources` names every file it read, and a `Port` line it could not parse leaves a warning and the default 22 rather than the value. A partial parse and a complete one must not be quoted the same way. **Fallback**: manually read `~/.ssh/config`.
 
 For each server found, create an entry with host, username, ssh_key_path, alias (SSH config Host name). Ask user for `mlclaw_root` (remote workspace root for path mapping) and `python_path` (try `ssh <host> "which python3"` to auto-detect). Leave gpu/description empty for user to fill.
 

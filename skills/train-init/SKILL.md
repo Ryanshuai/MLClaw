@@ -133,6 +133,7 @@ Determine:
 - **Ground truth pairing** → directory parallel / coco json / hf datasets / yolo txt
 - **Outputs** → checkpoints (with naming pattern), log files
 - **Required packages**: run `python <mlclaw_root>/scripts/infer-init/scan_requirements.py <code_dir>`. If it fails, check requirements.txt manually.
+  **Read `source` before writing the result down.** `file` means a declared dependency file was parsed and `files` names which; `imports` means nothing declared anything and the list was inferred from import statements — a guess, with no versions, blind to an optional or dynamic import. That is the `guessed` status `provenance.json` carries, so record it as one rather than as a read value. `unreadable` names a dependency file that could not be parsed, which is not a file that declared nothing.
 
 ### 1b. Extract the preprocessing chain
 
