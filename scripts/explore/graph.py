@@ -1027,7 +1027,10 @@ def cmd_set(a):
             # refuses first. This catches the hand-edited graph -- the case this file
             # keeps a `state_drift` report for -- and it keeps `reread` the only spelling
             # anywhere, so the field cannot come to have two authors.
-            broke("conditional_on is not edited directly -- `graph.py reread --id "
+            # Same line as above: this is the field refusing a second author, not
+            # a malformed value. Falling back to hand-editing it is exactly the
+            # move that makes `conditional_on` pointless.
+            refuse("conditional_on is not edited directly -- `graph.py reread --id "
                   f"{a.id} --condition <ID> --note '<what re-reading showed>'`. The "
                   "field exists because nothing clears it on its own, and clearing it "
                   "silently is the one move that makes that pointless")
@@ -1039,6 +1042,42 @@ def cmd_set(a):
                 if b is None:
                     broke(f"depends_on entry {i!r}: `blocks` must be one of "
                           f"{list(DEP_BLOCKS)}. A bare id means `launch`.")
+        if k == "run_id" and node.get("kind") in CODE_KINDS:
+            # ‼️ THE MOMENT OF THE ACT, not the audit afterwards. `check` reports
+            # `concurrent_arms_one_tree` correctly and reports it LATE -- by then
+            # the GPU hours are spent and the number cannot be attributed to
+            # anything. This is the same layering `set` already uses for a
+            # malformed `depends_on` and for a reused branch: refuse where it is
+            # written, keep `check` as the backstop for a graph edited around the
+            # tool.
+            #
+            # It cannot fire on a serial round -- one arm open at a time reaches
+            # this with `others` empty, which is how this pipeline has always
+            # worked and is not a defect. It fires on the SECOND concurrent arm,
+            # and what clears it is one `--set tree=...`.
+            if not (node.get("tree") or {}).get("branch"):
+                others = [o["id"] for o in graph.get("nodes", [])
+                          if o["id"] != node["id"] and o.get("kind") in CODE_KINDS
+                          and o.get("run_id") and o.get("result") is None
+                          and o.get("state") not in SETTLED]
+                if others:
+                    # ‼️ `refuse`, not `broke`. CLAUDE.md draws the line and it is
+                    # load-bearing: exit 2 means the script failed and the skill
+                    # FALLS BACK TO DOING IT BY HAND -- which here means opening
+                    # the arm anyway, i.e. the fallback rule quietly overriding
+                    # the safety check it exists to make room for. Exit 1 is "it
+                    # worked and the answer is no". Policy refusals are 1; a
+                    # malformed `--set` argument stays 2.
+                    refuse(f"{others} already has an arm open, and this card names no "
+                          f"`tree`. MLClaw resolves ONE `code_dir` per stage, so two "
+                          f"ports get written into one directory and the snapshot "
+                          f"taken at launch carries both -- it applies, it reproduces "
+                          f"exactly, and `variation_summary` cannot see it. Give this "
+                          f"arm its own: `git worktree add ../arms/{node['id']} -b "
+                          f"explore/{node['id']} <base>`, then `--set tree=...`",
+                          fix="or say out loud that this arm shares the tree, by "
+                              "declaring the same branch -- `check` will then rule on "
+                              "it rather than nothing ruling on it")
         if k == "tree":
             for msg in _tree_shape(node.get("tree")):
                 broke(msg)
@@ -1056,7 +1095,7 @@ def cmd_set(a):
                 if other["id"] == node["id"]:
                     continue
                 if ((other.get("tree") or {}).get("branch")) == want:
-                    broke(f"branch {want!r} already belongs to card {other['id']} -- "
+                    refuse(f"branch {want!r} already belongs to card {other['id']} -- "
                           f"two arms on one branch cannot be told apart, and moving "
                           f"the ref destroys whichever of them settles first. Give "
                           f"this arm its own")
@@ -1139,6 +1178,39 @@ def cmd_ready(a):
                 "detail": top,
                 "fix": "that blocker IS the work -- promote it. Do not open an arm "
                        "outside the ready set because there is nothing else to do"}
+
+    # ‼️ The ready set is WHERE PARALLEL ARMS ARE HANDED OUT, so it is where the
+    # tree instruction belongs. Reporting it at `check` time is reporting it
+    # after the contamination; reporting it here is reporting it before.
+    base = (graph.get("base") or {}).get("commit")
+    code_ready = [r for r in ready if r["kind"] in CODE_KINDS]
+    code_open = [i for i, st in states.items()
+                 if st in ("running", "filled") and by_id[i].get("kind") in CODE_KINDS]
+    if code_ready:
+        out["trees"] = [
+            {"id": r["id"],
+             "branch": (by_id[r["id"]].get("tree") or {}).get("branch")
+                       or "explore/" + r["id"],
+             "declared": bool((by_id[r["id"]].get("tree") or {}).get("branch")),
+             "cmd": "git worktree add ../arms/%s -b explore/%s %s"
+                    % (r["id"], r["id"], base or "<declare base.commit first>")}
+            for r in code_ready]
+        if not base:
+            out["base_undeclared"] = (
+                "`base.commit` is null and %d ready card(s) write code. Freeze the "
+                "round's base BEFORE opening any of them: it is what every arm's "
+                "delta is measured against, and Stage 6's 'the control must be "
+                "re-run on today's code' has no referent once 'today' differs per arm"
+                % len(code_ready))
+        if len(code_ready) + len(code_open) > 1:
+            out["parallel_arms"] = (
+                "%d code-writing arm(s) ready and %d already open. MLClaw resolves ONE "
+                "`code_dir` per stage, so these share a working tree unless each gets "
+                "its own -- and a snapshot taken over two half-written ports applies "
+                "cleanly, reproduces exactly, and moves neither `runtime_params` nor "
+                "`workload`. Run the `trees` commands first; `set --set run_id=` "
+                "refuses the second one otherwise"
+                % (len(code_ready), len(code_open)))
 
     # Capacity is not this file's. `pool.py` holds slots; over-parallelising is
     # a structural zero rather than a slowdown -- see references/cluster-ops.md.

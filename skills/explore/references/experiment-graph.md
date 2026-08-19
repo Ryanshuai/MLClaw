@@ -85,6 +85,24 @@ all**, so a snapshot's file list must come from a filesystem walk either way. Wh
 changes is *which* directory gets walked and rsynced. Point `code_dir` (or the rsync source) at
 `../arms/N07`, and record where it was in `tree.path`.
 
+#### Where this is stopped, and where it is only reported
+
+‼️ **`check` reports it correctly and reports it LATE** — by then the GPU hours are spent and the
+number cannot be attributed to anything. So the discipline arrives at two earlier points, and
+`check` is the backstop for a graph edited around the tool:
+
+| When | What happens |
+|---|---|
+| `graph.py ready` — **where parallel arms are handed out** | the ready set comes back with a `trees` block: one `git worktree add` line per code-writing card, already carrying the round's base. Plus `base_undeclared` if the base is not frozen yet, and `parallel_arms` when more than one would be open at once |
+| `graph.py set --set run_id=…` — **the moment an arm opens** | refused, at **exit 1**, when another code-writing arm is already open and this card names no `tree`. ‼️ It cannot fire on a serial round — one arm at a time reaches it with nothing else open, which is how this pipeline has always worked and is not a defect. It fires on the *second concurrent* arm, and one `--set tree=…` clears it |
+| `graph.py check` | the backstop: `concurrent_arms_one_tree` and the rest of §4 |
+
+‼️ **Exit 1 and not exit 2, and the difference is the whole point.** CLAUDE.md's fallback rule
+says exit 2 means the script broke and the skill does the same work **by hand** — which for a
+refusal means opening the arm anyway. A safety check whose refusal routes into the fallback rule
+is a safety check that fires and is then walked around. Policy refusals here are 1; a malformed
+`--set` argument stays 2.
+
 **The record of it is this field, and the record is the half nothing could hold before.** Four
 keys: `branch` (the arm's own, never another card's), `base` (the sha it forked from, which must
 be the round's), `head` (what actually ran — compared against the run's snapshot), `path` (where

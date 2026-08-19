@@ -1686,7 +1686,7 @@ class AConditionIsRetiredOnTheRecord(GraphCase):
         anything. `set` refuses it even where the settled guard would not."""
         a, b = self._conditional()
         rc, out, err = self.g("set", "--id", b, "--set", "conditional_on=[]")
-        self.assertNotEqual(rc, 0)
+        self.assertEqual(rc, 1, "exit 2 would send the skill to hand-edit the field")
         self.assertEqual(self.card(b)["conditional_on"], [a])
 
     def test_retiring_a_condition_never_revises_the_verdict(self):
@@ -1851,7 +1851,9 @@ class TwoArmsMayNotShareAWorkingTree(GraphCase):
         rc, out, err = self.g("set", "--id", b, "--set",
                               'tree={"branch":"explore/' + a + '","base":"'
                               + BASE_SHA + '"}')
-        self.assertNotEqual(rc, 0)
+        self.assertEqual(rc, 1, "a policy refusal is exit 1 -- exit 2 tells the skill "
+                                "to fall back and do it BY HAND, which here means "
+                                "writing the collision in anyway")
         self.assertEqual((self.card(b).get("tree") or {}).get("branch"),
                          "explore/" + b)
 
@@ -1868,6 +1870,53 @@ class TwoArmsMayNotShareAWorkingTree(GraphCase):
         rc, out, _ = self.g("check")
         self.assertNotIn(nid, [f["card"] for f in out["findings"]
                                if f["invariant"] == "arm_tree_unrecorded"])
+
+    def test_the_second_concurrent_arm_is_refused_at_the_moment_it_opens(self):
+        """‼️ `check` reports this correctly and reports it LATE -- by then the GPU
+        hours are spent and the number cannot be attributed to anything. The gate
+        belongs at the act, which is the same layering `set` already uses for a
+        malformed edge and a reused branch: refuse where it is written, keep
+        `check` as the backstop for a graph edited around the tool.
+        """
+        a, b = self.add_complete(), self.add_complete()
+        self._hand_write_tree((b,), None)
+        self.run_it(a, run_id="run_" + a)
+        rc, out, err = self.g("set", "--id", b, "--set", "run_id=run_" + b)
+        self.assertEqual(rc, 1, "a policy refusal is exit 1; exit 2 would send the "
+                                "skill to open the arm by hand")
+        self.assertIsNone(self.card(b).get("run_id"))
+        self.assertIn("worktree", json.dumps(out))
+
+    def test_one_tree_used_serially_is_never_blocked(self):
+        """This is how the pipeline has always worked and it is not a defect. The
+        gate is about two arms at once, never about the directory."""
+        a, b = self.add_complete(), self.add_complete()
+        self._hand_write_tree((a, b), None)
+        self.run_it(a, run_id="run_" + a)
+        self.g("fill", "--id", a, "--result", '{"x":1}', "--tier", "T1")
+        self.g("close", "--id", a, "--verdict", "won")
+        rc, out, _ = self.g("set", "--id", b, "--set", "run_id=run_" + b)
+        self.assertEqual(rc, 0, "a serial round must never meet this gate")
+
+    def test_the_ready_set_hands_out_the_isolation_with_the_work(self):
+        """The ready set is WHERE PARALLEL ARMS ARE HANDED OUT, so it is where the
+        instruction belongs. At `check` time it arrives after the contamination."""
+        self.add_complete()
+        self.add_complete()
+        rc, out, _ = self.g("ready")
+        self.assertEqual(len(out["trees"]), 2)
+        self.assertIn("git worktree add", out["trees"][0]["cmd"])
+        self.assertIn(BASE_SHA, out["trees"][0]["cmd"])
+        self.assertIn("parallel_arms", out)
+
+    def test_a_round_with_no_base_says_so_before_an_arm_opens(self):
+        g = self.graph()
+        g["base"] = {"commit": None, "repo_subdir": None, "declared_at": None}
+        self.write_json(os.path.join("stages", "exploration", "graph.json"), g)
+        self.add_complete()
+        rc, out, _ = self.g("ready")
+        self.assertIn("base_undeclared", out)
+        self.assertIn("declare base.commit first", out["trees"][0]["cmd"])
 
     def test_a_declared_transition_lands_in_the_history(self):
         """‼️ `prev` used to be read AFTER the set loop, so `--set state=running`
