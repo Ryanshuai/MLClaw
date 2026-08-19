@@ -21,10 +21,13 @@ That list is the honest scope of what a green run proves — regenerate it rathe
 than maintaining a copy by hand.
 """
 import glob
+import json
 import os
 import re
+import shutil
 import subprocess
 import sys
+import tempfile
 import unittest
 
 from helpers import REPO_ROOT
@@ -480,6 +483,58 @@ class ScriptPathsAreResolvedNotAssumed(unittest.TestCase):
         with open(os.path.join(self.ROOT, "CLAUDE.md"), encoding="utf-8") as f:
             claude = f.read()
         self.assertIn("<mlclaw_root>/scripts/", claude)
+        self.assertIn("CLAUDE_PLUGIN_ROOT", claude,
+                      "the resolution order must name the official mechanism")
+
+    # The three below RUN the resolver instead of grepping it. What is being
+    # checked is a behaviour -- which copy of the plugin a skill's scripts come
+    # from -- and a source-level assertion would pass on a version that reads
+    # the variable and then ignores it.
+
+    def _resolve(self, env_value):
+        e = dict(os.environ)
+        if env_value is None:
+            e.pop("CLAUDE_PLUGIN_ROOT", None)
+        else:
+            e["CLAUDE_PLUGIN_ROOT"] = env_value
+        out = subprocess.run(
+            [sys.executable, os.path.join(self.ROOT, "scripts", "shared",
+                                          "workspaces.py"), "tool"],
+            capture_output=True, text=True, env=e, check=True)
+        return out.stdout.strip()
+
+    def test_plugin_root_outranks_the_cached_state_file(self):
+        """A skill and the scripts it runs must come from one copy.
+
+        `~/.mlclaw/state.json` is sticky across copies: pinned to a development
+        tree, it answers with that tree even for a skill loaded from the plugin
+        cache. `$CLAUDE_PLUGIN_ROOT` is the harness's own answer and outranks it.
+        """
+        with tempfile.TemporaryDirectory() as d:
+            shutil.copytree(os.path.join(self.ROOT, ".claude-plugin"),
+                            os.path.join(d, ".claude-plugin"))
+            self.assertEqual(self._resolve(d), os.path.realpath(d))
+
+    def test_a_root_that_is_not_this_plugin_falls_through(self):
+        """Returning a confident wrong root is worse than falling through."""
+        with tempfile.TemporaryDirectory() as d:
+            self.assertNotEqual(self._resolve(d), os.path.realpath(d))
+        self.assertNotEqual(self._resolve("/nonexistent"), "/nonexistent")
+
+    def test_the_marker_is_the_manifest_not_a_path_inside_the_tree(self):
+        """A layout-shaped marker rejects every copy predating that layout.
+
+        Measured: the first version checked for `scripts/shared/`, and refused
+        the 0.1.0 install on the author's machine -- which was a perfectly valid
+        MLClaw, just one built before `scripts/` moved to the root.
+        """
+        with tempfile.TemporaryDirectory() as d:
+            os.makedirs(os.path.join(d, ".claude-plugin"))
+            with open(os.path.join(d, ".claude-plugin", "plugin.json"), "w",
+                      encoding="utf-8") as f:
+                json.dump({"name": "mlclaw"}, f)
+            # No scripts/ at all, and it must still be recognised.
+            self.assertEqual(self._resolve(d), os.path.realpath(d))
 
 
 if __name__ == "__main__":

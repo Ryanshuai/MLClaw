@@ -45,7 +45,7 @@ Each stage has: `enabled`, `code_path` (`stages/{stage}/code`), `code_source` (`
 ## Create project
 
 ```
-MLCLAW_ROOT=$(python <repo>/scripts/shared/workspaces.py tool)
+MLCLAW_ROOT=$(python "${CLAUDE_PLUGIN_ROOT:-<repo>}/scripts/shared/workspaces.py" tool)
 python "$MLCLAW_ROOT/scripts/project-init/init_project.py" '<project_json_string>' "$MLCLAW_ROOT"
 ```
 

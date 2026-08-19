@@ -9,11 +9,15 @@ needed to decide what to do next, which is why it is not in CLAUDE.md.
 
 **Workspace** — directory holding all of this user's MLClaw projects + their shared `resources.json`. One value, lives in `workspace_root:` at the top of this file. `/project-init` rewrites that line if the user picks a different path. No registry, no priority chain — when there's actually more than one workspace on the same machine, that's the time to add structure, not before. CLI override: `/project-init --workspace <path>`.
 
-**MLClaw repo** — auto-detected and cached in `~/.mlclaw/state.json`:
+**MLClaw repo** — resolved in three steps, first hit wins:
 ```
-mlclaw_root  = $(python <repo>/scripts/shared/workspaces.py tool)
+mlclaw_root  = $(python "${CLAUDE_PLUGIN_ROOT:-<repo>}/scripts/shared/workspaces.py" tool)
 ```
-Self-bootstraps from `__file__` on first call, so skills don't need the user to pass the MLClaw path each time. Override with `workspaces.py register-tool <path>` if you have multiple clones.
+1. **`$CLAUDE_PLUGIN_ROOT`** — the official plugin mechanism, and the only source that keeps a skill and the scripts it runs in the *same copy*. Verified against `.claude-plugin/plugin.json -> name` (not against a path inside the tree: that encodes one layout and would reject every copy installed before it), and never cached — it is true per invocation.
+2. **`~/.mlclaw/state.json`** — pinned by a previous call. Override with `workspaces.py register-tool <path>` if you have multiple clones.
+3. **`__file__`** — self-bootstrap, so a checkout works with no setup at all.
+
+‼️ The order is not cosmetic. Step 2 is **sticky across copies**: with MLClaw both installed and checked out, a skill loaded from the plugin cache would resolve its scripts to the development tree — two copies inside one flow, and nothing raises. Step 1 is what closes that.
 
 **Working directory** — the MLClaw repo, always. Not the ML project (that is `--project`), and the skills are not copied into `~/.claude/skills/`. The repo is what makes three things resolve, and only the third of them fails loudly:
 
