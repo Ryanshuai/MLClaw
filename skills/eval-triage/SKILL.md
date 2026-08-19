@@ -73,6 +73,29 @@ For each case: open the image and whatever `per_sample.fields` carried across (p
 
 `--basis` is required. A verdict with no basis cannot be re-examined by whoever acts on it, and "the label looks wrong" is not a basis — *"the box covers two cartons, GT has one"* is.
 
+### Step 2b — `triage-verifier`: something checks it after all
+
+That sentence above — *"the one nothing can check afterwards"* — was true, and this is the check.
+Dispatch the **`triage-verifier`** agent once per case (`Agent(mlclaw:triage-verifier)`), giving it the
+unit id, the per-sample fields **by absolute path**, the proposed verdict, and its `--basis` verbatim.
+Its job is to **refute**; the verdict survives only if it fails. It is read-only by declaration —
+`tools: Read, Glob, Grep` — so it cannot edit a record it is judging.
+
+**It is not a person, so its disagreement is not an overrule.** A person outranks an agent about what
+is in an image; a second agent carries *equal* authority, and Step 3's rule for that is already
+written: two equal authorities disagreeing → `disputed`, no standing verdict, `route` refuses it.
+There is no tie-break here that is not a coin flip. So map its three answers, and never a fourth:
+
+| it returns | what you do |
+|---|---|
+| `sustained` | verdict stands as `claim`; record the attempt in `caveats` — an unrecorded check is not one |
+| `refuted` | **`disputed`.** No standing verdict. `IF_REFUTED_WHICH` is a *proposal for a person*, never a decision |
+| `cannot_tell` | verdict stands as `claim`, and **write the `CONFIDENCE_LIMIT` down** — it is what the case was never checked on |
+
+Skip it for nothing, but scale it: verifying a sample first is the same economy Step 3 describes, and
+the sample must be drawn across all four verdicts rather than only the `label_wrong` pile — checking
+only the pile you already doubt measures nothing about the ones you do not.
+
 ## Step 3 — `confirm`: a person agrees or overrules
 
 This is the step that makes a finding `verified`, and the only one that can.
