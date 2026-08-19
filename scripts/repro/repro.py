@@ -611,6 +611,29 @@ def probe_env(run):
         return axis("unverifiable", f"could not read the current env: {err}",
                     fix="run capture_env.py by hand in the project env and diff it")
 
+    # What neither side could READ, as opposed to read as absent. `capture_env.py`
+    # returns a bare null for a device probe that answered "no GPU here" and for
+    # one that timed out; it now says which, and this is the only place that
+    # distinction changes an answer. Before it existed, `old and new` skipped the
+    # null and this axis reported `intact` -- "every behaviour-affecting field
+    # matches" -- about a field nothing had looked at.
+    #
+    # A record written before `capture_env.py` carried the key has no `unreadable`
+    # at all, which is a third state and NOT a clean one; it simply cannot be
+    # improved on retroactively, so it behaves as it always did.
+    blind = {}
+    for side, rec in (("then", was), ("now", now)):
+        for field, why in ((rec.get("unreadable") or {}).items()):
+            if field in KEY_ENV_FIELDS or field == "packages":
+                blind[f"{field} ({side})"] = why
+
+    if any(k.startswith("packages ") for k in blind):
+        return axis("unverifiable",
+                    "the package list could not be read, so no version comparison "
+                    "means anything here",
+                    unreadable=blind,
+                    fix="run capture_env.py by hand in the project env and read `unreadable`")
+
     key_drift, also = [], []
     for pkg, old in sorted(recorded.items()):
         new = (now.get("packages") or {}).get(pkg)
@@ -624,8 +647,17 @@ def probe_env(run):
             key_drift.append({"field": field, "was": old, "now": new})
 
     if key_drift:
+        # A real difference is still real, and blind fields ride along rather than
+        # softening it: the axis has already moved off `intact` for a stated reason.
         return axis("drifted", f"{len(key_drift)} behaviour-affecting difference(s)",
-                    key_drift=key_drift, also_changed=also)
+                    key_drift=key_drift, also_changed=also,
+                    unreadable=blind or None)
+    if blind:
+        return axis("unverifiable",
+                    f"{len(blind)} behaviour-affecting field(s) nothing could read",
+                    unreadable=blind, also_changed=also,
+                    fix="fix the probe and re-run; a device field that did not answer "
+                        "is not a device field that matched")
     return axis("intact", "every behaviour-affecting package and device field matches",
                 also_changed=also)
 

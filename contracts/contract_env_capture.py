@@ -28,10 +28,14 @@ nothing a reader will see.
 """
 import json
 import os
+import shutil
+import stat
 import subprocess
 import sys
 import tempfile
 import unittest
+
+from helpers import load_script
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SHARED = os.path.join(REPO_ROOT, "scripts", "shared")
@@ -128,6 +132,112 @@ class CheckDepsSeparatesUsageFromARefusal(unittest.TestCase):
         a = run(DEPS, cfg, os.path.join(d, "run"))
         b = run(DEPS, cfg, os.path.join(d, "run", "run.json"))
         self.assertEqual(a, b)
+
+
+class ThreeFactsNotTwo(unittest.TestCase):
+    """CLAUDE.md -> "Never silently": *Never report data you could not look at.* A
+    machine that did not answer, a path that is not there, and a directory that is
+    genuinely empty are three facts, and only the last means the data is gone.
+
+    `capture_env.py` returned a bare `None` for all three. `nvidia-smi` timing out
+    and a box with no NVIDIA GPU produced the identical record -- and that record is
+    what `/repro` compares a re-run against.
+    """
+
+    def _with_fake_bin(self, name, script):
+        d = tempfile.mkdtemp()
+        p = os.path.join(d, name)
+        with open(p, "w", encoding="utf-8") as f:
+            f.write(script)
+        os.chmod(p, os.stat(p).st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
+        env = dict(os.environ, PATH=d + os.pathsep + os.environ.get("PATH", ""))
+        try:
+            r = subprocess.run([sys.executable, "-X", "utf8", CAPTURE, "numpy"],
+                               capture_output=True, text=True, encoding="utf-8",
+                               cwd=REPO_ROOT, env=env, timeout=180)
+            return json.loads(r.stdout)
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+
+    def test_a_clean_capture_says_nothing_was_unreadable(self):
+        rc, out = run(CAPTURE, "numpy")
+        self.assertEqual(rc, 0)
+        self.assertIn("unreadable", out,
+                      "the key is always emitted: a record without it is one written "
+                      "before this existed, which is a third state and not a clean one")
+
+    def test_a_probe_that_timed_out_is_not_a_box_without_a_gpu(self):
+        out = self._with_fake_bin("nvidia-smi", "#!/bin/sh\nsleep 30\n")
+        self.assertIsNone(out["gpu"])
+        self.assertEqual(out["gpu_count"], 0)
+        for field in ("gpu", "gpu_count", "nvidia_driver"):
+            self.assertIn(field, out["unreadable"],
+                          "gpu_count 0 from a hung probe must not read as a measurement")
+
+    def test_a_probe_that_failed_is_not_a_box_without_cuda(self):
+        out = self._with_fake_bin("nvcc", "#!/bin/sh\nexit 3\n")
+        self.assertIsNone(out["cuda"])
+        self.assertIn("cuda", out["unreadable"])
+
+    def test_a_tool_that_is_absent_is_a_fact_and_not_flagged(self):
+        """The whole point of three facts: `not installed` is an ANSWER. Flagging it
+        would make every CPU box report an unreadable env and teach people to ignore
+        the field."""
+        out = self._with_fake_bin("_mlclaw_unused_shim", "#!/bin/sh\nexit 0\n")
+        for field in ("gpu", "cuda"):
+            if out.get(field) is None:
+                self.assertNotIn(field, out["unreadable"])
+
+
+class ReproWillNotCallItIntact(unittest.TestCase):
+    """CLAUDE.md -> "Never silently": *Never report data you could not look at.*
+
+    `probe_env` compared with `if old and new and old != new`, so a null from a probe
+    that did not answer was skipped -- and with nothing else drifting the axis
+    returned `intact`, whose detail reads *"every behaviour-affecting package and
+    device field matches"*. That sentence about a field nobody read is the failure
+    `/repro` exists to catch, produced by `/repro` itself.
+    """
+
+    repro = load_script("repro/repro.py")
+
+    def _probe(self, was, now):
+        real = self.repro.current_env
+        self.repro.current_env = lambda packages: (now, None)
+        try:
+            return self.repro.probe_env({"env": was})
+        finally:
+            self.repro.current_env = real
+
+    def test_an_unreadable_device_field_is_unverifiable_not_intact(self):
+        was = {"packages": {"torch": "2.4.1"}, "gpu": "H100", "unreadable": {}}
+        now = {"packages": {"torch": "2.4.1"}, "gpu": None,
+               "unreadable": {"gpu": "timed out"}}
+        out = self._probe(was, now)
+        self.assertEqual(out["verdict"], "unverifiable")
+        self.assertIn("gpu (now)", out["unreadable"])
+
+    def test_an_unreadable_package_list_cannot_be_compared_at_all(self):
+        was = {"packages": {"torch": "2.4.1"}, "unreadable": {}}
+        now = {"packages": {"torch": None},
+               "unreadable": {"packages": "pip freeze printed nothing"}}
+        out = self._probe(was, now)
+        self.assertEqual(out["verdict"], "unverifiable",
+                         "every recorded version would otherwise compare unequal to "
+                         "None and report a total environment rebuild")
+
+    def test_a_real_drift_still_reports_drifted_with_the_blind_set_alongside(self):
+        was = {"packages": {"torch": "2.4.1"}, "gpu": "H100", "unreadable": {}}
+        now = {"packages": {"torch": "2.6.0"}, "gpu": None,
+               "unreadable": {"gpu": "timed out"}}
+        out = self._probe(was, now)
+        self.assertEqual(out["verdict"], "drifted")
+        self.assertIn("gpu (now)", out["unreadable"])
+
+    def test_a_record_predating_the_key_behaves_exactly_as_before(self):
+        was = {"packages": {"torch": "2.4.1"}, "gpu": "H100"}
+        now = {"packages": {"torch": "2.4.1"}, "gpu": "H100"}
+        self.assertEqual(self._probe(was, now)["verdict"], "intact")
 
 
 class NoDocumentStillSpellsTheRefusedCall(unittest.TestCase):

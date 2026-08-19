@@ -91,7 +91,11 @@ Only packages whose version silently changes what the model computes count towar
 |---|---|
 | `intact` | every key package and device field matches |
 | `drifted` | ≥1 key package or device field differs |
-| `unverifiable` | no env recorded for the run, or the current env could not be read |
+| `unverifiable` | no env recorded for the run, the current env could not be read, or **a key field nothing could look at** |
+
+**A null device field is two facts, and only one of them is about the machine.** `capture_env.py` used to return a bare null for both, so `nvidia-smi` timing out and a box with no NVIDIA GPU wrote the identical record — and the comparison here skips a null, which meant the axis reported `intact`, *"every behaviour-affecting package and device field matches"*, about a field nobody had read. It now emits `unreadable: {field: why}`, always, and a field in it makes the axis `unverifiable` rather than a match. A **real** drift still reports `drifted`, with the blind set carried alongside: the axis has already left `intact` for a stated reason. An `unreadable` **packages** entry is `unverifiable` on its own — every recorded version would otherwise compare unequal to null and report a total environment rebuild.
+
+‼️ A record written before that key existed has no `unreadable` at all. That is a third state, not a clean one; it cannot be improved retroactively, so it behaves as it always did — which is the same reason `/data-check` marks a census `complete: false` instead of guessing.
 
 **To pin it:** build an env at the recorded versions (`{WORKSPACE}/resources.json → local.env_manager`) and run the trial in it. A `gpu` or `nvidia_driver` difference usually cannot be pinned at all without the original machine — say that rather than pretending the pin is available, and consider whether `/lease` can get a matching one.
 
