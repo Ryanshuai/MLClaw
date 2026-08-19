@@ -42,6 +42,15 @@ stages/*/runs/
 stages/*/artifacts/
 stages/*/data/
 
+# Bytes pulled back INTO the project. Everything MLClaw recovers lands under the
+# project directory -- that is what makes a census able to see it -- and the
+# project directory is a git repo, so the landing sites have to be named here.
+# ‼️ The extension rules above catch checkpoints and nothing else: a pulled
+# capture day is JPEG/PNG/npy/mp4 and would commit itself. Records stay tracked;
+# only these two hold bytes.
+datasets/*/bytes/
+evacuations/*/recovered/
+
 # Secrets — NEVER commit
 secrets.json
 

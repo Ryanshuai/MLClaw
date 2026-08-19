@@ -155,10 +155,105 @@ def count_dest(dest):
     return n, b
 
 
+BYTES_DIRNAME = "bytes"
+
+
+def _dataset_path(project, dataset):
+    return os.path.join(project, "datasets", dataset, "dataset.json")
+
+
+def resolve_into(project, dataset, into):
+    """-> (dest, record). Where a pull LANDS, derived rather than invented.
+
+    ‼️ This exists because `--into` used to be `required=True` with the help
+    text "destination directory", which does not ask an agent to choose a
+    destination -- it requires one to be INVENTED, and every session invented a
+    different one. The cost is not untidiness. A census reads
+    `dataset.json -> locations[]` and nothing else, so data pulled to
+    `~/tmp/whatever` **is not in the world the census describes**: `UNARCHIVED`
+    ("never reached authority") then gets decided against an incomplete
+    inventory while the census still reports `complete: true`.
+
+    That is a third form of CLAUDE.md's *"Never report data you could not look
+    at"* and the one it does not cover. The other two are a machine that did not
+    answer and a directory that is genuinely empty; this one is a copy that was
+    never on the list, so no machine was ever asked about it. Nothing raises,
+    because from the census's side nothing happened.
+
+    So the destination is a DECLARED LOCATION, and the resolution is:
+
+      explicit `--into`  the caller overrides. Recorded as `explicit`, and
+                         checked against the declared locations so an override
+                         that lands outside them says so.
+      a declared local   the dataset's own `working` location, else `authority`.
+      nothing declared   `{PROJECT}/datasets/<id>/bytes/` -- and it is DECLARED
+                         into `dataset.json` on the spot. Creating a location and
+                         not declaring it is the whole defect; doing the first
+                         without the second would just relocate it.
+    """
+    dpath = _dataset_path(project, dataset) if dataset else None
+    doc = read_json(dpath, required=False) if dpath else None
+    locs = [l for l in ((doc or {}).get("locations") or [])
+            if l.get("via") == "local" and l.get("root")]
+
+    def _inside(dest):
+        for l in locs:
+            root = os.path.abspath(os.path.expanduser(l["root"]))
+            if dest == root or dest.startswith(root + os.sep):
+                return l.get("key")
+        return None
+
+    if into:
+        dest = os.path.abspath(os.path.expanduser(into))
+        key = _inside(dest)
+        return dest, {"root": dest, "from": "explicit", "location_key": key,
+                      "declared": key is not None, "dataset": dataset}
+
+    if not dataset:
+        refuse("no destination and no dataset to derive one from",
+               why="a pull with an invented destination lands outside every "
+                   "declared location, and a census cannot see what is not on "
+                   "its list -- so the data reads as absent while the scan "
+                   "reports itself complete",
+               fix="pass --dataset <id> to land in its declared location, or "
+                   "--into <dir> to override deliberately")
+
+    for want in ("working", "authority"):
+        for l in locs:
+            if l.get("role") == want:
+                dest = os.path.abspath(os.path.expanduser(l["root"]))
+                return dest, {"root": dest, "from": "declared",
+                              "location_key": l.get("key"), "declared": True,
+                              "dataset": dataset}
+
+    dest = os.path.abspath(os.path.join(project, "datasets", dataset, BYTES_DIRNAME))
+    entry = {"key": "project", "role": "working", "via": "local", "server": None,
+             "root": dest, "has_layers": None,
+             "note": "created by /data-collect: bytes pulled into the project. "
+                     "Declared so the census can see them."}
+    rec = {"root": dest, "from": "created", "location_key": "project",
+           "declared": False, "dataset": dataset}
+    if doc is not None:
+        doc.setdefault("locations", []).append(entry)
+        doc["updated_at"] = now_utc()
+        atomic_write_json(dpath, doc)
+        rec["declared"] = True
+        rec["declared_into"] = dpath
+    else:
+        # No `dataset.json` yet -- the bootstrap case, and refusing it would
+        # block the first pull a project ever makes. The directory is still the
+        # derived one, and the gap is NAMED rather than left to be discovered
+        # by a census that cannot see the data.
+        rec["‼️"] = (f"no datasets/{dataset}/dataset.json, so this location could "
+                     f"not be declared. Until /data-check declares it, no census "
+                     f"will look here and the data reads as absent")
+    return dest, rec
+
+
 def cmd_plan(a):
     project = os.path.expanduser(a.project)
     kind, remote, described = resolve(project, a.frm, a.at, a.resources)
-    dest = os.path.expanduser(a.into)
+    dest, dest_rec = resolve_into(project, a.dataset, a.into)
     os.makedirs(dest, exist_ok=True)
     cmd = build_cmd(kind, remote, dest.rstrip("/") + "/", a, dry=True)
     rc, stdout, err = run(cmd, a.timeout)
@@ -170,9 +265,16 @@ def cmd_plan(a):
                hint="if somebody has to go capture or connect it, that is an "
                     "exchange with a party MLClaw does not control — use /data-label "
                     "(kind: data_request) so it is tracked instead of remembered")
-    emit({"would_pull_from": described, "into": dest, "dry_run": True,
-          "tool": cmd[0], "output": stdout.strip()[-1500:],
-          "overwrite_existing": bool(a.overwrite)})
+    out = {"would_pull_from": described, "into": dest, "destination": dest_rec,
+           "dry_run": True, "tool": cmd[0], "output": stdout.strip()[-1500:],
+           "overwrite_existing": bool(a.overwrite)}
+    if not dest_rec.get("declared"):
+        out["‼️destination"] = (
+            "this lands outside every declared location of "
+            f"{a.dataset or 'any dataset'}. A census reads `locations[]` and "
+            "nothing else, so it will not see these bytes -- and will still "
+            "report itself complete")
+    emit(out)
 
 
 def _resolve_cited_window(project, cite_window, session):
@@ -240,7 +342,7 @@ def cmd_pull(a):
     if not os.path.isdir(project):
         broke(f"project not found: {project}")
     kind, remote, described = resolve(project, a.frm, a.at, a.resources)
-    dest = os.path.expanduser(a.into)
+    dest, dest_rec = resolve_into(project, a.dataset, a.into)
     os.makedirs(dest, exist_ok=True)
 
     before_n, before_b = count_dest(dest)
@@ -260,6 +362,7 @@ def cmd_pull(a):
         "started_at": started,
         "source": described,
         "into": dest,
+        "destination": dest_rec,
         "tool": cmd[0],
         "exit_code": rc,
         "complete": complete,
@@ -342,7 +445,12 @@ def add_common(p):
     p.add_argument("--from", dest="frm", required=True,
                    help="a key in resources.json -> servers, or 's3' / 'local'")
     p.add_argument("--at", required=True, help="path (or s3:// URI) on that resource")
-    p.add_argument("--into", required=True, help="destination directory")
+    p.add_argument("--dataset", default=None,
+                   help="dataset id; the destination is derived from its declared "
+                        "local location. Either this or --into")
+    p.add_argument("--into", default=None,
+                   help="override the derived destination. Prefer --dataset: an "
+                        "invented path is one a census cannot see")
     p.add_argument("--include", action="append")
     p.add_argument("--exclude", action="append")
     p.add_argument("--overwrite", action="store_true",

@@ -30,7 +30,7 @@ an artifact another person can read.
 | `evidence/` | `stream.jsonl`, metrics, `tb/`, **the raw logs**. Logs belong here because MLClaw's grounding rule requires a number to cite the transcribed line it came from — **that line is the evidence** |
 | `logic/` | `knowledge/conclusions.json` — what `/conclude` produced |
 | `trace/` | every dated record of a multi-step process: `/explore`'s `graph.json`, `findings.json`, `baseline.json`, `audit.json` — **and a tune session's `state.json` + `chain.md`, a repro loop's `session.json`, an adaptation campaign's.** **This layer decides whether that ablation is still legible a year from now** |
-| **`weights/`** | **‼️ ARA does not have this layer.** Not an oversight: a paper's artifact is **knowledge**, and knowledge regrows from `src + evidence`. **A 4GB checkpoint does not.** It is the one layer that cannot be rebuilt |
+| **`weights/`** | **‼️ ARA does not have this layer.** Not an oversight: a paper's artifact is **knowledge**, and knowledge regrows from `src + evidence`. **A checkpoint does not.** It is the one layer that cannot be rebuilt |
 
 Plus one bucket that is deliberately **not** a layer: `unclassified` — whatever the rules did
 not recognise is **kept anyway, and named**. A sweep that keeps only what it recognises is

@@ -82,7 +82,7 @@ class TheLayersAreARAsPlusTheOneItDoesNotHave(AraCase):
     reason MLClaw needs a fifth.
 
     A paper's artifact is its KNOWLEDGE, and knowledge regenerates from src +
-    evidence. A 4GB checkpoint does not. `weights/` is the only layer the other
+    evidence. A checkpoint does not. `weights/` is the only layer the other
     four cannot rebuild, which is also why its partial transfer costs the most
     (`/evacuate`).
     """

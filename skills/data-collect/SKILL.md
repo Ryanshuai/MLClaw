@@ -19,13 +19,24 @@ which resource, which session, how much arrived, and whether the transfer actual
 
 ```bash
 S=<mlclaw_root>/scripts/data-collect/collect.py
-python $S plan   --project <p> --from <resource> --at <path> --into <dir>
-python $S pull   --project <p> --from <resource> --at <path> --into <dir> [--session <s>] [--rig <r>]
+python $S plan   --project <p> --from <resource> --at <path> --dataset <id>
+python $S pull   --project <p> --from <resource> --at <path> --dataset <id> [--session <s>] [--rig <r>]
 python $S status --project <p> [--root <dir>]
 ```
 
 `--from` is a key in `resources.json -> servers`, or the literal `s3` / `local`. Run `plan` first
 when the source is large or unfamiliar — it is a dry run and costs nothing.
+
+**`--dataset` decides where it lands; do not invent a path.** The destination is derived from
+that dataset's declared `via: local` location (`working`, else `authority`), and when none is
+declared the pull lands in `datasets/<id>/bytes/` — **which is declared into `locations[]` as it
+is created**, because a location that exists and is undeclared is the entire defect. `--into`
+still overrides, and the record says when an override landed outside every declared location.
+
+‼️ **This is not tidiness.** A census reads `dataset.json -> locations[]` and nothing else, so a
+pull to `~/tmp/whatever` is not in the world the census describes: `UNARCHIVED` gets decided
+against an inventory that never contained it, and the census still reports `complete: true`.
+Full rule: `<mlclaw_root>/references/layout.md` -> "Where a pull lands".
 
 ## Three rules the transfer obeys
 
@@ -91,8 +102,9 @@ never fails a pull — the bytes are already in.
 
 A session is written to `<into>/_collect/collect_<session>.json` — **beside the data, not beside
 the project**, so it survives an rsync to a machine that has never heard of this project. That is
-also why `status` takes `--root`: `--into` is often outside the project tree, and scanning only the
-project would report "no sessions" for data that was in fact collected.
+also why `status` takes `--root`: a destination can still be outside the project tree when
+`--into` overrides, and scanning only the project would report "no sessions" for data that was
+in fact collected.
 
 **The record names the resource key, never the address.** Host, username and key stay in
 `resources.json`, the never-committed file; a collect record can be committed and cannot leak a

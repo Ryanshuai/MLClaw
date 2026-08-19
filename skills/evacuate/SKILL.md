@@ -65,10 +65,11 @@ The one thing this skill owns and `/ara` cannot know is the **Transfer section o
 
 ## The order cannot be changed
 
-The script is `<mlclaw_root>/scripts/evacuate/evacuate.py`, with seven verbs:
+The script is `<mlclaw_root>/scripts/evacuate/evacuate.py`, with eight verbs:
 
 ```
-plan → freeze → push → verify → bundle → clearance      (+ status)
+plan → freeze → push ────→ verify          → bundle → clearance   (+ status)
+              └→ recover → verify --local
 ```
 
 **`freeze` must come before `push`, and that is where the entire guarantee lives.** A manifest
@@ -78,6 +79,29 @@ is computed against it. A `push` that runs before `freeze` is refused.
 
 ‼️ **Remembering to freeze once the machine is already gone gives `unverifiable`, permanently.**
 What arrived cannot testify for what did not.
+
+## Two destinations, and neither replaces the other
+
+**`push` sends the bytes offsite; `recover` brings them into the project** at
+`evacuations/<id>/recovered/`. The offsite copy is the one that survives this disk; the
+in-project one is reachable without credentials and sits beside the record that describes it.
+
+**Neither destination is a value you supply.** `--bucket` derives from
+`resources.json -> aws.s3_bucket`, `--prefix` from `{project}/{evacuation_id}/`, and the
+recovery path from the evacuation id. Both were free-form once, and `build_push_cmd` will
+assemble `s3://None/` out of an omitted bucket and hand it to the aws cli. The full rule, and
+what an invented destination costs: `<mlclaw_root>/references/layout.md` -> "Where a pull lands".
+
+‼️ **Each is verified against the same frozen manifest, and recorded separately** — `verify` for
+the offsite copy, `verify --local` for the recovery. One slot for both would let the second
+stand in for the first: a local copy that arrived whole could clear a machine whose offsite copy
+never went, and the record would say `verified` meaning something different than last time.
+
+‼️ **The project directory is one disk, and the recovery now shares it with the workspace.**
+`plan` reads free space against the manifest total and says so; `recover` **refuses** rather than
+running out of room mid-transfer, because that produces precisely the right-name/wrong-length
+file this skill exists to catch — and produces it silently. `--anyway` takes a partial copy
+deliberately, which `verify --local` will mark `truncated`.
 
 ## Six arrival states, and `exists()` tells none of them apart
 
@@ -96,6 +120,14 @@ Upload with `--checksum-algorithm SHA256` and `head-object` will return `Checksu
 it cannot, the answer is `size_only` — which is **not** `verified`.
 
 ## Clearance: three verdicts, computed rather than declared
+
+**One clean destination clears the machine, not both.** The gate is *the bytes are somewhere
+that was read back against the frozen manifest* — holding a box because the second copy is still
+running would be paying for a machine over a redundancy, and a project with no bucket could
+never clear at all. Every destination's state is reported regardless, and clearing on a single
+copy says so: a verdict that hides which copy is broken is how one surviving copy gets mistaken
+for two.
+
 
 | verdict | When | Who reads it |
 |---|---|---|

@@ -12,8 +12,7 @@ MLClaw's version differs in exactly one way, and the difference is about what is
 being preserved rather than a liberty taken:
 
   weights/   ‼️ ARA has no equivalent. A paper's artifact is its KNOWLEDGE, and
-             knowledge regenerates from src + evidence. A 4GB checkpoint does
-             not. It is the one layer the other four cannot rebuild, which is
+             knowledge regenerates from src + evidence. A checkpoint does not. It is the one layer the other four cannot rebuild, which is
              also why it is the one whose partial transfer costs the most.
 
 And one bucket that is not a layer at all:
@@ -376,7 +375,7 @@ def cmd_build(a):
     concs = _conclusions(project)
 
     # The project's RECORDS are copied PHYSICALLY. They have to stay readable
-    # without pulling forty gigabytes of weights back down, and they are the
+    # without pulling the weights back down, and they are the
     # part that survives when the weights do not.
     #
     # ‼️ `classify` decides the layer and is the ONLY thing that decides it. The

@@ -333,10 +333,15 @@ evacuations/                        ← one directory per machine emptied before
     manifest.jsonl                  ← frozen AT THE SOURCE before the transfer. The only authority
                                       for what was supposed to arrive; computing completeness from
                                       what showed up is a tautology that passes every partial pull
+    recovered/                      ← the bytes, IN the project. gitignored. The copy reachable
+                                      without credentials, beside the record describing it; the
+                                      S3 push is the offsite one and neither replaces the other.
+                                      Each is verified against the same frozen manifest and
+                                      recorded separately — `verify --local` vs `verify`
     bundle/                         ← the readable artifact: ARTIFACT.md (ARA's PAPER.md) plus
                                       the project's records copied in physically, so the
                                       conclusions, the ablation graph and every tune chain stay
-                                      readable without pulling 40GB of weights back down
+                                      readable without pulling the weights back down
 ara/                                ← one directory per artifact, DATED and never overwritten:
   ara_{YYYYMMDD}_{HHmmss}/            round two building over round one destroys the record of
     ARTIFACT.md                       what was believed during round one, which is what makes
@@ -374,6 +379,10 @@ datasets/                           ← where the data is and what state it is i
   {dataset_id}/                       project-level. See "Dataset identity and census records"
     dataset.json                    ← the layout contract, plus `derived_from` (null = captured),
                                       plus `online` (where the LIVE counterpart arrives)
+    bytes/                          ← data pulled into the project, when no local location was
+                                      declared. gitignored, and DECLARED into `locations[]` by
+                                      `/data-collect` as it creates it — a location that exists
+                                      and is undeclared is the whole defect
     census/census_{ts}.json         ← one scan; `complete: false` = a location did not answer
     audits/{audit_id}/              ← audit.json + audit_report.html. The census's counterpart:
                                       that one reads where the files are, this one reads what is
@@ -444,6 +453,50 @@ by `run_id`. Same boundary `/data-curate` draws for a conversion and `adaptation
 converter: a search that runs its own trials is a second run machinery, and it drifts from the
 first. `/train-tune` is the same shape one stage over, and it stores its sessions under
 `training/` for exactly this reason.
+
+## Where a pull lands
+
+**Everything MLClaw brings back lands under `{workspace_root}/{project_name}/`.** One rule, and
+this is its only statement — every script derives its destination from here rather than taking
+one.
+
+| Pulled | Lands at | Derived from |
+|---|---|---|
+| a remote run's outputs | `stages/{stage}/runs/{run_id}/` | the path-mapping rule: project-relative path is identical on both machines, only the root prefix changes (`run-mechanics.md` → "Path Mapping") |
+| a dataset | the dataset's `via: local` location — `working`, else `authority`. None declared → `datasets/{id}/bytes/`, **declared into `locations[]` as it is created** | `datasets/{id}/dataset.json → locations[]` |
+| a machine being evacuated | `evacuations/{evac_id}/recovered/`, and offsite to `s3://{aws.s3_bucket}/{project}/{evac_id}/` | `resources.json → aws.s3_bucket` + the evacuation id |
+| a round's artifact | `ara/ara_{ts}/` | the project and the clock |
+
+‼️ **A destination the caller invents is the defect this closes, and its cost is not
+untidiness.** A census reads `dataset.json → locations[]` and nothing else, so data pulled to
+`~/tmp/whatever` **is not in the world the census describes** — `UNARCHIVED` then gets decided
+against an inventory that never contained it, while the census still reports `complete: true`.
+That is a third form of CLAUDE.md's *"Never report data you could not look at"*: not a machine
+that failed to answer, not a directory that is genuinely empty, but **a copy that was never on
+the list, so nothing was ever asked about it.** Nothing raises, because from the census's side
+nothing happened.
+
+**Two consequences that have to be held together.** The project directory is a **git repo**, so
+every landing site that holds bytes is named in `.gitignore` — `stages/*/{runs,artifacts,data}/`,
+`datasets/*/bytes/`, `evacuations/*/recovered/`. The extension rules catch checkpoints and
+nothing else, so an un-ignored capture day of JPEGs would commit itself. And the project
+directory is **one disk**: an evacuation now shares it with the whole workspace, which is why
+`evacuate.py plan` reads free space against the manifest total and `recover` refuses rather than
+producing a half-written checkpoint out of a full disk.
+
+‼️ **That figure is the only one anywhere in this that is a number**, and it is `shutil.disk_usage`
+against the frozen manifest — read at the moment it decides something. Nothing else here states a
+size. The prose used to: the same act (what you would have to pull back down) was written "a 4GB
+checkpoint" in five places and "40GB of weights" in three, ten times apart, neither ever measured,
+in files that both cite *"Never let a value have two authors."* The argument — knowledge regrows
+from `src + evidence` and a checkpoint does not — never needed a magnitude, and an invented one
+is what a reader sizes a disk against.
+
+**What does not move.** `dataset.json` stays machine-independent — `locations[]` names the
+machines and everything else describes the data. A pull destination inside the project is **one
+more declared location** (`role: working`), never a replacement for `origin` (a capture box by
+definition), `backup` (a second disk by definition) or `authority`. Collapsing those into the
+project would delete the very distinctions the census is computed from.
 
 ## Dataset identity and census records
 

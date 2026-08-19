@@ -33,8 +33,11 @@ Verbs:
              for what was supposed to arrive
   bundle     build the ARA for what is being evacuated (delegates to
              `/ara`; the deadline forces the artifact, it does not own it)
-  push       build/run the transfer, or record that somebody else did it
-  verify     read the DESTINATION back and compare against the frozen manifest
+  push       build/run the OFFSITE transfer, or record that somebody else did it
+  recover    bring the bytes INTO the project at evacuations/<id>/recovered/ --
+             the copy reachable without credentials, beside the record for it
+  verify     read a DESTINATION back and compare against the frozen manifest
+             (`--local` for the recovery, otherwise the offsite copy)
   clearance  the verdict a release reads: clear | clear_size_only | blocked
   status     open evacuations and what is blocking them
 """
@@ -43,6 +46,7 @@ import argparse
 import fnmatch
 import json
 import os
+import shutil
 import subprocess
 import sys
 
@@ -64,6 +68,12 @@ from _records import (atomic_write_json, broke, emit, id_stamp,  # noqa: E402
 from handoff import (build_manifest, hash_file, iter_files,  # noqa: E402
                      read_manifest, write_manifest)
 from ara import CLASSES, classify, reproducibility            # noqa: E402
+# Imported, not reimplemented: `resources_beside_project` already resolves
+# --resources / $MLCLAW_RESOURCES / the workspace beside the project, and a
+# second copy of that precedence would drift from the first without either side
+# noticing. Same reason `iter_files` comes from `handoff.py`.
+sys.path.insert(0, os.path.join(os.path.dirname(_HERE), "data-collect"))
+from collect import resources_beside_project                  # noqa: E402
 
 ARA_PY = os.path.join(os.path.dirname(_HERE), "ara", "ara.py")
 
@@ -188,6 +198,59 @@ def _latest(project, host=None):
     return None
 
 
+RECOVERED_DIRNAME = "recovered"
+
+
+def recovered_dir(project, eid):
+    return os.path.join(evac_dir(project, eid), RECOVERED_DIRNAME)
+
+
+def derive_destination(project, eid, bucket, prefix):
+    """-> (bucket, prefix, derived_from). The offsite destination, DERIVED.
+
+    ‼️ Both were `default=None` and the skill said nothing about what to put in
+    them, so every session invented a prefix -- and `build_push_cmd` will
+    happily assemble `s3://None/` out of the omission and hand it to the aws
+    cli. A destination nobody chose is the same defect as a pull destination
+    nobody chose, one layer over: what it costs here is that the offsite copy of
+    a machine that no longer exists is somewhere nothing can enumerate.
+    """
+    derived = {}
+    if not bucket:
+        rpath = resources_beside_project(project, None)
+        res = read_json(rpath, required=False) if rpath else None
+        bucket = ((res or {}).get("aws") or {}).get("s3_bucket") or None
+        if bucket:
+            derived["bucket"] = "resources.json -> aws.s3_bucket"
+    if not prefix:
+        prefix = f"{os.path.basename(os.path.abspath(project))}/{eid}/"
+        derived["prefix"] = "{project}/{evacuation_id}/"
+    return bucket, prefix, derived
+
+
+def local_recovery_fit(project, need_bytes):
+    """-> {path, bytes_needed, bytes_free, fits}. Read, never guessed.
+
+    Every byte MLClaw recovers lands under the project directory, which is what
+    lets a census and an artifact see it -- and which also means one evacuation
+    can fill the disk the whole workspace lives on. The footprint is knowable
+    before the transfer starts, so it is READ and reported here rather than
+    discovered as a half-written checkpoint: a partial local copy is this
+    skill's own named failure, and running out of room produces one silently.
+    """
+    base = os.path.abspath(project)
+    while not os.path.isdir(base) and os.path.dirname(base) != base:
+        base = os.path.dirname(base)
+    try:
+        free = shutil.disk_usage(base).free
+    except OSError:
+        return {"path": None, "bytes_needed": need_bytes, "bytes_free": None,
+                "fits": None, "note": "could not read free space -- unknown, "
+                                      "which is not the same as fits"}
+    return {"bytes_needed": need_bytes, "bytes_free": free,
+            "fits": free > need_bytes}
+
+
 # -------------------------------------------------------------------- plan
 
 def _walk(root, excludes):
@@ -245,14 +308,19 @@ def cmd_plan(a):
     repro = reproducibility(root)
 
     eid = a.id or f"evac_{id_stamp()}"
+    bucket, prefix, derived = derive_destination(project, eid, a.bucket, a.prefix)
+    fit = local_recovery_fit(project, total)
     rec = _template()
     rec.update({
         "evacuation_id": eid,
         "project": os.path.basename(os.path.abspath(project)),
         "source": {"host": a.host, "root": root, "reached_at": now_utc(),
                    "via": a.via},
-        "destination": {"kind": a.dest_kind, "bucket": a.bucket,
-                        "prefix": a.prefix, "checksum_algorithm": None},
+        "destination": {"kind": a.dest_kind, "bucket": bucket,
+                        "prefix": prefix, "checksum_algorithm": None,
+                        "derived": derived or None},
+        "recovery": {"path": RECOVERED_DIRNAME, "at": None, "returncode": None,
+                     "fit_at_plan": fit, "verification": None},
         "classes": {c: len(v) for c, v in classes.items()},
         "reproducible": repro,
         "cited_by": cites,
@@ -271,7 +339,24 @@ def cmd_plan(a):
            "bytes": total, "classes": {c: len(v) for c, v in classes.items()},
            "left_behind": len(dropped), "cited_paths": len(cites),
            "reproducible": repro["verdict"],
+           "destination": {"bucket": bucket, "prefix": prefix,
+                           "derived": derived or None},
+           "local_recovery": dict(fit, path=recovered_dir(project, eid)),
            "next": "freeze -- nothing is protected until the manifest exists"}
+    if not bucket and a.dest_kind == "s3":
+        out["‼️destination"] = (
+            "no bucket, and none in `resources.json -> aws.s3_bucket`. `push` "
+            "will refuse. The local recovery would then be the ONLY copy, and a "
+            "single copy on the disk the workspace lives on is not an offsite one")
+    if fit.get("fits") is False:
+        out["‼️local_recovery"] = (
+            f"{total:,} bytes to recover and {fit['bytes_free']:,} free. `recover` "
+            f"will refuse: running out of room mid-transfer produces exactly the "
+            f"half-written checkpoint this skill exists to catch, and produces it "
+            f"silently")
+    elif fit.get("fits") is None:
+        out["‼️local_recovery"] = ("free space could not be read, which is unknown "
+                                   "and not `fits`")
     if repro["verdict"] != "yes":
         out["reproducibility"] = repro["reason"]
     if not classes["src"]:
@@ -381,6 +466,13 @@ def build_push_cmd(rec, root):
     d = rec.get("destination") or {}
     if d.get("kind") != "s3":
         broke(f"no push builder for destination kind {d.get('kind')!r}")
+    if not d.get("bucket"):
+        refuse("this evacuation has no destination bucket",
+               why="`s3://None/...` is what an omitted bucket assembles into, and "
+                   "the aws cli would be handed it. Nothing about that failure "
+                   "says the bytes are still on a machine that is about to go",
+               fix="set `resources.json -> aws.s3_bucket`, or re-plan with "
+                   "--bucket. `recover` puts a copy in the project meanwhile")
     uri = f"s3://{d.get('bucket')}/{(d.get('prefix') or '').strip('/')}"
     # ‼️ --checksum-algorithm SHA256 is not optional decoration. Without it the
     # only thing `head-object` returns is an ETag, which equals the MD5 for
@@ -433,6 +525,86 @@ def cmd_push(a):
     emit(out)
 
 
+# ------------------------------------------------------------------ recover
+
+def build_recover_cmd(root, dest):
+    """The transfer is not ours -- `cmd_push`'s rule and `collect.py`'s.
+
+    ‼️ No `--partial`. Resuming a large pull is worth something and a plausible
+    half-written file left on disk is worth less than nothing: it is the exact
+    state `os.path.exists` cannot tell from a whole one, and it is what this
+    skill was written after. rsync's default removes it; `verify` remains the
+    authority either way.
+    """
+    return ["rsync", "-a", root.rstrip("/") + "/", dest.rstrip("/") + "/"]
+
+
+def cmd_recover(a):
+    """Bring the bytes INTO the project, beside the record that describes them.
+
+    The offsite copy goes to S3 and this one does not replace it -- it is the
+    copy a census, an artifact and a person can reach without credentials, and
+    it lands under `{PROJECT}/evacuations/<id>/recovered/` because everything
+    MLClaw recovers lands under the project. That is also why the fit is checked
+    first: the workspace and the recovery now share a disk.
+    """
+    project = os.path.expanduser(a.project)
+    rec = _load(project, a.id)
+    mpath = os.path.join(evac_dir(project, a.id), "manifest.jsonl")
+    if not os.path.exists(mpath):
+        refuse("this evacuation has no frozen manifest",
+               why="recovering first and manifesting afterwards computes "
+                   "completeness from what arrived, which is a tautology that "
+                   "passes every partial pull",
+               fix="`freeze` first")
+    root = (rec.get("source") or {}).get("root")
+    if not root or not os.path.isdir(root):
+        refuse(f"source root {root!r} is not readable now",
+               why="the source did not answer. That is `unverifiable`, and it is "
+                   "permanent once the machine is gone")
+
+    _, sent = read_manifest(mpath)
+    need = sum(e.get("bytes") or 0 for e in sent)
+    fit = local_recovery_fit(project, need)
+    dest = recovered_dir(project, a.id)
+    if fit.get("fits") is False and not a.anyway:
+        refuse("the recovery does not fit on this disk",
+               bytes_needed=need, bytes_free=fit.get("bytes_free"),
+               why="running out of room mid-transfer leaves files that are the "
+                   "right name and the wrong length, which is the one state "
+                   "`os.path.exists` cannot see and the failure this skill was "
+                   "written after",
+               fix="free space, recover to a bigger disk, or --anyway if you "
+                   "intend a partial copy that `verify` will mark truncated")
+
+    os.makedirs(dest, exist_ok=True)
+    cmd = build_recover_cmd(root, dest)
+    if a.dry:
+        emit({"ok": True, "would_run": cmd, "into": dest,
+              "bytes_needed": need, "bytes_free": fit.get("bytes_free")})
+        return
+    try:
+        p = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8",
+                           timeout=a.timeout)
+    except (OSError, subprocess.SubprocessError) as e:
+        broke(f"transfer could not run: {type(e).__name__}: {e}")
+
+    rec.setdefault("recovery", {}).update(
+        {"path": RECOVERED_DIRNAME, "at": now_utc(), "returncode": p.returncode,
+         "by": " ".join(cmd), "bytes_expected": need})
+    _save(project, rec)
+    out = {"ok": p.returncode == 0, "returncode": p.returncode,
+           "evacuation_id": a.id, "into": dest,
+           "next": "verify --local -- a copy is a claim until it is read back "
+                   "against the manifest"}
+    if p.returncode:
+        out["‼️"] = ("the transfer reported a failure. It may still have moved most "
+                     "of the bytes -- which is precisely the state that gets read as "
+                     "success. `verify --local` is what decides")
+        out["stderr_tail"] = (p.stderr or "")[-800:]
+    emit(out)
+
+
 # ------------------------------------------------------------------- verify
 
 def _dest_listing(a, rec):
@@ -474,6 +646,18 @@ def _dest_listing(a, rec):
 def cmd_verify(a):
     project = os.path.expanduser(a.project)
     rec = _load(project, a.id)
+    # ‼️ Two destinations now, and each is verified against the SAME frozen
+    # manifest. Writing both into one slot would let the second silently stand
+    # in for the first, so a local copy that arrived whole could clear a machine
+    # whose offsite copy never went -- the record would say `verified` and mean
+    # a different thing than the last time it said it.
+    if getattr(a, "local", False):
+        if a.dest_root or a.listing:
+            refuse("--local names the destination; --dest-root/--listing name "
+                   "another one",
+                   fix="verify the local recovery with --local alone, and the "
+                       "offsite copy in its own call")
+        a.dest_root = recovered_dir(project, a.id)
     mpath = os.path.join(evac_dir(project, a.id), "manifest.jsonl")
     if not os.path.exists(mpath):
         refuse("no frozen manifest",
@@ -514,12 +698,17 @@ def cmd_verify(a):
                   "sides are reading different fields. This is a defect in the "
                   "verifier, not a finding about the transfer")
 
-    rec["verification"] = {"checked_at": now_utc(), "counts": counts,
-                           "files": files[:500], "reachable": reachable}
+    block = {"checked_at": now_utc(), "counts": counts,
+             "files": files[:500], "reachable": reachable}
+    where = "local" if getattr(a, "local", False) else "offsite"
+    if where == "local":
+        rec.setdefault("recovery", {})["verification"] = block
+    else:
+        rec["verification"] = block
     rec["status"] = "verified"
     _save(project, rec)
-    out = {"ok": True, "evacuation_id": a.id, "counts": counts,
-           "problems": files[:20]}
+    out = {"ok": True, "evacuation_id": a.id, "destination": where,
+           "counts": counts, "problems": files[:20]}
     if counts["corrupt"]:
         out["‼️"] = (f"{counts['corrupt']} file(s) are the RIGHT LENGTH and the WRONG "
                      f"BYTES. Only the hash sees this one -- every size check in the "
@@ -532,6 +721,22 @@ def cmd_verify(a):
         out["‼️"] = ("the destination did not answer. Every file is `unverifiable`, "
                      "which is NOT `missing` -- nothing here has evidence either way")
     emit(out)
+
+
+def _verifications(rec):
+    """-> [(name, block)] for every destination that has actually been read back.
+
+    Absence here is `never verified`, which is neither a pass nor a failure --
+    the same third answer as a census that could not reach a machine.
+    """
+    out = []
+    off = rec.get("verification") or {}
+    if off.get("checked_at"):
+        out.append(("offsite", off))
+    loc = (rec.get("recovery") or {}).get("verification") or {}
+    if loc.get("checked_at"):
+        out.append(("local", loc))
+    return out
 
 
 # ---------------------------------------------------------------- clearance
@@ -608,19 +813,41 @@ def cmd_clearance(a):
                          "auto": True, "ok": rc_b == 0}
         _save(project, rec)
 
-    v = rec.get("verification") or {}
-    counts = v.get("counts") or {}
+    # ‼️ ONE clean destination clears the machine, not all of them. The gate is
+    # "the bytes are somewhere that was read back against the frozen manifest",
+    # and holding a box because the SECOND copy is still running would be paying
+    # for a machine over a redundancy -- while a project with no bucket could
+    # never clear at all. Every destination's state is reported either way: a
+    # verdict that hides which copy is broken is how a single surviving copy
+    # gets mistaken for two.
+    dests = _verifications(rec)
+    per, clean = [], []
+    for name, v in dests:
+        c = v.get("counts") or {}
+        problems = [f"{c[st]} file(s) {st}" for st in
+                    ("missing", "truncated", "corrupt", "unverifiable") if c.get(st)]
+        per.append({"destination": name, "problems": problems,
+                    "hash_verified": c.get("verified", 0),
+                    "size_only": c.get("size_only", 0)})
+        if not problems:
+            clean.append((name, c))
+
     blocked = []
-    if not v.get("checked_at"):
-        blocked.append("never verified -- the destination has not been read back")
-    for s in ("missing", "truncated", "corrupt", "unverifiable"):
-        if counts.get(s):
-            blocked.append(f"{counts[s]} file(s) {s}")
+    if not dests:
+        blocked.append("never verified -- no destination has been read back")
+    elif not clean:
+        for d in per:
+            blocked += [f"{d['destination']}: {x}" for x in d["problems"]]
     stranded = _unevacuated_citations(project, rec)
     for c in stranded:
         blocked.append(f"{c['cites']} is cited by {c['by']} and is not in the manifest")
 
-    n_ver, n_size = counts.get("verified", 0), counts.get("size_only", 0)
+    # Prefer the copy with nothing resting on length alone -- `clear_size_only`
+    # is a weaker verdict and must not be reported when a stronger copy exists.
+    best = sorted(clean, key=lambda kv: kv[1].get("size_only", 0))[0] if clean else None
+    cleared_by = best[0] if best else None
+    bc = best[1] if best else {}
+    n_ver, n_size = bc.get("verified", 0), bc.get("size_only", 0)
     if blocked:
         verdict = "blocked"
     elif n_size:
@@ -630,13 +857,21 @@ def cmd_clearance(a):
 
     rec["clearance"] = {"verdict": verdict, "decided_at": now_utc(),
                         "hash_verified": n_ver, "of": n_ver + n_size,
+                        "cleared_by": cleared_by, "destinations": per,
                         "blocked_by": blocked}
     rec["status"] = "cleared" if verdict != "blocked" else "blocked"
     _save(project, rec)
 
     out = {"evacuation_id": rec["evacuation_id"], "verdict": verdict,
            "hash_verified": n_ver, "of": n_ver + n_size, "blocked_by": blocked,
+           "cleared_by": cleared_by, "destinations": per,
            "artifact": (rec.get("bundle") or {}).get("path")}
+    if len(clean) < 2 and verdict != "blocked":
+        out["‼️copies"] = (
+            f"cleared on ONE verified copy ({cleared_by}). The other destination "
+            f"is {'unverified' if len(dests) < 2 else 'not clean'} -- so once this "
+            f"machine goes there is a single copy, and nothing here has checked "
+            f"whether the disk it sits on is backed up")
     if (rec.get("bundle") or {}).get("ok") is False:
         out["‼️artifact"] = ("`/ara build` failed, so these bytes ship as a "
                              "directory with no cover page. NOT a reason to hold "
@@ -720,8 +955,19 @@ def main():
     s.add_argument("--timeout", type=int, default=7200)
     s.set_defaults(func=cmd_push)
 
+    s = common(sub.add_parser("recover"))
+    s.add_argument("--id", required=True)
+    s.add_argument("--dry", action="store_true")
+    s.add_argument("--anyway", action="store_true",
+                   help="recover even though it does not fit. Produces a partial "
+                        "copy; `verify --local` will mark it truncated")
+    s.add_argument("--timeout", type=int, default=7200)
+    s.set_defaults(func=cmd_recover)
+
     s = common(sub.add_parser("verify"))
     s.add_argument("--id", required=True)
+    s.add_argument("--local", action="store_true",
+                   help="verify the in-project recovery instead of the offsite copy")
     s.add_argument("--dest-root", default=None)
     s.add_argument("--listing", default=None,
                    help="JSONL of {item, bytes, sha256} read from the destination")
