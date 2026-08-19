@@ -234,6 +234,13 @@ search that runs overnight, and every box in the fleet expiring mid-flight. The 
 failure — the session ending and TTLs running out — is the **safe** one, and is the
 reason the switch exists.
 
+**`close` drains before it destroys.** A slot in `busy` still has a trial on it, and the
+disk goes with the lease — so `close` refuses and names the runs. This became checkable
+only when `/train-tune`'s loop stopped being a barrier: while it launched a batch and
+waited for all of it, "stopped launching" and "nothing is running" were the same fact.
+`--abandon "<why>"` is the honest exit and records what was dropped; an abandoned trial is
+not evidence, same as a preempted one.
+
 **A pool must be closable with no upstream state.** `pool.py close --session <id>` reads
 the pool record; if that is gone, `/lease reap` is the backstop and works from the cloud
 side alone. Neither may require the project, the tune session, or a healthy `leases.json`

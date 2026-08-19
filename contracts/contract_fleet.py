@@ -1270,5 +1270,82 @@ class ReapIsWiredAndScopedToWhatBills(unittest.TestCase):
         self.assertNotIn("still not wired", claude)
 
 
+class ClosingDestroysTheBoxesSoDrainFirst(TempDirCase):
+    """CLAUDE.md -> "Never silently", the evacuate-before-release rule, and
+    `skills/train-tune/SKILL.md` -> Step 6 "Drain, close the fleet, then render".
+
+    Nothing had to check this while `/train-tune`'s loop was a barrier: it launched a
+    batch and blocked until ALL of it finished, so no trial could still be running when
+    a stop condition tripped. The loop is a pipeline now -- trials launch as slots free
+    and are harvested one at a time -- and that makes "stopped launching" and "nothing
+    is running" two different facts for the first time. `close` tears the boxes down,
+    the disk goes with the lease, and there is no `rm` anywhere in the log.
+
+    Written as a refusal rather than prose for the reason CLAUDE.md gives for the
+    destructive-delete hook: the moment it matters is the one where nobody is reading.
+    """
+
+    BUSY = {"slot": "slot_0", "lease_id": "lease_a", "provider": "n",
+            "machine_type": "m", "price_hr": 1.0, "preemptible": True,
+            "state": "busy", "run": "run_007",
+            "history": [{"run": "run_007", "at": 0, "outcome": None}]}
+    FREE = dict(BUSY, slot="slot_1", lease_id="lease_b", state="free", run=None,
+                history=[])
+
+    def setUp(self):
+        super().setUp()
+        self.pool = load_script("shared/pool.py")
+        self.released = []
+        self.pool.lease = lambda *a, **kw: self.released.append(a) or (True, {})
+        self.session = self.path("sess")
+
+    def _pool(self, *slots):
+        self.write_json("sess/pool.json", {
+            "session": self.session, "opened_at": 0, "closed_at": None,
+            "shape": {}, "allow_preemptible": True, "ttl_s": 3600, "plan": {},
+            "slots": [dict(x) for x in slots]})
+
+    def _close(self, abandon=None):
+        return capture(self.pool.v_close, types.SimpleNamespace(
+            session=self.session, abandon=abandon))
+
+    def test_a_busy_slot_refuses_the_close(self):
+        self._pool(self.BUSY, self.FREE)
+        out = self._close()
+        self.assertIn("error", out)
+        self.assertEqual([b["run"] for b in out["busy"]], ["run_007"],
+                         "the refusal must name what is still on the box")
+        self.assertEqual(self.released, [],
+                         "nothing may be torn down on the refusing path")
+
+    def test_a_drained_pool_closes_normally(self):
+        """The refusal must not become a thing people route around: a pool whose
+        trials were all released closes exactly as before."""
+        self._pool(dict(self.BUSY, state="free", run=None), self.FREE)
+        out = self._close()
+        self.assertNotIn("error", out)
+        self.assertEqual(out["released"], 2)
+
+    def test_abandoning_is_allowed_and_recorded_as_a_decision(self):
+        """A silent teardown and a deliberate abandonment read identically afterwards,
+        which is the whole reason this cannot be a warning."""
+        self._pool(self.BUSY, self.FREE)
+        out = self._close(abandon="user stopped the search")
+        self.assertNotIn("error", out)
+        self.assertEqual([b["run"] for b in out["abandoned"]], ["run_007"])
+        rec = self.read_json("sess/pool.json")["abandoned"]
+        self.assertEqual(rec[0]["run"], "run_007")
+        self.assertEqual(rec[0]["why"], "user stopped the search",
+                         "the reason outlives the session that had it")
+
+    def test_an_abandoned_trial_is_not_evidence(self):
+        """Same rule as a preemption: the box went away under it, so its number says
+        nothing about its hypothesis. fleet.md -> "A preempted trial is not a failed
+        trial"."""
+        self._pool(self.BUSY)
+        out = self._close(abandon="lease expired")
+        self.assertIn("not be recorded as refuted", out["‼️"])
+
+
 if __name__ == "__main__":
     unittest.main()

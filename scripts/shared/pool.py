@@ -301,6 +301,34 @@ def v_close(args):
     exactly the one that will not run this."""
     session = args.session
     pool = read_pool(session)
+
+    # ‼️ The drain, as a refusal rather than a line of prose.
+    #
+    # `close` destroys the boxes. While `/train-tune`'s loop was a barrier -- launch a
+    # batch, block until ALL of it finished -- no trial could still be running when a
+    # stop condition tripped, so nothing had to check. That loop is a pipeline now
+    # (trials launch as slots free and are harvested one at a time), which makes
+    # "stopped launching" and "nothing is running" two different facts for the first
+    # time. Destroying a box under a running trial loses the trial AND is CLAUDE.md ->
+    # "Never release a machine you did not evacuate": the disk goes with the lease and
+    # there is no `rm` anywhere in the log.
+    #
+    # The honest exit is `--abandon`, which is a DECISION and is recorded as one. A
+    # silent teardown and a deliberate abandonment read identically afterwards, which is
+    # the whole reason this cannot be a warning.
+    busy = [{"slot": s_["slot"], "run": s_.get("run")}
+            for s_ in pool["slots"] if s_["state"] == "busy"]
+    if busy and not args.abandon:
+        fail("%d slot(s) still have a trial on them -- drain before closing" % len(busy),
+             busy=busy,
+             fix="let them finish and `pool.py release --slot <s> --outcome ...` each, "
+                 "then close. If they must be dropped, `--abandon '<why>'` -- that is a "
+                 "decision and lands in the record as one. Closing destroys the disks: "
+                 "run /evacuate first if anything on them is worth keeping")
+    if busy and args.abandon:
+        pool.setdefault("abandoned", []).extend(
+            [dict(b, why=args.abandon, at=int(time.time())) for b in busy])
+
     released, stuck = [], []
     for lease_id in sorted({s["lease_id"] for s in pool["slots"] if s.get("lease_id")}):
         ok, data = lease("release", lease_id)
@@ -312,6 +340,12 @@ def v_close(args):
     write_pool(session, pool)
     out = {"released": len(released), "stuck": stuck or None,
            "session": pool["session"]}
+    if busy and args.abandon:
+        out["abandoned"] = busy
+        out["‼️"] = ("%d trial(s) were still running and their boxes are gone. They are "
+                     "NOT evidence about their hypotheses and must not be recorded as "
+                     "refuted -- same rule as a preemption. Name them in the summary."
+                     % len(busy))
     if stuck:
         # Never paper over a failed teardown. The lease rows stay open on purpose so the
         # boxes remain visible to `status` and `reap`.
@@ -594,6 +628,10 @@ def main():
 
     c = sub.add_parser("close"); c.set_defaults(fn=v_close)
     c.add_argument("--session", required=True)
+    c.add_argument("--abandon", metavar="WHY",
+                   help="close even though slots still hold running trials, dropping "
+                        "them. Records what was abandoned and why. Without it, a busy "
+                        "slot is a refusal: closing destroys the disk under a live run")
 
     args = ap.parse_args()
     global RESOURCES

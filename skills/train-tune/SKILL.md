@@ -287,6 +287,12 @@ launching → let the in-flight trials finish → harvest each as in step 5 → 
 Under the old barrier this could not arise, which is exactly why it has to be written down
 now. `no_signal` is computed over `completed_trials` at close, so it is still whole.
 
+‼️ **This one is not left to prose.** `pool.py close` **refuses** (exit 1) while any slot
+is `busy`, and names the runs. That refusal is the answer, not a breakage — do not route
+around it. Dropping the trials anyway is `--abandon "<why>"`, which is a *decision* and is
+recorded as one in `pool.json -> abandoned`; an abandoned trial is **not evidence** about
+its hypothesis, exactly like a preemption.
+
 **The heartbeat is step 4's first line and not an optional flourish.** A fleet's TTLs are
 sized in hours and a search runs overnight; the loop is the only thing that knows the
 search is still alive, so a missed heartbeat kills every trial in flight. It is one call
