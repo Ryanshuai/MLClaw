@@ -70,9 +70,14 @@ PHASE_PY = os.path.join(HERE, "..", "data", "phase.py")
 # phase.py's own docstring) -- but this script's own --stale-days default still
 # needs a value to show before phase.py ever runs, and it must be the same
 # value phase.py would pick on its own. Imported, so the two cannot drift the
-# way two independently-typed `14.0` literals eventually would.
+# way two independently-typed literals eventually would.
+#
+# From phase.py and NOT from `_vocab.py`'s staleness ladder, even though both
+# read the same today: what this renders is the age of a census READING. The
+# ladder measures how long an open exchange has gone quiet. The number is the
+# same by coincidence and the subjects are not, so this follows the census.
 sys.path.insert(0, os.path.join(HERE, "..", "data"))
-from phase import DEFAULT_STALE_DAYS  # noqa: E402
+from phase import CENSUS_STALE_DAYS  # noqa: E402
 
 
 def e(x):
@@ -556,7 +561,7 @@ def main():
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     p.add_argument("--project", required=True)
     p.add_argument("--out", default=None, help="default: <project>/data_board.html")
-    p.add_argument("--stale-days", type=float, default=DEFAULT_STALE_DAYS)
+    p.add_argument("--stale-days", type=float, default=CENSUS_STALE_DAYS)
     p.add_argument("--last", type=int, default=20,
                    help="columns to draw, most recent first (default 20). A grid "
                         "wider than a screen stops being scannable, which is the "

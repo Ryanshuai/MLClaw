@@ -39,13 +39,12 @@ a lie:
     holding type objects, so `literal_eval` cannot read it and this check cannot know its
     value. `pool.py` carried three copies of that table until this round; nothing here
     would have caught them, and Step 5b's by-hand sweep is what did.
-  * `DEFAULT_STALE_DAYS`. It genuinely HAS two authors today -- `phase.py` and
-    `handoff.py:669`'s `--stale-days` default -- and `board.py:73`'s comment predicted it
-    in as many words ("the way two independently-typed `14.0` literals eventually would").
-    It is absent here because fixing it needs a decision nobody has made: handoff staleness
-    is arguably `handoff.py`'s, and `handoff.py` importing `phase.py` inverts the layering.
-    A check kept red over an open design question is a check that teaches people to ignore
-    a red. Registering it is the fix, once that call is made.
+  * The staleness thresholds, which are NOT in the registry and are checked by shape
+    instead -- see `EveryStalenessThresholdComesFromTheLadder` below. Registering them
+    would make this file red for a non-defect: two of the three are equal, and the
+    structural check compares values, so one author would report the other as its own
+    second author. That two constants may be equal today and must stay free to diverge is
+    the case the registry cannot express.
 """
 import ast
 import os
@@ -165,6 +164,51 @@ class OneListIsASubsetOfTheOtherOrReproCannotSeeIt(unittest.TestCase):
         self.assertEqual(uncaptured, [],
                          "these decide a `drifted` verdict but capture_env never records "
                          "their version, so /repro can never see them move")
+
+
+class EveryStalenessThresholdComesFromTheLadder(unittest.TestCase):
+    """CLAUDE.md -> "Never silently": *Never let a value have two authors*, for a value
+    the registry above cannot hold.
+
+    CLAUDE.md "On Conversation Start" step 3 reports three open-exchange staleness
+    thresholds in one pass and argues the split between them in prose -- *"stale at 7
+    days, not 14"*. Prose is the copy no test executes, and the three numbers were three
+    independently-typed literals; `board.py`'s comment had already predicted the drift in
+    as many words.
+
+    They cannot go in `SINGLE_AUTHOR`: `ASK_STALE_DAYS` and `ADAPTATION_STALE_DAYS` are
+    equal, and the structural check compares parsed values, so registering both would
+    report each as the other's second author. `phase.py -> CENSUS_STALE_DAYS` equals a
+    third of them and is deliberately a separate subject. So this checks the SHAPE that
+    survives all that: a `--stale-days` default must be a name, never a literal. Where the
+    name resolves is the design decision; that one was typed rather than imported is the
+    defect.
+    """
+
+    def test_no_stale_days_default_is_a_bare_literal(self):
+        offenders, seen = [], 0
+        for rel in tracked("scripts/*.py"):
+            try:
+                tree = ast.parse(open(os.path.join(REPO_ROOT, rel), encoding="utf-8").read())
+            except (OSError, SyntaxError):
+                continue
+            for node in ast.walk(tree):
+                if not (isinstance(node, ast.Call)
+                        and isinstance(node.func, ast.Attribute)
+                        and node.func.attr == "add_argument"
+                        and node.args
+                        and isinstance(node.args[0], ast.Constant)
+                        and node.args[0].value == "--stale-days"):
+                    continue
+                seen += 1
+                for kw in node.keywords:
+                    if kw.arg == "default" and not isinstance(kw.value, ast.Name):
+                        offenders.append(f"{rel}:{node.lineno}")
+        self.assertTrue(seen, "no --stale-days parser found; this check stopped checking")
+        self.assertEqual(sorted(offenders), [],
+                         "a staleness threshold typed as a literal. Name it in "
+                         "`shared/_vocab.py` (an open exchange) or in the script that owns "
+                         "the subject (`phase.py -> CENSUS_STALE_DAYS`), and import it")
 
 
 class EveryRegisteredValueHasOneAuthor(unittest.TestCase):

@@ -42,6 +42,7 @@ from datetime import datetime, timezone
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__))), "shared"))
 from _records import (age_days, atomic_write_json, broke, emit, now_utc, read_json, refuse)  # noqa: E402
+from _vocab import ASK_STALE_DAYS  # noqa: E402
 
 # What is being asked for. Shapes what an answer even means, so it is a fixed
 # vocabulary rather than free text.
@@ -320,7 +321,7 @@ def main():
     st = sub.add_parser("status", help="what is outstanding; no network")
     st.add_argument("--project", required=True)
     st.add_argument("--open-only", action="store_true")
-    st.add_argument("--stale-days", type=float, default=7.0)
+    st.add_argument("--stale-days", type=float, default=ASK_STALE_DAYS)
     st.set_defaults(fn=cmd_status)
 
     sh = sub.add_parser("show", help="print one ask")

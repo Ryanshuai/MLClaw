@@ -58,3 +58,33 @@ PROVENANCE = ("user", "ai-suggested", "ai-executed", "user-revised")
 # --------------------------------------------------------------------------
 
 HANDOFF_TERMINAL = ("accepted", "rejected", "cancelled")
+
+# --------------------------------------------------------------------------
+# how long an OPEN EXCHANGE may go quiet before it is stale — the three
+# thresholds CLAUDE.md "On Conversation Start" step 3 reports in one pass:
+# `handoff.py status`, `ask.py status`, `adapt.py status`.
+#
+# One table with three entries, not one number: CLAUDE.md argues the split
+# itself — *"stale at 7 days, not 14 — a question someone could answer in a
+# minute going unanswered for a week is a worse signal than a labeling batch
+# taking three weeks."* That sentence was the only place the ladder existed,
+# and CLAUDE.md's own rule is that a copy in prose is the one no test executes.
+# Each entry is separately movable on purpose; what has one author is the
+# table.
+#
+# NOT here, and it is the distinction the whole entry turns on: `phase.py`'s
+# census threshold. It reads 14.0 today too, and it is a different subject —
+# how old a READING of the disks is, not how long somebody has been sitting on
+# work. CLAUDE.md gives the census no threshold at all. Two values that are
+# equal today and must stay free to diverge, which is why merging them on the
+# strength of the number would have been the wrong fix.
+# --------------------------------------------------------------------------
+
+HANDOFF_STALE_DAYS = 14.0        # an artifact batch out with another party
+
+ASK_STALE_DAYS = 7.0             # a question put to a person
+
+ADAPTATION_STALE_DAYS = 7.0      # a data<->model feedback session left open.
+                                 # Question-shaped rather than batch-shaped:
+                                 # the other end is a colleague deciding, not a
+                                 # team working through a queue.

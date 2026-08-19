@@ -50,6 +50,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__))), "shared"))
 from _records import (age_days, atomic_write_json, broke, emit, now_utc,  # noqa: E402
                       read_json, refuse, id_stamp)
+from _vocab import ADAPTATION_STALE_DAYS  # noqa: E402
 
 # The two ends of the seam plus the thing that defines it. A fixed vocabulary
 # because the whole design turns on these NOT being people: a role register would
@@ -625,7 +626,7 @@ def main():
     st = sub.add_parser("status", help="what is open and how long; no network")
     st.add_argument("--project", required=True)
     st.add_argument("--open-only", action="store_true")
-    st.add_argument("--stale-days", type=float, default=7.0)
+    st.add_argument("--stale-days", type=float, default=ADAPTATION_STALE_DAYS)
     st.set_defaults(fn=cmd_status)
 
     sh = sub.add_parser("show", help="print one session")

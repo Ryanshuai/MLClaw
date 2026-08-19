@@ -37,7 +37,7 @@ from datetime import datetime, timezone
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__))), "shared"))
 from _records import (age_days, atomic_write_json, broke, emit, now_utc, read_json, refuse)  # noqa: E402
-from _vocab import HANDOFF_TERMINAL as TERMINAL  # noqa: E402
+from _vocab import HANDOFF_STALE_DAYS, HANDOFF_TERMINAL as TERMINAL  # noqa: E402
 
 # Fixed vocabulary, deliberately short. A handoff's kind decides what a reviewer
 # looks for on return, so an open string would make that undecidable downstream.
@@ -666,7 +666,7 @@ def main():
     st.add_argument("--workspace", default=None, help="scan every project under here")
     st.add_argument("--id", default=None)
     st.add_argument("--open-only", action="store_true")
-    st.add_argument("--stale-days", type=float, default=14.0)
+    st.add_argument("--stale-days", type=float, default=HANDOFF_STALE_DAYS)
     st.set_defaults(fn=cmd_status)
 
     sh = sub.add_parser("show", help="print one handoff record")

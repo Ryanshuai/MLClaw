@@ -48,7 +48,13 @@ from _vocab import HANDOFF_TERMINAL as TERMINAL_HANDOFF  # noqa: E402
 # reports for retire is what has happened to it, not where it stands.
 PHASES = ("collect", "label", "curate", "freeze", "ready", "retire")
 GATES = ("freeze", "curate", "consume")
-DEFAULT_STALE_DAYS = 14.0
+# How old a CENSUS reading may be before `assess` warns. Not the handoff
+# threshold in `_vocab.py`, which reads the same today: that one measures how
+# long somebody has been sitting on work, this one how long ago the disks were
+# last looked at. They must stay free to move apart, so this is deliberately
+# NOT imported from there -- and it is named for its subject so the next
+# reader is not invited to unify them on the strength of the number.
+CENSUS_STALE_DAYS = 14.0
 
 
 # --------------------------------------------------------------------------- #
@@ -612,7 +618,7 @@ def main():
     s = sub.add_parser("phase", help="where each dataset is, and what is next")
     s.add_argument("--project", required=True)
     s.add_argument("--dataset", default=None)
-    s.add_argument("--stale-days", type=float, default=DEFAULT_STALE_DAYS)
+    s.add_argument("--stale-days", type=float, default=CENSUS_STALE_DAYS)
     s.set_defaults(fn=cmd_phase)
 
     h = sub.add_parser("history", help="one replayed assessment per census")
@@ -620,7 +626,7 @@ def main():
     h.add_argument("--dataset", default=None)
     h.add_argument("--last", type=int, default=None,
                    help="only the N most recent censuses per dataset")
-    h.add_argument("--stale-days", type=float, default=DEFAULT_STALE_DAYS)
+    h.add_argument("--stale-days", type=float, default=CENSUS_STALE_DAYS)
     h.set_defaults(fn=cmd_history)
 
     g = sub.add_parser("gate", help="refuse a transition whose preconditions fail")
@@ -629,7 +635,7 @@ def main():
     g.add_argument("--to", required=True, choices=GATES)
     g.add_argument("--acknowledge", default=None,
                    help="restate the blocker count to proceed anyway")
-    g.add_argument("--stale-days", type=float, default=DEFAULT_STALE_DAYS)
+    g.add_argument("--stale-days", type=float, default=CENSUS_STALE_DAYS)
     g.set_defaults(fn=cmd_gate)
 
     a = p.parse_args()
