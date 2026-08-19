@@ -45,6 +45,15 @@ MLClaw replaces MLflow/W&B/TensorBoard with conversation-driven ML lifecycle man
 
 ## Never silently
 
+**One of these is now mechanized.** `hooks/guard_destructive.py` is a `PreToolUse` refusal on
+`Bash`: it blocks a delete aimed at a checkpoint, at frozen data, at a run record or at a
+`knowledge/` file, and names the `plan` → `apply` script that owns it. It is a hook and not a
+skill's `allowed-tools` for the reason this whole section exists — **`allowed-tools` binds only
+while a skill runs, and these rules are for the moment when none does.** It blocks rather than
+warns, on `identity.md` build step 8's line: non-blocking is right for a capture operator who
+cannot re-shoot the frames, and wrong for a script whose next statement is `rm -rf` over ssh.
+The other rules below are judgment, and nothing can mechanize them.
+
 Ten rules that outrank convenience. They are here, in the always-loaded file, because the moment they matter most is when no skill is running — a user says "clean up the old checkpoints", "which run was best", or "the labels came back, load them in", nothing loads, and an obliging agent does the wrong thing without anything raising. Mechanism and rationale: `lifecycle/references/run-mechanics.md -> "Record integrity"`.
 
 - **Never delete a checkpoint outside `retention.py plan` → `apply`.** Showing the user a list of filenames is not confirmation — the list carries no evidence the ranking behind it was right. Never delete a file you cannot rank.

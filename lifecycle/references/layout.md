@@ -104,6 +104,7 @@ README.md                           ← what MLClaw is, and which stages are bui
   plugin.json                       ← the manifest. Plugin root is the REPO root — install copies the plugin dir, so a plugin rooted at `.claude/` ships 34 skills and none of their scripts
   marketplace.json                  ← the catalog that makes it installable: one entry, source `./`
 .claude/                            ← project settings only; NOT the plugin. The two were the same directory until that bug was found
+hooks/                              ← plugin hooks. `guard_destructive.py` is the only one: a PreToolUse refusal, because a skill's `allowed-tools` binds only while that skill runs
 skills/                             ← one dir per skill; a skill's own `references/` is its business, not listed here
   project-init/SKILL.md             ← /project-init
   infer-init/SKILL.md               ← /infer-init

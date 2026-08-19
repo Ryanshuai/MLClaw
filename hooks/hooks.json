@@ -1,0 +1,17 @@
+{
+  "description": "One PreToolUse guard on Bash. It refuses a delete that CLAUDE.md reserves for a plan -> apply script (checkpoints, frozen data, run records, knowledge files) and is silent about everything else. It exists because a skill's `allowed-tools` binds only while that skill runs, and the rules it enforces are for the moment when none does.",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/guard_destructive.py\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}
