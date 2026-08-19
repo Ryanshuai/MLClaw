@@ -580,6 +580,76 @@ def _next_id(graph):
     return "N%02d" % ((max(nums) + 1) if nums else 1)
 
 
+# ------------------------------------------------------- dependency edges
+#
+# ‼️ An edge used to be a bare id, and a bare id can only say ONE thing: wait.
+# That single missing distinction is what made the graph serialise on order it
+# was never asked to impose. The case it was found on: N07 (fusion) needed N06's
+# SIGMA -- a value, two flags in one code change -- and the graph handed it N06's
+# VERDICT, four and a half hours of it, because there was no way to write the
+# difference down. The only way to parallelise was to DELETE the edge, and
+# deleting it threw away the half that was real: that N07's number cannot be
+# read without knowing whether that sigma was calibrated.
+#
+# So an edge now says WHAT IT BLOCKS, and the two answers gate different verbs:
+#
+#   launch    B cannot start. The premise share is unmeasured, the parent ckpt
+#             does not exist, the code cannot be written until A lands. Gates
+#             `ready` -- this is the old meaning, and the four real dependencies
+#             in SKILL.md are all this kind.
+#   reading   B starts immediately; B's RESULT cannot be interpreted alone. Gates
+#             NOTHING. It stamps `conditional_on` at close so the verdict says out
+#             loud what it is standing on, and re-surfaces when A lands.
+#
+# 「先跑不等于先读」 was written here for the noise floor and treated as that one
+# number's exemption. It is the general rule: the graph exists to gate READING,
+# and the launch order is a consequence of it, not the point of it.
+#
+# ‼️ A bare id still means `launch`. The permissive default would silently
+# unblock every graph ever written; the prompt to retype lives in `ready`, which
+# is the moment the edge actually costs something.
+DEP_BLOCKS = ("launch", "reading")
+
+
+def _parse_dep(spec):
+    """CLI form. `N06` -> launch; `N06:reading` -> reading."""
+    if isinstance(spec, str) and ":" in spec:
+        did, _, blocks = spec.partition(":")
+        if blocks not in DEP_BLOCKS:
+            broke(f"--depends-on {spec!r}: blocks must be one of {list(DEP_BLOCKS)}")
+        return {"id": did, "blocks": blocks}
+    return spec
+
+
+def _dep_edges(node):
+    """[(id, blocks)] out of either stored form.
+
+    A malformed entry comes back with `blocks=None` rather than being dropped:
+    silently ignoring an edge nobody can parse is how a gate stops existing while
+    the file still shows it. `None` blocks like `launch` and `check` reports it.
+    """
+    out = []
+    for d in node.get("depends_on") or []:
+        if isinstance(d, str):
+            out.append((d, "launch"))
+        elif isinstance(d, dict) and isinstance(d.get("id"), str):
+            b = d.get("blocks", "launch")
+            out.append((d["id"], b if b in DEP_BLOCKS else None))
+        else:
+            out.append((json.dumps(d, ensure_ascii=False), None))
+    return out
+
+
+def _dep_ids(node, blocks=None):
+    return [i for i, b in _dep_edges(node) if blocks is None or b == blocks]
+
+
+def _unsettled(node, by_id, blocks=None):
+    return [i for i, b in _dep_edges(node)
+            if (blocks is None or b == blocks)
+            and (i not in by_id or by_id[i].get("state") not in SETTLED)]
+
+
 def _derive_state(node, by_id, corpus):
     """-> (state, why) for one card. The single truth for draft/blocked/ready.
 
@@ -605,10 +675,19 @@ def _derive_state(node, by_id, corpus):
     scope = _share_scope(node, corpus)
     if missing or scope:
         return "draft", {"why": "incomplete card", "missing": missing, "scope": scope}
-    unmet = [d for d in node.get("depends_on") or []
-             if d not in by_id or by_id[d].get("state") not in SETTLED]
+    # ‼️ Only `launch` edges gate. A `reading` edge that is unsettled leaves the
+    # card takeable and says so -- see the block above `DEP_BLOCKS`.
+    unmet = [i for i, b in _dep_edges(node) if b != "reading"
+             and (i not in by_id or by_id[i].get("state") not in SETTLED)]
     if unmet:
-        return "blocked", {"why": "dependencies unsettled", "waiting_on": unmet}
+        return "blocked", {
+            "why": "dependencies unsettled", "waiting_on": unmet,
+            "ask": "does this card need those VERDICTS, or only a value / an "
+                   "artifact / a line of code from them? Only the first is a "
+                   "`launch` edge. Retype the rest `{\"id\": \"X\", \"blocks\": "
+                   "\"reading\"}` and this card is takeable now -- the verdict it "
+                   "eventually gets will carry `conditional_on` instead of the "
+                   "queue carrying the wait"}
     return "ready", {}
 
 
@@ -667,7 +746,7 @@ def cmd_add(a):
         "criterion": a.criterion,
         "guardrail": a.guardrail or [],
         "parent": a.parent,
-        "depends_on": a.depends_on or [],
+        "depends_on": [_parse_dep(d) for d in a.depends_on or []],
         "oracle_ceiling": None,
         "kill_condition": a.kill_condition,
         "tier": None,
@@ -675,6 +754,7 @@ def cmd_add(a):
         "run_id": None,
         "result": None,
         "verdict": None,
+        "conditional_on": [],
         "killed_by": None,
         "revive_if": None,
         "history": [{"at": now_utc(), "to": "draft", "note": "added",
@@ -707,6 +787,14 @@ def cmd_set(a):
             node[k] = json.loads(v)
         except json.JSONDecodeError:
             node[k] = v
+        if k == "depends_on":
+            # Refuse an unparseable edge here rather than let `check` report it
+            # later: an edge whose kind nobody can read gates like `launch`, so
+            # the mistake shows up as a card that will not move.
+            for i, b in _dep_edges(node):
+                if b is None:
+                    broke(f"depends_on entry {i!r}: `blocks` must be one of "
+                          f"{list(DEP_BLOCKS)}. A bare id means `launch`.")
     missing = _missing_fields(node)
     corpus = graph.get("corpus") or {}
     scope = _share_scope(node, corpus)
@@ -798,7 +886,11 @@ def _cycle(by_id):
             return None
         seen.add(nid)
         stack.append(nid)
-        for d in by_id[nid].get("depends_on") or []:
+        # ‼️ `launch` edges only. A pair of cards each `reading` the other is
+        # legitimate -- "run both, adjudicate together" has exactly that shape --
+        # and walking every edge would report the healthiest use of the new kind
+        # as a deadlock.
+        for d in [i for i, b in _dep_edges(by_id[nid]) if b != "reading"]:
             c = walk(d)
             if c:
                 return c
@@ -869,7 +961,8 @@ def _propagation(graph, node, p):
     for n in graph.get("nodes", []):
         if n["id"] == nid:
             continue
-        if nid in (n.get("depends_on") or []) or n.get("parent") == nid:
+        if nid in _dep_ids(n) or n.get("parent") == nid \
+                or nid in (n.get("conditional_on") or []):
             hits["depends_on_this"].append(n["id"])
             continue
         blob = json.dumps({k: n.get(k) for k in
@@ -943,12 +1036,37 @@ def cmd_close(a):
         node["verdict"] = a.verdict
         node["history"].append({"at": now_utc(), "to": "closed", "verdict": a.verdict})
 
+    # ‼️ A `reading` dependency does not refuse the verdict -- it stamps it. The
+    # alternative was to block `close`, which just moves the stall one state to
+    # the right: a pile of 🟪 nobody may adjudicate is the same waiting, minus the
+    # GPU hours. What must not happen is the verdict travelling WITHOUT its
+    # condition, and that is what this field is: the card says out loud that its
+    # reading rests on something still open.
+    by_id = {n["id"]: n for n in graph["nodes"]}
+    node["conditional_on"] = _unsettled(node, by_id, "reading")
+
     graph["updated_at"] = now_utc()
     atomic_write_json(p["graph"], graph)
-    emit({"id": a.id, "state": node["state"],
-          "unblocked": [n["id"] for n in graph["nodes"]
-                        if a.id in (n.get("depends_on") or [])
-                        and n["state"] not in SETTLED]})
+    out = {"id": a.id, "state": node["state"],
+           "unblocked": [n["id"] for n in graph["nodes"]
+                         if a.id in _dep_ids(n, "launch")
+                         and n["state"] not in SETTLED],
+           # Verdicts already written that were standing on THIS card. `fill` says
+           # what a result may have voided; this says what a VERDICT may have.
+           "re_read": [n["id"] for n in graph["nodes"]
+                       if a.id in (n.get("conditional_on") or [])]}
+    if node["conditional_on"]:
+        out["conditional_on"] = node["conditional_on"]
+        out["note"] = ("this verdict is conditional on %s, which is still open. It "
+                       "may not be quoted without them: if they land badly the "
+                       "attribution here is void, not merely weaker."
+                       % ", ".join(node["conditional_on"]))
+    if out["re_read"]:
+        out["note"] = (out.get("note", "") + " ").lstrip()
+        out["note"] += ("cards %s were closed conditional on this one -- re-read "
+                        "those verdicts now and clear their `conditional_on`."
+                        % ", ".join(out["re_read"]))
+    emit(out)
 
 
 # ---------------------------------------------------------------- DISPUTE
@@ -1068,13 +1186,40 @@ def cmd_check(a):
             flag("critical", "settled_without_source", nid,
                  "a conclusion with no run behind it -- nobody can re-check it")
 
-        # 2. a running card's dependencies are all settled
+        # 2. a running card's LAUNCH dependencies are all settled
         if dst in ("running", "filled"):
-            unmet = [d for d in n.get("depends_on") or []
-                     if d not in by_id or by_id[d]["state"] not in SETTLED]
+            unmet = _unsettled(n, by_id, "launch")
             if unmet:
                 flag("critical", "gate_bypassed", nid,
-                     f"opened with unsettled dependencies {unmet}")
+                     f"opened with unsettled launch dependencies {unmet}")
+
+        # 2b. an edge whose kind nobody can read. It gates like `launch`, so the
+        # symptom is a card that never becomes takeable and no stated reason.
+        for i, b in _dep_edges(n):
+            if b is None:
+                flag("major", "malformed_dependency", nid,
+                     f"depends_on entry {i!r} has no readable `blocks` -- it is "
+                     f"gating like `launch` by default, which may not be what was "
+                     f"meant. One of {list(DEP_BLOCKS)}, or a bare id for launch")
+
+        # 2c. a verdict standing on something still open. NOT a defect: it is
+        # what `reading` is for, and the whole point is that the arm ran instead
+        # of waiting. It is reported so the condition cannot be forgotten -- a
+        # conditional verdict quoted as a plain one is this repo's oldest failure
+        # (CLAUDE.md -> "Never silently", the re-reading rule).
+        cond = n.get("conditional_on") or []
+        if st in SETTLED and cond:
+            landed = [c for c in cond if c in by_id and by_id[c]["state"] in SETTLED]
+            still = [c for c in cond if c not in landed]
+            if landed:
+                flag("major", "condition_resolved_unreviewed", nid,
+                     f"closed conditional on {landed}, which has since settled. "
+                     f"Re-read this verdict against it and clear `conditional_on` "
+                     f"-- nothing does that on its own")
+            if still:
+                flag("minor", "verdict_is_conditional", nid,
+                     f"verdict holds only if {still} lands as assumed. Quote it "
+                     f"with that clause or not at all")
 
         # 3. every kill has a typed cause and a revival condition
         if st == "killed":
@@ -1131,7 +1276,7 @@ def cmd_check(a):
              f"{d.get('challenger')} contradicts it ({d.get('id')}): {d.get('detail')}. "
              f"Neither was reverted -- adjudicate with `resolve`")
         for n in nodes:
-            if d.get("disputed") in (n.get("depends_on") or []) and n["state"] not in SETTLED:
+            if d.get("disputed") in _dep_ids(n) and n["state"] not in SETTLED:
                 flag("critical", "built_on_contested", n["id"],
                      f"depends on {d.get('disputed')}, which is under open dispute "
                      f"{d.get('id')} -- this arm would stand on contested ground")
@@ -1368,6 +1513,16 @@ def cmd_status(a):
         "killed": [{"id": n["id"], "killed_by": n.get("killed_by"),
                     "revive_if": n.get("revive_if")}
                    for n in nodes if n.get("state") == "killed"],
+        # ‼️ Here rather than only in `check`, because this is the screen the
+        # sentence gets quoted off. A verdict that ran ahead of what it rests on
+        # is the right trade -- the arm ran instead of queueing -- and it stops
+        # being the right trade the moment it is repeated without the clause.
+        "conditional_verdicts": [
+            {"id": n["id"], "verdict": n.get("verdict") or n.get("killed_by"),
+             "conditional_on": n.get("conditional_on"),
+             "resolved": [c for c in n.get("conditional_on") or []
+                          if c in by_id and by_id[c].get("state") in SETTLED]}
+            for n in nodes if n.get("conditional_on")],
         "provenance": {p: sum(1 for n in nodes if n.get("provenance") == p)
                        for p in PROVENANCE},
         "open_disputes": [{"id": d["id"], "challenger": d["challenger"],
@@ -1394,7 +1549,13 @@ def main():
     a.add_argument("--criterion")
     a.add_argument("--guardrail", action="append")
     a.add_argument("--parent")
-    a.add_argument("--depends-on", action="append", dest="depends_on")
+    a.add_argument("--depends-on", action="append", dest="depends_on",
+                   metavar="ID[:launch|:reading]",
+                   help="`N06` blocks the launch (the default, and the four real "
+                        "dependencies in SKILL.md are all this). `N06:reading` "
+                        "does not -- the arm opens now and its verdict carries "
+                        "`conditional_on`. Ask which one it is EVERY time: the "
+                        "wrong answer here is a queue that serialises for no reason")
     a.add_argument("--kill-condition", dest="kill_condition")
     a.add_argument("--provenance", choices=PROVENANCE, default="ai-suggested",
                    help="who put this on the queue. Defaults to the conservative "

@@ -1318,5 +1318,119 @@ class AFloorFromAnotherCorpusIsNotAFloor(GraphCase):
                       f["noise_floor_unusable"]["detail"])
 
 
+class AnEdgeSaysWhatItBlocks(GraphCase):
+    """references/experiment-graph.md -> TAKE, "一条边说的是它挡什么", and
+    SKILL.md -> Stage 3 「先跑不等于先读」.
+
+    A bare id could only say "wait", so every dependency that was really about
+    ATTRIBUTION -- B's number cannot be read without A's -- was paid for as
+    SCHEDULING, in GPU hours. The only way to parallelise was to delete the edge,
+    which threw away the real half. These checks hold the two apart: the launch
+    gate keeps its old strictness, and a `reading` edge buys the parallelism
+    without letting the verdict travel unqualified.
+    """
+
+    def _pair(self, blocks=None):
+        a, b = self.add_complete(), self.add_complete()
+        dep = json.dumps([{"id": a, "blocks": blocks} if blocks else a])
+        self.g("set", "--id", b, "--set", "depends_on=" + dep)
+        return a, b
+
+    def test_a_bare_id_still_blocks_the_launch(self):
+        """The permissive default would silently unblock every graph already
+        written. An untyped edge keeps meaning exactly what it meant."""
+        a, b = self._pair()
+        rc, out, _ = self.g("ready")
+        self.assertEqual([r["id"] for r in out["ready"]], [a])
+        self.assertEqual([x["id"] for x in out["blocked"]], [b])
+
+    def test_a_blocked_card_is_asked_which_kind_of_edge_it_is(self):
+        """The retype prompt fires at the one moment the edge costs something.
+        Without it the wait reads as a fact of nature and nobody re-examines it."""
+        a, b = self._pair()
+        rc, out, _ = self.g("ready")
+        self.assertIn("ask", out["blocked"][0])
+        self.assertIn("reading", out["blocked"][0]["ask"])
+
+    def test_a_reading_edge_does_not_hold_the_arm(self):
+        """The whole point: N07 needed N06's sigma, not N06's verdict."""
+        a, b = self._pair("reading")
+        rc, out, _ = self.g("ready")
+        self.assertEqual(sorted(r["id"] for r in out["ready"]), sorted([a, b]))
+        self.assertEqual(out["blocked"], [])
+
+    def test_a_verdict_ahead_of_what_it_rests_on_is_stamped_not_refused(self):
+        """Refusing `close` would move the same stall one state right: a pile of
+        filled cards nobody may adjudicate is the same waiting, minus the GPU
+        hours. What must not happen is the verdict travelling without its clause."""
+        a, b = self._pair("reading")
+        self.run_it(b)
+        self.fill(b)
+        rc, out, _ = self.g("close", "--id", b, "--verdict", "won")
+        self.assertEqual(rc, 0)
+        self.assertEqual(out["conditional_on"], [a])
+        self.assertEqual(self.card(b)["conditional_on"], [a])
+        rc, st, _ = self.g("status")
+        self.assertEqual([c["id"] for c in st["conditional_verdicts"]], [b],
+                         "the screen the sentence gets quoted off must carry the clause")
+
+    def test_an_open_condition_is_reported_and_a_landed_one_escalates(self):
+        """Nothing clears `conditional_on` on its own, which is the failure this
+        exists to catch: CLAUDE.md -> "Never silently", the re-reading rule."""
+        a, b = self._pair("reading")
+        self.run_it(b)
+        self.fill(b)
+        self.g("close", "--id", b, "--verdict", "won")
+        rc, out, _ = self.g("check")
+        f = {x["invariant"]: x for x in out["findings"] if x["card"] == b}
+        self.assertEqual(f["verdict_is_conditional"]["severity"], "minor")
+        self.assertNotIn("condition_resolved_unreviewed", f)
+
+        self.run_it(a)
+        self.fill(a)
+        rc, closed, _ = self.g("close", "--id", a, "--verdict", "won")
+        self.assertEqual(closed["re_read"], [b],
+                         "closing the upstream must name the verdicts hanging on it")
+        rc, out, _ = self.g("check")
+        f = {x["invariant"]: x for x in out["findings"] if x["card"] == b}
+        self.assertEqual(f["condition_resolved_unreviewed"]["severity"], "major")
+
+    def test_two_cards_reading_each_other_are_not_a_deadlock(self):
+        """"Run both, adjudicate together" has exactly the shape of a cycle. The
+        old walk would have reported the healthiest use of the new kind as the
+        thing you must break."""
+        a, b = self._pair("reading")
+        self.g("set", "--id", a, "--set",
+               "depends_on=" + json.dumps([{"id": b, "blocks": "reading"}]))
+        rc, out, _ = self.g("ready")
+        self.assertEqual(sorted(r["id"] for r in out["ready"]), sorted([a, b]))
+        self.assertNotIn("deadlock", out)
+
+    def test_a_launch_cycle_is_still_a_deadlock(self):
+        a, b = self._pair()
+        self.g("set", "--id", a, "--set", "depends_on=" + json.dumps([b]))
+        rc, out, _ = self.g("ready")
+        self.assertEqual(out["deadlock"]["kind"], "cycle")
+
+    def test_an_edge_whose_kind_nobody_can_read_is_refused(self):
+        """It would gate like `launch`, so the symptom is a card that never
+        becomes takeable and no stated reason."""
+        a, b = self.add_complete(), self.add_complete()
+        rc, out, err = self.g("set", "--id", b, "--set",
+                              "depends_on=" + json.dumps([{"id": a, "blocks": "soon"}]))
+        self.assertNotEqual(rc, 0)
+        self.assertIn("blocks", json.dumps(out or err))
+
+    def test_the_launch_gate_keeps_its_old_strictness(self):
+        """A `reading` edge buys parallelism; it must not become a way to open an
+        arm whose premise measurement has not landed."""
+        a, b = self._pair()
+        self.run_it(b)
+        rc, out, _ = self.g("check")
+        f = [x for x in out["findings"] if x["invariant"] == "gate_bypassed"]
+        self.assertEqual([x["card"] for x in f], [b])
+        self.assertEqual(f[0]["severity"], "critical")
+
+
 if __name__ == "__main__":
     unittest.main()
