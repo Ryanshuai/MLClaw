@@ -59,8 +59,39 @@ a search that runs its own trials is a second run machinery that drifts from the
 
 Every skill knows its position in this graph. Two types of edges:
 
-- **requires** (↑ upstream): must be done before this skill can run. If missing, pause and prompt user to do the upstream skill first.
+- **requires** (↑ upstream): what has to hold for this skill's output to mean what it says.
 - **suggests** (↓ downstream): after completing, offer the user the next logical step.
+
+### ‼️ A requirement says WHAT it blocks — and most of them do not block entry
+
+`requires` used to read *"must be done before this skill can run … if the user declines,
+stop"*. One kind of edge, one response, and the response was **stop** — which contradicts the
+always-loaded file. CLAUDE.md → "File the question; do not block on it" says a question here
+is not a cost but a **deadlock**, because this runs unattended, and reserves blocking for
+where "proceeding under any assumption would be unsafe or would make the work useless if
+wrong". Two files, one fact, opposite writings.
+
+It is also wrong against the evidence in this file's own tables, which already sort
+requirements into three kinds while naming none of them:
+
+| Kind | What an unmet requirement does | Already written here as |
+|---|---|---|
+| **gate** | refuse — the record it would produce is false | "fine to report, **not fine to rank, freeze or delete on**" · "**exit 1 means do not release it**" · "exit 1 is a refusal, not a breakage" |
+| **provisional** | proceed, and stamp the output with what was unmet | "a **warning, not a gate** — record the resulting config as provisional, and proceed if the user still wants the session" · "Report such a reading; **never compare it**" · "a lower bound **that must be said as one**" |
+| **absent** | proceed, and record the missing part as missing | "that section is recorded `skipped`, **never inferred**" · "No graph at all is **not evidence either way**" |
+
+‼️ **A requirement is a property of the CONSUMER, not of the skill.** The row that proves it is
+"census usable for a decision": the very same incomplete census is a **gate** for `/data-freeze`
+and `/data-retire`, and no obstacle at all for `/data-report`. So the entry question is never
+"is this met" — it is **"which of the things I am about to do does this hold up?"**, and the
+answer is usually *some of them*.
+
+**Default to `provisional`.** A gate must be able to name the false record it prevents; one that
+cannot is a provisional wearing a gate's clothes. ‼️ The two mistakes are not symmetric — a
+wrong **gate** stops an unattended session dead and reads afterwards as *nothing having
+happened*, while a wrong **provisional** produces the work carrying a stamp that says exactly
+what is unverified. Same asymmetry `/explore`'s graph draws between `launch` and `reading`, one
+level up: `skills/explore/references/experiment-graph.md` → TAKE.
 
 | Skill | Requires (check on entry) | Suggests (offer on exit) |
 |---|---|---|
@@ -89,7 +120,7 @@ Every skill knows its position in this graph. Two types of edges:
 | `/data-collect` | project.json (+ resources.json for a server) | `/data-check scan` to confirm it landed, then `/data` |
 | `/data-online-sample` | `dataset.json` — its `identity` is what both sides count. **Not** a frozen snapshot: that is needed to *compare* a reading, not to take one | a drift comparison against a frozen snapshot; `/data-collect --cite-window` to pull the interesting units; `/ask-human` for a `decision` on retention or vendor access |
 | `/data-check` | project.json | on GAP: whatever `layers[].produced_by` names. On a clean census: `/data-freeze` |
-| `/data-audit` | project.json **and** either a declared dataset or a user-named path. Step 2 additionally needs a stage with a non-empty `entry_command` — absent, that section is recorded `skipped`, never inferred | by finding, never generically: `label_wrong`-shaped → a `/data-label` rework · format defect → `/data-curate` · fatal on frozen data → `/data-freeze` for a corrected snapshot · clean → the run the user was heading for · `/data-audit-report` when there is something to look at |
+| `/data-audit` | project.json **and** either a declared dataset or a user-named path. Step 2 additionally needs a stage with a non-empty `entry_command` — **[absent]** missing, that section is recorded `skipped`, never inferred | by finding, never generically: `label_wrong`-shaped → a `/data-label` rework · format defect → `/data-curate` · fatal on frozen data → `/data-freeze` for a corrected snapshot · clean → the run the user was heading for · `/data-audit-report` when there is something to look at |
 | `/data-audit-report` | an `audits/*/audit.json` — including one that stopped at a Step 1 fatal, which is often the useful one | exactly where the audit routed; rendering never softens an owner |
 | `/data-freeze` | a census whose `complete` is true | `/train-init` or `/train-run`; `/data` |
 | `/data-curate` | a frozen snapshot of **every** parent (`datasets/<id>@<snap>` resolves) | `/data-check` (declare the output's locations, then scan), then `/data` |
@@ -109,7 +140,23 @@ honest step is to go look, not to train.
 
 ## How skills use this graph
 
-**On entry** — check `requires` column. If a requirement is not met, offer to run the upstream skill. If user agrees, invoke it as a sub-skill (see Workflow State Protocol below). If user declines, stop.
+**On entry** — check the `requires` column, and for each unmet requirement decide which of the
+three kinds it is **for the thing you are about to do**:
+
+- **gate** → do not take that action. Name the false record it would produce, offer to run the
+  upstream skill (invoke it as a sub-skill — see Workflow State Protocol below), and if it
+  cannot run now, `ask.py open` and carry on with everything the gate does not cover.
+  ‼️ **A gate stops one action, not the session.**
+- **provisional** → proceed. Mark it at the field, and say in the summary what the result rests
+  on. This is the default when the kind is not obvious.
+- **absent** → proceed, and record the missing part as missing — `null`, `skipped`,
+  `unverifiable`. Never inferred.
+
+‼️ **"The user declined, so stop" is not one of the three, and used to be the whole rule.** It
+is the shape CLAUDE.md calls a deadlock: nobody answers, and the skill sits at requirement 2 of
+9 having produced nothing. **A halted skill and a finished record with three open asks look
+nothing alike to whoever picks this up** — the first is nothing, the second is most of the work
+plus a worklist.
 
 **On exit** — check `suggests` column. Offer the next skill. If user accepts, invoke it as a sub-skill.
 
@@ -179,7 +226,7 @@ without inverting the order.
 | eval-init done | `{PROJECT}/stages/evaluation/config.json → entry_command` is non-empty |
 | train-init done | `{PROJECT}/stages/training/config.json → entry_command` is non-empty |
 | ≥1 prior train-run completed | `{PROJECT}/stages/training/runs/*/run.json` with `status: "completed"` exists |
-| the architecture is settled (for `/train-tune`) | nothing declares it, and only one thing can contradict it: if `{PROJECT}/stages/exploration/graph.json` exists, `graph.py status --project {PROJECT}` reports **zero** cards in `draft` / `blocked` / `ready` / `running` / `filled`. Non-zero is a **warning, not a gate** — say which cards are open, record the resulting config as provisional, and proceed if the user still wants the session. No graph at all is not evidence either way; it is the ordinary case |
+| the architecture is settled (for `/train-tune`) | **[provisional]** nothing declares it, and only one thing can contradict it: if `{PROJECT}/stages/exploration/graph.json` exists, `graph.py status --project {PROJECT}` reports **zero** cards in `draft` / `blocked` / `ready` / `running` / `filled`. Non-zero is a **warning, not a gate** — say which cards are open, record the resulting config as provisional, and proceed if the user still wants the session. No graph at all is not evidence either way; it is the ordinary case |
 | tune session exists with ≥1 run | `{PROJECT}/stages/training/tune_sessions/*/state.json` exists AND ≥1 run with `lineage.session = <id>` |
 | resources.json for credentials | checked lazily — `{WORKSPACE}/resources.json`, only when a source needs non-local credentials |
 | eval-run completed | `{PROJECT}/stages/evaluation/runs/*/run.json` with `status: "completed"` exists |
@@ -187,16 +234,16 @@ without inverting the order.
 | refactor-run completed | `{PROJECT}/stages/refactor/runs/*/run.json` with `status: "completed"` exists |
 | env_manager available | `{WORKSPACE}/resources.json → local.env_manager.tool` is non-empty |
 | a corpus is declared for `/explore` | `{PROJECT}/stages/exploration/graph.json -> corpus.dataset_id` non-empty **and** that dataset has a frozen snapshot. Without it every `premise_share` is unscoped, and an unscoped share is what queued five arms against a fault that did not exist |
-| an artifact still says what the record says | `ara.py check --project {PROJECT}` exits 0. **Exit 1 means the frozen copy disagrees with `conclusions.json`** — a belief the artifact froze at `supported` that the evidence no longer supports. Rebuild before citing it; do not edit the artifact by hand |
-| a machine may be released | `evacuate.py clearance --project {PROJECT} --host {HOST}` exits 0. **Exit 1 means do not release it** — the disk goes with the lease, and the verdict names what is still on it. `pool.py release --artifacts recovered` enforces the same thing one layer down by requiring the record |
-| the conclusions are intact | `conclude.py check --project {PROJECT}` exits 0. **Exit 1 is a refusal, not a breakage** — the same fallback exception applies. The finding to look for first is a `status` recorded as `supported` against evidence that no longer resolves; re-deriving it by hand is overriding the check, not falling back to it |
-| the explore graph is intact | `graph.py check --project {PROJECT}` exits 0. **Exit 1 is a refusal, not a breakage** — do not open another arm, and do not fall back to doing it by hand: the fallback rule's exception applies (CLAUDE.md -> "Script Integration") |
+| an artifact still says what the record says | **[gate]** `ara.py check --project {PROJECT}` exits 0. **Exit 1 means the frozen copy disagrees with `conclusions.json`** — a belief the artifact froze at `supported` that the evidence no longer supports. Rebuild before citing it; do not edit the artifact by hand |
+| a machine may be released | **[gate]** `evacuate.py clearance --project {PROJECT} --host {HOST}` exits 0. **Exit 1 means do not release it** — the disk goes with the lease, and the verdict names what is still on it. `pool.py release --artifacts recovered` enforces the same thing one layer down by requiring the record |
+| the conclusions are intact | **[gate]** `conclude.py check --project {PROJECT}` exits 0. **Exit 1 is a refusal, not a breakage** — the same fallback exception applies. The finding to look for first is a `status` recorded as `supported` against evidence that no longer resolves; re-deriving it by hand is overriding the check, not falling back to it |
+| the explore graph is intact | **[gate]** `graph.py check --project {PROJECT}` exits 0. **Exit 1 is a refusal, not a breakage** — do not open another arm, and do not fall back to doing it by hand: the fallback rule's exception applies (CLAUDE.md -> "Script Integration") |
 | dataset declared | `{PROJECT}/datasets/<id>/dataset.json` exists with non-empty `identity.unit_glob`, `layers`, `locations` |
-| census usable for a decision | `datasets/<id>/census/*.json` exists **and** its `complete` is true. `complete: false` means a location didn't answer, so every count is a lower bound — fine to report, not fine to rank, freeze or delete on |
+| census usable for a decision | **[gate for rank / freeze / delete · nothing for report — the row that proves the kind belongs to the CONSUMER]** `datasets/<id>/census/*.json` exists **and** its `complete` is true. `complete: false` means a location didn't answer, so every count is a lower bound — fine to report, not fine to rank, freeze or delete on |
 | an online contract is declared | `datasets/<id>/dataset.json → online` is non-empty. Nothing else says where this dataset's live counterpart arrives, and a guessed production layout yields a reading of a directory nobody serves from |
-| a reading is comparable | `datasets/<id>/online/window_*.json` exists, `complete` is true, `policy` is `uniform`. A drift verdict against a window missing a day is a verdict about the outage. Report such a reading; never compare it |
-| a rate off production is exact rather than a floor | that reading's `population_basis` is `declared`. `enumeration_only` means nothing counted what production actually handled, so `sample_rate` is null and every derived rate is a lower bound that must be said as one |
-| a frozen parent exists | `datasets/<id>/snapshots/<sid>/snapshot.json` exists for the id being cited. A bare dataset id never satisfies this — a dataset grows, and a parent edge that cannot say which afternoon is not lineage |
+| a reading is comparable | **[provisional]** `datasets/<id>/online/window_*.json` exists, `complete` is true, `policy` is `uniform`. A drift verdict against a window missing a day is a verdict about the outage. Report such a reading; never compare it |
+| a rate off production is exact rather than a floor | **[provisional]** that reading's `population_basis` is `declared`. `enumeration_only` means nothing counted what production actually handled, so `sample_rate` is null and every derived rate is a lower bound that must be said as one |
+| a frozen parent exists | **[gate]** `datasets/<id>/snapshots/<sid>/snapshot.json` exists for the id being cited. A bare dataset id never satisfies this — a dataset grows, and a parent edge that cannot say which afternoon is not lineage |
 | a derivation is checked, not claimed | `dataset.json → derived_from.provenance` is `"run"`, and that run has `status: "completed"` and cites the same parents. `"claimed"` is a legitimate record and is **not** this |
 | a run is reproducible at all | `repro.py check`'s `overall` is not `not_reproducible`. That verdict means an axis is `gone` and **no amount of relaunching gets past it**. A `data_retired` stamp alone is *not* this — it names one location, so until a census taken since says whether a copy survived the honest verdict is `unverifiable`. `reproducible_with_drift` and `reproducible_unverifiably` both satisfy this and both cap the verdict below `reproduced` |
 | a number is verified rather than claimed | a **closed** `repro/*/session.json` whose `verdict` is `reproduced` or `reproduced_with_drift` — **not `remeasured*`**, which asserts only that an artifact still scores this and leaves the recipe unexercised. The only thing that moves an inherited checkpoint's `origin.confidence` off `claimed`; a session left open is not it |
