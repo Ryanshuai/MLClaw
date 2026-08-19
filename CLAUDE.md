@@ -98,6 +98,30 @@ rules would be skimmed with it.
 
 **Implemented**: inference (init + run), evaluation (init + run + report + triage), refactor (init + run + report), training (init + run + tune + tune-report), **exploration** (`/explore` — architecture search, ported from the `arch-transplant` skill) with **`/conclude`** closing it (the belief layer: what is now believed, on what evidence, and what would overturn it — borrowed structurally from ARA's `logic/claims.md`), project init, resources, lease, **`/evacuate`** (empty a machine before it is released, prove every byte arrived, and store the result as an ARA-shaped artifact — `src` code+config, `evidence` numbers, `logic` conclusions, `trace` the ablation graph, `weights`), handoff, reproduction, and the whole data line (collect + label + curate + freeze + retire, plus check / audit / route / report / online-sample). **Multi-machine is real** as of the fleet layer: two rented-compute adapters (`nebius`, `lambda`) beside the owned-hardware one, and `lifecycle/scripts/shared/pool.py` holding N slots for one search, which `/train-tune` calls. What is *not* there: **multi-node distributed training** — a slot is one machine — and no bin-packing across concurrent searches. Full list: `lifecycle/references/fleet.md` "What this does not do".
 
+**Shipped as a plugin**, and the repo root is the plugin root — `.claude-plugin/` holds both the
+manifest and the catalog, `skills/` `agents/` `hooks/` sit beside `lifecycle/`. That layout is not
+cosmetic: install *copies the plugin directory*, so a plugin rooted at `.claude/` delivered 34 skills
+and none of their scripts, with `validate` green the whole way. ‼️ `skills/` at the root is **not**
+auto-loaded by working directory — `claude --plugin-dir .` or an install is now the only load path,
+and an install reaches the project directories under `workspace_root` where cwd-loading never could.
+Plugin skills are namespaced: see the note above the skill table.
+
+**Three boundary gates and one verifier** close the places where a downstream stage consumed an
+upstream artifact without checking it — the shape `handoff.py receive` has always had and nothing else
+did. `provenance_gate.py` refuses a production run while `provenance.json` still calls a value a guess
+(that file had no reader at all). `audit_gate.py` refuses one whose data is `fatal` / `never_audited` /
+`unverifiable` / `stale` / `unreadable` — five states, because *an audit missing its compatibility
+section reads identically to one that passed it*. `hooks/guard_destructive.py` is a `PreToolUse`
+refusal on the deletes the rules reserve for a `plan` → `apply` script, and it is the only one that
+works when **no skill is loaded**, which is the moment "Never silently" exists for. `triage-verifier`
+is the one agent: `/eval-triage`'s verdict decided nothing could check, checked — read-only, and its
+disagreement is a `disputed`, never an overrule. Both waivers stamp themselves into `run.json`; a
+waiver outside the record is a flag.
+
+**The gap those four found and did not fill**: `adaptation/adapt.py` is nine verbs of the data↔model
+feedback loop and **no skill walks it** — roadmap.md's *"the one path in MLClaw that every skill points
+at and none of them walks"*, still true. Two of the gates' failure routes point straight at it.
+
 **Next**, in dependency order: `/train-triage` (depends on nothing, and covers the one failure the record layer actively disguises — a run that finished and was void), then `models/<id>@<release>` (the model-identity primitive three things wait on), then deployment (`/deploy-init` + `/deploy-run`) and model curate, plus `/data-drift`'s comparison half — its online half is built. Then `/train-compare`. **Designed, not built: there is no script to call.** Reasoning, and the traps that make the obvious implementation wrong: `lifecycle/references/roadmap.md`.
 
 **The data lifecycle**, one skill per phase — including the small ones, because a phase whose skill is "part of another skill" is a phase nobody can name, and an unnamed box reads as a box that does not exist:
