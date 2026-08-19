@@ -41,18 +41,13 @@ import json
 import os
 import sys
 
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(
+    os.path.abspath(__file__))), "shared"))
+from _records import broke  # noqa: E402
+
 BLOCK_STATUSES = ("blocking", "guessed", "unverified")
 CLEAR_STATUSES = ("absent",)
 KNOWN = BLOCK_STATUSES + CLEAR_STATUSES
-
-
-def broke(msg, fix=None):
-    out = {"ok": False, "error": msg}
-    if fix:
-        out["fix"] = fix
-    json.dump(out, sys.stdout, indent=2, ensure_ascii=False)
-    print()
-    sys.exit(2)
 
 
 def main(argv=None):

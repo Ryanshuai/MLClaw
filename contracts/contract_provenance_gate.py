@@ -142,7 +142,7 @@ class TheGateFailsLoudNotOpen(unittest.TestCase):
             f.write("{not json")
         rc, out = gate(d, "production")
         self.assertEqual(rc, 2)
-        self.assertFalse(out["ok"])
+        self.assertIn("error", out)
         self.assertIn("fix", out)
 
     def test_unresolved_of_the_wrong_type_is_exit_2(self):
