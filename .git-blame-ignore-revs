@@ -33,3 +33,8 @@ c6e737e80aca24d6a8d5467a26861ff03cfda745
 
 # docs(explore): the last Chinese in the code -- and three pointers my own rename had just broken
 8dbd3a2678b187067b3c14d421e06083693fd383
+
+# The encoding sweep: one argument added to 68 `open()` calls across 33 files,
+# no other line touched. Mechanical and semantics-preserving on every platform
+# except the one it fixes, which is exactly what this file is for.
+a90a25b53fe87f40e465cc781e9d0980804a16f1
