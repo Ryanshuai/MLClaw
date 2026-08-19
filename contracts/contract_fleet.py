@@ -1349,3 +1349,43 @@ class ClosingDestroysTheBoxesSoDrainFirst(TempDirCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class NoResourcesFileIsNotTheSameAsNobodySayingWhich(unittest.TestCase):
+    """CLAUDE.md -> "Never silently": *Never report data you could not look at*, in
+    its module-state form.
+
+    `pool.RESOURCES` is written once by `main()` and read by every L2 call. It held
+    `None` while unbound -- and `None` is also the LEGITIMATE bound value, meaning no
+    `--resources` was given and `lease.py` resolves the file itself. So an in-process
+    call made before the binding ran was byte-identical to a correct call, and the
+    difference is which resources file -- which fleet, which billing account -- every
+    subsequent L2 call reads.
+
+    Two facts sharing one representation, exactly as with a census that could not
+    reach a machine. The unbound state now has its own sentinel and `lease()` refuses
+    on it.
+    """
+
+    def setUp(self):
+        self.pool = load_script("shared/pool.py")
+
+    def test_lease_refuses_before_anything_bound_it(self):
+        with self.assertRaises(RuntimeError) as cm:
+            self.pool.lease("status")
+        self.assertIn("bind_resources", str(cm.exception))
+
+    def test_binding_none_is_legitimate_and_does_not_refuse(self):
+        """`--resources` is optional by design: L2 resolves the file itself. Binding
+        None must therefore be a normal state, not a second error."""
+        self.pool.bind_resources(None)
+        self.assertIsNone(self.pool.RESOURCES)
+        self.assertIsNot(self.pool.RESOURCES, self.pool._UNBOUND)
+
+    def test_main_binds_before_dispatching_to_any_verb(self):
+        """The refusal above is only safe because the CLI path always binds first."""
+        src = open(os.path.join(REPO_ROOT, "scripts", "shared", "pool.py"),
+                   encoding="utf-8").read()
+        bind = src.index("bind_resources(args.resources)")
+        dispatch = src.index("args.fn(args)")
+        self.assertLess(bind, dispatch, "main() must bind before it dispatches")

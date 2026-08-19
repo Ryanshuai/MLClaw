@@ -64,7 +64,23 @@ def fail(detail, **extra):
 
 # --- L2 ------------------------------------------------------------------------
 
-RESOURCES = None   # set once from --resources; L2 otherwise resolves it itself
+# Bound once by `main()` from --resources. `None` is a LEGITIMATE bound value --
+# it means no --resources was given and L2 resolves the file itself -- so the
+# unbound state needs its own sentinel. Without it, calling `lease()` in-process
+# before main() has run is indistinguishable from calling it correctly with no
+# --resources, and the difference is which resources file every L2 call reads.
+# Three facts, not two, the same split `census.py` draws between a machine that
+# did not answer and a directory that is genuinely empty.
+_UNBOUND = object()
+RESOURCES = _UNBOUND
+
+
+def bind_resources(path):
+    """The only writer. Exists so the binding is a named step rather than a
+    `global` buried in argument parsing, and so an in-process caller has
+    something to call."""
+    global RESOURCES
+    RESOURCES = path
 
 
 def lease(*args, timeout=960):
@@ -75,6 +91,11 @@ def lease(*args, timeout=960):
     `lease.py` is a money rule saying no. Doing it by hand there means overriding the
     safeguard, not routing around a bug.
     """
+    if RESOURCES is _UNBOUND:
+        raise RuntimeError(
+            "pool.lease() called before bind_resources(). This is not a missing "
+            "--resources -- that is `None` and is legitimate. It means nothing has "
+            "said which resources file L2 should read.")
     pre = ["--resources", RESOURCES] if RESOURCES else []
     argv = [sys.executable, "-X", "utf8", LEASE, *pre, *map(str, args)]
     proc = subprocess.run(argv, capture_output=True, text=True, timeout=timeout)
@@ -634,8 +655,7 @@ def main():
                         "slot is a refusal: closing destroys the disk under a live run")
 
     args = ap.parse_args()
-    global RESOURCES
-    RESOURCES = args.resources
+    bind_resources(args.resources)
     args.fn(args)
 
 
