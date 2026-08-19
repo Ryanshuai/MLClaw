@@ -72,6 +72,29 @@ STATES = ("draft", "blocked", "ready", "running", "filled", "closed", "killed")
 # this one" is as much an answer as a verdict.
 SETTLED = ("closed", "killed")
 
+# ‼️ The seven split two ways, and leaving the split unnamed is what let `status`
+# and `ready` answer the same question OPPOSITELY -- the first reading the stored
+# label, the second recomputing from the card, neither wrong about its own
+# question. Three cards complete with no dependencies reported `blocked: 3` and
+# `ready: [N01, N02, N03]` at the same instant, and `status` is the one a person
+# reads. Worse in the other direction: nothing ever WROTE `ready`, so an arm whose
+# card was never flipped to `running` stayed in the computed ready set and could
+# be opened twice.
+#
+# DERIVED    a function of the card's own fields plus its dependencies. Nobody
+#            declares these and nobody should: they change when a DIFFERENT card
+#            settles, so a stored copy is stale the moment it is written.
+# DECLARED   an act somebody performed -- an arm opened, a result filled, a
+#            verdict reached. Not computable from the card, and the record IS the
+#            declaration.
+#
+# `_derive_state` is the single truth for the first three; the stored field is
+# written forward as a convenience for external readers, never read back for a
+# decision. Same fact, one writing -- the rule `/agent-refactor` calls 双协议 and
+# the reason this file has one state machine rather than three.
+DERIVED_STATES = ("draft", "blocked", "ready")
+DECLARED_STATES = ("running", "filled", "closed", "killed")
+
 # What a card proposes. The kind decides which stage its arm runs in and which
 # fields it needs -- a measurement has no single-key delta and therefore no
 # parent, while a port without one cannot attribute its delta to anything.
@@ -441,6 +464,38 @@ def _next_id(graph):
     return "N%02d" % ((max(nums) + 1) if nums else 1)
 
 
+def _derive_state(node, by_id, corpus):
+    """-> (state, why) for one card. The single truth for draft/blocked/ready.
+
+    `why` carries what is missing or unmet, so callers report a reason rather
+    than recomputing one. DECLARED states are returned as stored -- there is
+    nothing to derive them from and the record is the declaration.
+
+    ‼️ Two reads are deliberately by CONTENT and not by label:
+      - a card carrying a `result` is `filled` whatever the label says;
+      - a card carrying a `run_id` and no result has an ARM OPEN, whatever the
+        label says. That one closes the double-arm hole: `run_id` is set at the
+        moment an arm opens, so forgetting the accompanying `state=running` can
+        no longer leave the card sitting in the ready set.
+    """
+    stored = node.get("state")
+    if stored in SETTLED:
+        return stored, {}
+    if node.get("result") is not None or stored == "filled":
+        return "filled", {}
+    if node.get("run_id") or stored == "running":
+        return "running", {}
+    missing = _missing_fields(node)
+    scope = _share_scope(node, corpus)
+    if missing or scope:
+        return "draft", {"why": "incomplete card", "missing": missing, "scope": scope}
+    unmet = [d for d in node.get("depends_on") or []
+             if d not in by_id or by_id[d].get("state") not in SETTLED]
+    if unmet:
+        return "blocked", {"why": "dependencies unsettled", "waiting_on": unmet}
+    return "ready", {}
+
+
 def _missing_fields(node):
     req = list(REQUIRED_COMMON) + list(REQUIRED_BY_KIND.get(node.get("kind"), ()))
     out = []
@@ -542,10 +597,19 @@ def cmd_set(a):
     if scope:
         missing.append("premise_share (" + scope + ")")
     prev = node["state"]
-    if not missing and node["state"] == "draft":
-        node["state"] = "blocked"
-        node["history"].append({"at": now_utc(), "to": "blocked",
-                                "note": "schema complete"})
+    # Write the DERIVED state forward, all three of them. This used to stop at
+    # draft -> blocked, which is why `ready` was in the vocabulary and unreachable:
+    # a complete card with no dependencies sat in `blocked` -- contradicting that
+    # word's own definition ("card complete, dependencies unmet") -- until somebody
+    # hand-set it. ‼️ It is written for external readers, not read back: blocked ->
+    # ready happens when ANOTHER card settles, and no `set` runs on this one then.
+    # That is why every decision below goes through `_derive_state` instead.
+    by_id = {n["id"]: n for n in graph.get("nodes", [])}
+    derived, _why = _derive_state(node, by_id, corpus)
+    if derived != prev:
+        node["state"] = derived
+        node["history"].append({"at": now_utc(), "to": derived,
+                                "note": "derived: schema + dependencies"})
     graph["updated_at"] = now_utc()
     atomic_write_json(p["graph"], graph)
     emit({"id": a.id, "state": node["state"], "was": prev, "missing": missing})
@@ -560,28 +624,25 @@ def cmd_ready(a):
     by_id = {n["id"]: n for n in nodes}
     corpus = graph.get("corpus") or {}
 
-    ready, blocked = [], []
+    # `blocked` here means NOT TAKEABLE and so holds derived `draft` as well as
+    # derived `blocked` -- it always did, and each entry now says which, because
+    # "finish the card" and "wait for N02" are different instructions.
+    ready, blocked, states = [], [], {}
     for n in nodes:
-        if n["state"] in SETTLED or n["state"] in ("running", "filled"):
+        st, why = _derive_state(n, by_id, corpus)
+        states[n["id"]] = st
+        if st in DECLARED_STATES:
             continue
-        missing = _missing_fields(n)
-        scope = _share_scope(n, corpus)
-        unmet = [d for d in n.get("depends_on") or []
-                 if d not in by_id or by_id[d]["state"] not in SETTLED]
-        if missing or scope:
-            blocked.append({"id": n["id"], "why": "incomplete card",
-                            "missing": missing, "scope": scope})
-        elif unmet:
-            blocked.append({"id": n["id"], "why": "dependencies unsettled",
-                            "waiting_on": unmet})
-        else:
+        if st == "ready":
             ready.append({"id": n["id"], "title": n["title"], "kind": n["kind"],
                           "tier": n.get("tier"),
                           "offline": n.get("kind") == "measurement"})
+        else:
+            blocked.append(dict({"id": n["id"], "state": st}, **why))
 
     out = {"ready": ready, "blocked": blocked,
-           "running": [n["id"] for n in nodes if n["state"] == "running"],
-           "filled": [n["id"] for n in nodes if n["state"] == "filled"]}
+           "running": [i for i, st in states.items() if st == "running"],
+           "filled": [i for i, st in states.items() if st == "filled"]}
 
     # Deadlock: two kinds, and they want opposite responses. Reporting "nothing
     # to do" for either is how a round stalls while looking finished.
@@ -872,6 +933,13 @@ def cmd_check(a):
 
     for n in nodes:
         nid, st = n["id"], n.get("state")
+        # Invariants about an ARM (2, 4) read the derived state -- a card with a
+        # `run_id` and no result has one open whatever its label says, and those
+        # are exactly the cards a missed `state=running` used to hide. Invariants
+        # about the RECORD (1, 3, 5, 8) keep reading the stored label on purpose:
+        # 5 exists to catch a hand-written `ready` on an incomplete card, and
+        # derived `ready` can never be incomplete by construction.
+        dst, _why = _derive_state(n, by_id, corpus)
 
         # 1. every settled card has a run id or a measurement source
         if st in SETTLED and not n.get("run_id") and n.get("tier") != "T0":
@@ -879,7 +947,7 @@ def cmd_check(a):
                  "a conclusion with no run behind it -- nobody can re-check it")
 
         # 2. a running card's dependencies are all settled
-        if st in ("running", "filled"):
+        if dst in ("running", "filled"):
             unmet = [d for d in n.get("depends_on") or []
                      if d not in by_id or by_id[d]["state"] not in SETTLED]
             if unmet:
@@ -966,10 +1034,14 @@ def cmd_check(a):
         for sev, detail in _eval_setting(n):
             flag(sev, "one_number_two_settings", n["id"], detail)
 
-    # 4. no two running cards share (parent, delta)
+    # 4. no two running cards share (parent, delta). Derived, and that is the whole
+    # point of the invariant: keyed on `state == "running"` it could not see the
+    # one arm shape that actually duplicates work -- a card whose `run_id` was set
+    # while its label was left behind. The label is what a forgetful caller drops;
+    # the `run_id` is what an opened arm cannot be without.
     seen = {}
     for n in nodes:
-        if n.get("state") != "running":
+        if _derive_state(n, by_id, corpus)[0] != "running":
             continue
         key = (n.get("parent"), json.dumps(n.get("delta"), sort_keys=True))
         if key in seen:
@@ -1137,11 +1209,25 @@ def cmd_status(a):
     graph = _load(p["graph"], "graph")
     baseline = read_json(p["baseline"], required=False) or {}
     nodes = graph.get("nodes", [])
-    counts = {s: sum(1 for n in nodes if n.get("state") == s) for s in STATES}
+    # ‼️ Derived, because this is the one-screen summary a PERSON reads, and read
+    # off the stored label it used to report `blocked: 3` about three cards that
+    # `ready` was simultaneously handing out as takeable. For an agent arriving
+    # with no context that is not a cosmetic disagreement -- it reads as a stalled
+    # queue and the round stops.
+    by_id = {n["id"]: n for n in nodes}
+    corpus = graph.get("corpus") or {}
+    derived = {n["id"]: _derive_state(n, by_id, corpus)[0] for n in nodes}
+    counts = {s: sum(1 for st in derived.values() if st == s) for s in STATES}
+    # A stored label behind its derivation is NORMAL, not a defect: blocked ->
+    # ready fires when another card settles and nothing runs `set` on this one.
+    # Reported rather than repaired, so a hand-edited graph is visible too.
+    drift = [{"id": n["id"], "stored": n.get("state"), "derived": derived[n["id"]]}
+             for n in nodes if n.get("state") != derived[n["id"]]]
     emit({
         "corpus": graph.get("corpus"),
         "noise_floor": baseline.get("value"),
         "counts": counts,
+        "state_drift": drift,
         "killed": [{"id": n["id"], "killed_by": n.get("killed_by"),
                     "revive_if": n.get("revive_if")}
                    for n in nodes if n.get("state") == "killed"],
@@ -1150,7 +1236,7 @@ def cmd_status(a):
         "open_disputes": [{"id": d["id"], "challenger": d["challenger"],
                            "disputed": d["disputed"], "detail": d.get("detail")}
                           for d in graph.get("disputes", []) if d.get("state") == "open"],
-        "awaiting_verdict": [n["id"] for n in nodes if n.get("state") == "filled"],
+        "awaiting_verdict": [i for i, st in derived.items() if st == "filled"],
         "updated_at": graph.get("updated_at"),
     })
 

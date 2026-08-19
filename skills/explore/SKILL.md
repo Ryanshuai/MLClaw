@@ -133,7 +133,7 @@ python <mlclaw_root>/scripts/explore/graph.py <verb> --project <PROJECT>
 | `fill` | 结果上卡，**并列出这个结果可能作废了什么**（依赖它的、正文引它的、源自这个 run 的常数） |
 | `close` | 一个裁决，或四种死法之一 |
 | `check` | ‼️ **那七条不变量 + MLClaw 加的两条。报，不修** |
-| `status` | 一屏摘要 |
+| `status` | 一屏摘要。⬜🟨🟩 是**现算**的（和 `ready` 同一个函数），存下来的标签落后于推导时另报一行 `state_drift` |
 
 **`check` 的退出码按 CLAUDE.md「Script Integration」：有 critical 就 exit 1 —— 脚本工作了，
 答案是不行。这不是失败，不要回退到手工绕过它。**
@@ -291,6 +291,13 @@ python <mlclaw_root>/scripts/explore/graph.py new --project <P> [--since 12h]
 
 这里实测：同权重同口径两次 91.66 / 91.41，**噪声底 0.25 AP**。任何小于噪声底的改进不是结果。
 我在这条上翻过车：先报了 0.06，然后据此写了一个 "+0.30 有效" 的结论，全部撤回。
+
+‼️ **这个数写进 `baseline.json` 时要配一把尺子，不是手算。** 底是两次测量的**差**，
+没有任何日志会打印它 —— 所以别把 `sources` 写成两条日志行（谁都不含那个差），
+更别编一句 `"31.09 - 28.16 = 2.93"` 当 quote（那正是 grounding 检查存在的理由）。
+写一个小脚本 `stages/exploration/scripts/<name>.py`，读两个 run 的 metric 行、打印所有档位的差，
+把**它的 stdout** 当 quote，`kind: "derived"`，并带上 `command`；两条端点日志照常 `kind: "result"` 并列。
+这样换了权重是**重跑尺子**，不是手改 JSON。细则见 `baseline.json -> _comment_value`。
 
 顺带两条同源的规矩：
 - **跨源对比必须同口径。** 两边过滤门限不同源时，量到的是门限差，不是模型差。

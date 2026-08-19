@@ -1000,6 +1000,195 @@ class ASettledRoundLeavesSomethingToHandOver(GraphCase):
             self.assertEqual(f["severity"], "major",
                              "a missing artifact is a worklist item, not a refusal")
 
+class AnHonestNoiseFloorMustBeWritable(GraphCase):
+    """lifecycle/exploration/baseline.json -> `_comment_value`, and CLAUDE.md ->
+    "Never record a metric you did not read" through `graph.py -> _grounding`.
+
+    The floor is a SPREAD between two repeat measurements, so no log anywhere
+    prints it. Grounding demanded every source quote the value, which no honest
+    citation of the endpoints can do — so the only cheap way to pass `check` was
+    to invent a quote like "31.09 - 28.16 = 2.93", which IS the fabrication
+    grounding exists to catch. A record layer whose sole passing path is the
+    forbidden one teaches its reader to fake the field, and the next field faked
+    is one nobody is watching. `derived` is the honest path; these tests hold it
+    open AND hold it shut as an escape hatch.
+    """
+
+    RULER = {"ref": "stages/exploration/scripts/seed_floor.py",
+             "command": "python stages/exploration/scripts/seed_floor.py",
+             "quote": "mAP0.85  e135h 31.09  e135i 28.16  spread 2.93",
+             "kind": "derived"}
+    E1 = {"ref": "runs/e135h/eval.log:12",
+          "quote": "Test model; Metrics mAP0.85: 31.09", "kind": "result"}
+    E2 = {"ref": "runs/e135i/eval.log:12",
+          "quote": "Test model; Metrics mAP0.85: 28.16", "kind": "result"}
+
+    def _floor(self, **over):
+        b = _template("baseline.json")
+        b.update({"value": 2.93, "unit": "AP", "metric": "mAP0.85"})
+        b.update(over)
+        self.write_json(os.path.join("stages", "exploration", "baseline.json"), b)
+        rc, out, _ = self.g("check")
+        return [f for f in out["findings"] if f["invariant"] == "ungrounded_number"]
+
+    def test_citing_only_the_endpoints_cannot_ground_a_spread(self):
+        """The reported symptom. Kept as a test because it is the honest attempt:
+        both logs are real, both were open, and neither contains the difference.
+        It must fail — but the failure has to have somewhere to go, which is what
+        the next test asserts."""
+        bad = self._floor(sources=[self.E1, self.E2])
+        self.assertEqual(len(bad), 2, "each endpoint fails to attest the spread")
+
+    def test_a_ruler_plus_its_endpoints_is_clean(self):
+        self.assertEqual(self._floor(sources=[self.E1, self.E2, self.RULER]), [])
+
+    def test_the_ruler_alone_is_clean_too(self):
+        self.assertEqual(self._floor(sources=[self.RULER]), [])
+
+    def test_derived_does_not_excuse_the_derived_source_itself(self):
+        """‼️ The escape hatch, and the reason `derived` moves the digit check
+        rather than dropping it: if a `derived` source were exempt too, the kind
+        would be a one-word licence to write any number against any path."""
+        ruler = dict(self.RULER, quote="spread computed, see above")
+        bad = self._floor(sources=[self.E1, self.E2, ruler])
+        self.assertTrue(any("does not contain" in f["detail"] for f in bad),
+                        "the derivation must still print its own answer")
+
+    def test_a_derivation_nobody_can_rerun_is_refused(self):
+        ruler = dict(self.RULER)
+        ruler.pop("command")
+        bad = self._floor(sources=[self.E1, self.E2, ruler])
+        self.assertTrue(any("command" in f["detail"] for f in bad))
+        self.assertTrue(all(f["severity"] == "critical" for f in bad))
+
+    def test_a_transcribed_number_is_unaffected(self):
+        """No `derived` source present -> every source attests, exactly as before.
+        The relaxation must not reach the ordinary case, which is most of them."""
+        b = _template("state.json")
+        b["constants"] = [{"name": "neg_share", "value": 0.0462,
+                           "sources": [{"ref": "logs/scan.txt:214",
+                                        "quote": "G>=52 frames: 254/5495 (4.62%)",
+                                        "kind": "result"},
+                                       {"ref": "logs/other.txt:3",
+                                        "quote": "no number here", "kind": "result"}]}]
+        self.write_json(os.path.join("stages", "exploration", "state.json"), b)
+        rc, out, _ = self.g("check")
+        bad = [f for f in out["findings"] if f["invariant"] == "ungrounded_number"]
+        self.assertTrue(any("does not contain" in f["detail"] for f in bad),
+                        "a second source that attests nothing is still a finding")
+
+
+class StatusAndReadyAnswerTheSameQuestion(GraphCase):
+    """references/experiment-graph.md -> TAKE, and `graph.py -> _derive_state`.
+
+    ⬜🟨🟩 are a function of the card plus its dependencies; 🔵🟪✅❌ are acts
+    somebody performed. Storing the first three and recomputing them elsewhere is
+    CLAUDE.md's 双协议 inside one file: `status` read the stored label and `ready`
+    recomputed, so three complete cards with no dependencies were reported
+    `blocked: 3` and handed out as `ready: [N01, N02, N03]` at the same instant —
+    and `status` is the one a person reads, so the round looks stalled.
+
+    Written and read by the NEXT round, which is the bar in CLAUDE.md ->
+    "Conventions" for what earns a check.
+    """
+
+    def test_a_complete_card_with_no_dependencies_is_ready_not_blocked(self):
+        self.add_complete()
+        rc, ready, _ = self.g("ready")
+        rc, status, _ = self.g("status")
+        self.assertEqual(len(ready["ready"]), 1)
+        self.assertEqual(status["counts"]["ready"], 1,
+                         "the summary a person reads must not say the queue is stalled")
+        self.assertEqual(status["counts"]["blocked"], 0)
+
+    def test_blocked_means_what_the_schema_says_it_means(self):
+        """`blocked` 🟨 is defined as "card complete, dependencies unmet". A card
+        with `depends_on: []` cannot be blocked on anything, so labelling it so
+        contradicts the vocabulary the next reader is handed."""
+        nid = self.add_complete()
+        self.assertEqual(self.card(nid)["state"], "ready")
+
+    def test_an_unmet_dependency_is_what_blocked_is_for(self):
+        first = self.add_complete()
+        second = self.add_complete()
+        self.g("set", "--id", second, "--set", f'depends_on=["{first}"]')
+        rc, status, _ = self.g("status")
+        self.assertEqual(status["counts"]["blocked"], 1)
+        self.assertEqual(status["counts"]["ready"], 1)
+        rc, ready, _ = self.g("ready")
+        self.assertEqual([b["id"] for b in ready["blocked"]], [second])
+        self.assertEqual(ready["blocked"][0]["state"], "blocked")
+
+    def test_an_incomplete_card_is_draft_in_both_verbs(self):
+        rc, out, _ = self.g("add", "--title", "t", "--kind", "port")
+        rc, status, _ = self.g("status")
+        self.assertEqual(status["counts"]["draft"], 1)
+        rc, ready, _ = self.g("ready")
+        self.assertEqual(ready["blocked"][0]["state"], "draft",
+                         "'finish the card' and 'wait for N01' are different instructions")
+
+    def test_a_stored_label_behind_its_derivation_is_reported_not_hidden(self):
+        """blocked -> ready fires when ANOTHER card settles and no `set` runs on
+        this one, so drift is normal. It is reported because the same field is
+        what a hand-edited graph corrupts, and repairing it silently would hide
+        both."""
+        first = self.add_complete()
+        second = self.add_complete()
+        self.g("set", "--id", second, "--set", f'depends_on=["{first}"]')
+        self.run_it(first)
+        self.fill(first)
+        self.g("close", "--id", first, "--verdict", "won")
+        self.assertEqual(self.card(second)["state"], "blocked", "the stored label is stale")
+        rc, status, _ = self.g("status")
+        self.assertEqual(status["counts"]["ready"], 1, "the derivation is the truth")
+        self.assertEqual([d["id"] for d in status["state_drift"]], [second])
+
+
+class AnArmIsItsRunIdNotItsLabel(GraphCase):
+    """`graph.py -> _derive_state`, and invariant 4 (`duplicate_arm`).
+
+    The dangerous half of the same drift. `ready` skipped 🔵 by the stored label
+    and `duplicate_arm` only walked cards labelled `running`, so a card whose
+    `run_id` was set while the label was left behind stayed in the ready set —
+    and the one invariant meant to catch the second arm being opened on it was
+    walking past it. A `run_id` is set at the moment an arm opens; the label is
+    the part a caller forgets.
+    """
+
+    def _armed_without_the_label(self):
+        nid = self.add_complete()
+        g = self.graph()
+        for n in g["nodes"]:
+            if n["id"] == nid:
+                n["run_id"] = "run_20260817_000000"
+        self.write_json(os.path.join("stages", "exploration", "graph.json"), g)
+        return nid
+
+    def test_a_card_with_an_open_arm_leaves_the_ready_set(self):
+        nid = self._armed_without_the_label()
+        rc, out, _ = self.g("ready")
+        self.assertEqual([r["id"] for r in out["ready"]], [],
+                         "a second arm on the same card is duplicated GPU-weeks")
+        self.assertEqual(out["running"], [nid])
+
+    def test_duplicate_arm_still_sees_it(self):
+        a = self._armed_without_the_label()
+        b = self.add_complete()
+        self.run_it(b, run_id="run_20260817_111111")
+        rc, out, _ = self.g("check")
+        dupes = [f for f in out["findings"] if f["invariant"] == "duplicate_arm"]
+        self.assertTrue(dupes, "same parent and delta, one label missing")
+
+    def test_a_settled_card_is_not_dragged_back_to_running(self):
+        """The derivation is by content, so its ORDER matters: every filled and
+        closed card carries a `run_id` too."""
+        nid = self.add_complete()
+        self.run_it(nid)
+        self.fill(nid)
+        rc, status, _ = self.g("status")
+        self.assertEqual(status["counts"]["filled"], 1)
+        self.assertEqual(status["counts"]["running"], 0)
+
 
 if __name__ == "__main__":
     unittest.main()
