@@ -199,7 +199,8 @@ class EveryNumberCarriesItsTier(GraphCase):
 
 
 class AnApproximationCannotRefuteTheOriginal(GraphCase):
-    """SKILL.md -> Stage 3.5 rule 3: "近似版失败不能证伪原版" — a T4 exists to
+    """SKILL.md -> Stage 3.5 rule 3: an approximation failing cannot refute the
+    original — a T4 exists to
     PRICE the full technique, and using it as a verdict kills a good idea with a
     bad proxy. The check sits on `close` because that is the only moment the
     approximation's result becomes a conclusion about something else.
@@ -227,7 +228,7 @@ class AnApproximationCannotRefuteTheOriginal(GraphCase):
 
 
 class AResultIsNotAConclusion(GraphCase):
-    """references/experiment-graph.md -> §2: 🟪 已回填 and ✅ 已裁决 must stay
+    """references/experiment-graph.md -> §2: 🟪 filled and ✅ closed must stay
     separate, because a card's meaning often waits on ANOTHER card. The recorded
     instance: a mechanism criterion passed literally while the verdict was "the
     mechanism was verified and it is not worth anything" — a verdict that needed
@@ -365,8 +366,8 @@ class SettledCardsAreNotEdited(GraphCase):
 
 
 class FillEnumeratesWhatItMayHaveVoided(GraphCase):
-    """references/experiment-graph.md -> FILL: "不做传播的回填是这条流水线最贵的
-    失败" — a result that invalidates another card's premise, unswept, leaves that
+    """references/experiment-graph.md -> FILL: "a fill with no propagation is the most
+    expensive failure on this pipeline" — a result that invalidates another card's premise, unswept, leaves that
     arm on the queue for somebody to run.
 
     The script enumerates candidates and does not judge them; that split is the
@@ -410,7 +411,8 @@ class CheckReportsAndNeverRepairs(GraphCase):
 
 
 class TheQueueRemembersWhoAskedForIt(GraphCase):
-    """SKILL.md -> Stage 3: 「这一章是用户维护的执行队列，不是 agent 的记录本」.
+    """SKILL.md -> Stage 3: this chapter is a queue maintained BY THE USER, not the
+    agent's notebook.
 
     The provenance tag is borrowed from ARA (arXiv:2604.24658) and it is
     load-bearing for exactly that sentence: if the queue is the user's, then a
@@ -581,7 +583,8 @@ class TwoRecordsMayDisagreeWithoutOneBeingErased(GraphCase):
         self.assertIn(out["dispute"], self.card(b)["disputed_by"])
 
     def test_a_cheaper_check_cannot_refute_a_dearer_one(self):
-        """SKILL.md Stage 3.5 rule 2: 便宜的检查能给你继续的理由，不能给你否掉的理由.
+        """SKILL.md Stage 3.5 rule 2: a cheap check can give you a reason to continue,
+        not a reason to rule something out.
 
         Most apparent contradictions between a short run and a controlled one are
         not disagreements at all — they are incomparabilities. Adjudicating one
@@ -825,7 +828,8 @@ class OneNumberCannotDescribeTwoSettings(GraphCase):
     One-to-one matching needs no NMS, and it was being compared against
     one-to-many UNDER NMS. Holding the setting fixed makes the contrast clean and
     at the same time measures the setting rather than the technique — said out
-    loud only after the comparison had been read once: 「一对一 一定要关掉 nms 测啊」.
+    loud only after the comparison had been read once: "one-to-one HAS to be measured
+    with nms off".
 
     The resolution is the rule: hold it fixed for the contrast AND re-evaluate at
     the arm's own setting. The second costs no training and is the only number
@@ -866,7 +870,7 @@ class OneNumberCannotDescribeTwoSettings(GraphCase):
 class ANumberIsNotAConclusion(GraphCase):
     """references/experiment-graph.md -> §2, at the moment it is hardest to honour.
 
-    「现在有什么新的结论了吗？」 was asked roughly fifteen times across the six days
+    "So what new conclusions are there?" was asked roughly fifteen times across the six days
     of the round this skill came from. It is the moment that most tempts the
     filled/closed collapse: an arm has finished, its numbers are on the card, and
     the natural sentence reports the number as a conclusion. Often the verdict
@@ -1106,7 +1110,7 @@ class StatusAndReadyAnswerTheSameQuestion(GraphCase):
 
     ⬜🟨🟩 are a function of the card plus its dependencies; 🔵🟪✅❌ are acts
     somebody performed. Storing the first three and recomputing them elsewhere is
-    CLAUDE.md's 双协议 inside one file: `status` read the stored label and `ready`
+    CLAUDE.md's DOUBLE PROTOCOL inside one file: `status` read the stored label and `ready`
     recomputed, so three complete cards with no dependencies were reported
     `blocked: 3` and handed out as `ready: [N01, N02, N03]` at the same instant —
     and `status` is the one a person reads, so the round looks stalled.
@@ -1342,8 +1346,8 @@ class AFloorFromAnotherCorpusIsNotAFloor(GraphCase):
 
 
 class AnEdgeSaysWhatItBlocks(GraphCase):
-    """references/experiment-graph.md -> TAKE, "一条边说的是它挡什么", and
-    SKILL.md -> Stage 3 「先跑不等于先读」.
+    """references/experiment-graph.md -> TAKE, "an edge states what it blocks", and
+    SKILL.md -> Stage 3, "running first is not reading first".
 
     A bare id could only say "wait", so every dependency that was really about
     ATTRIBUTION -- B's number cannot be read without A's -- was paid for as
@@ -1456,9 +1460,10 @@ class AnEdgeSaysWhatItBlocks(GraphCase):
 
 
 class AFloorMeasuredBeforeMLClawMustBeWritable(GraphCase):
-    """`baseline.json -> _comment_origin`, and `SKILL.md -> 从哪儿进来`, whose own
-    heading is 用户基本不会从头开始: enter at any Stage, backfill what that Stage
-    owes. The row for 「跑完了，这个提升是真的吗」 says the backfill is Stage 0 --
+    """`baseline.json -> _comment_origin`, and `SKILL.md -> Where you come in`, whose own
+    heading says users essentially never start from scratch: enter at any Stage, backfill
+    what that Stage owes. The row for "it finished — is this improvement real" says the
+    backfill is Stage 0 --
     the noise floor.
 
     ‼️ There was no way to write one. `runs` was the only door and it takes

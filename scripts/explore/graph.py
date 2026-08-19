@@ -28,7 +28,7 @@ Plus the three that read rather than write, and one that records a disagreement:
     check   the invariants. Reports, never repairs -- see below
     status  one-screen summary of the whole graph
     new     what became a CONCLUSION since a time, and what only became a number.
-            The two lists stay apart because 「有什么新结论了」 is the moment that
+            The two lists stay apart because "so what new conclusions are there" is the moment that
             most tempts reporting a result as one
     dispute two cards disagree: mark both, revert neither, defer the adjudication
     resolve adjudicate one dispute -- upheld / rejected / not_comparable
@@ -61,7 +61,8 @@ from _records import (atomic_write_json, broke, digits as _digits,  # noqa: E402
 from _vocab import PROVENANCE, TIERS  # noqa: E402
 from compare import scope_key, scopes_equivalent, UNSPECIFIED_SCOPE  # noqa: E402
 
-# Seven, and the load-bearing split is `filled` vs `closed`: 有结果 != 有结论.
+# Seven, and the load-bearing split is `filled` vs `closed`: having a result is NOT
+# having a conclusion.
 # A card whose numbers are in but whose verdict is not is `filled`. Collapsing
 # the two propagates an unexplained number downstream as a finding -- the
 # recorded instance had a mechanism criterion pass literally while the verdict
@@ -91,7 +92,7 @@ SETTLED = ("closed", "killed")
 #
 # `_derive_state` is the single truth for the first three; the stored field is
 # written forward as a convenience for external readers, never read back for a
-# decision. Same fact, one writing -- the rule `/agent-refactor` calls 双协议 and
+# decision. Same fact, one writing -- the rule `/agent-refactor` calls a DOUBLE PROTOCOL, and
 # the reason this file has one state machine rather than three.
 DERIVED_STATES = ("draft", "blocked", "ready")
 DECLARED_STATES = ("running", "filled", "closed", "killed")
@@ -133,8 +134,9 @@ DISPUTE_OUTCOMES = {
 
 # Power ordering. T0 verified nothing and T4 is an approximation priced for the
 # original, so neither may contradict anything; among the rest, a cheaper check
-# CANNOT refute a dearer one -- SKILL.md Stage 3.5 rule 2: 「便宜的检查功率低：它能
-# 给你继续的理由，不能给你否掉的理由」. Most "contradictions" between a short run and
+# CANNOT refute a dearer one -- SKILL.md Stage 3.5 rule 2: a cheap check has low power;
+# it can give you a reason to continue, not a reason to rule something out. Most
+# "contradictions" between a short run and
 # a controlled one are not disagreements at all, and adjudicating one as if it
 # were is how a good result gets thrown away by a cheap probe.
 TIER_POWER = {"T0": 0, "T1": 1, "T2": 2, "T3": 3, "T4": 0}
@@ -143,7 +145,7 @@ TIER_POWER = {"T0": 0, "T1": 1, "T2": 2, "T3": 3, "T4": 0}
 # `research-manager/references/event-taxonomy.md` -> "Provenance Assignment".
 #
 # It is load-bearing HERE specifically because SKILL.md Stage 3 says the queue is
-# 「用户维护的执行队列，不是 agent 的记录本」: the user drops in a one-line idea, the
+# the queue is maintained BY THE USER, not the agent's notebook: the user drops in a one-line idea, the
 # agent completes the card and executes. A card the user demanded and a card the
 # agent invented therefore mean different things -- and without this field they
 # are the same row. The distribution is itself the signal: a graph that is all
@@ -315,7 +317,8 @@ def _run_json(project, target_stage, run_id):
 # ‼️ `runs` used to be the ONLY door: two `/eval-run` ids, re-read from
 # `stages/*/runs/<id>/run.json`. That is right for a project MLClaw has owned
 # from the start, and it has no answer at all for the case `SKILL.md ->
-# 从哪儿进来` calls the normal one -- "用户基本不会从头开始", enter at Stage 6,
+# Where you come in` calls the normal one -- "users essentially never start from
+# scratch", enter at Stage 6,
 # backfill Stage 0. A floor from before the takeover was measured on a box that
 # has since been released, from a checkpoint on a powered-down disk, by a
 # pipeline that never wrote a `run.json`. There was nowhere to write it down.
@@ -442,7 +445,7 @@ def _floor(baseline, corpus, project, stages):
                     "a floor is a SPREAD and %d run(s) cannot produce one. `runs` names "
                     "the repeat measurements it was computed from; without them nobody "
                     "can re-check what was actually varied. ‼️ If this floor was measured "
-                    "before MLClaw -- the takeover, which `SKILL.md -> 从哪儿进来` calls "
+                    "before MLClaw -- the takeover, which `SKILL.md -> Where you come in` calls "
                     "the normal way in -- do NOT invent two ids: set `origin: external` "
                     "and fill `unchecked`" % len(runs)))
         return out, "not_measured"
@@ -553,7 +556,7 @@ def _eval_setting(node):
     From the same round: one-to-one matching needs no NMS, and it was being
     compared against one-to-many UNDER NMS. Holding the setting fixed makes the
     contrast clean and simultaneously measures the setting rather than the
-    technique -- 「一对一 一定要关掉 nms 测啊」, said after the comparison had already
+    technique -- "one-to-one HAS to be measured with nms off", said after the comparison had already
     been read once.
 
     The resolution that round reached is the rule: hold the setting fixed for the
@@ -677,7 +680,7 @@ def _next_id(graph):
 #             NOTHING. It stamps `conditional_on` at close so the verdict says out
 #             loud what it is standing on, and re-surfaces when A lands.
 #
-# 「先跑不等于先读」 was written here for the noise floor and treated as that one
+# "running first is not reading first" was written here for the noise floor and treated as that one
 # number's exemption. It is the general rule: the graph exists to gate READING,
 # and the launch order is a consequence of it, not the point of it.
 #
@@ -1228,7 +1231,7 @@ def cmd_check(a):
     ‼️ No count in this sentence, deliberately. It said "the seven invariants,
     plus the two MLClaw adds" while `flag()` emitted twenty-one distinct names --
     a number with two authors, drifting exactly the way `/agent-refactor` calls
-    双协议. The list is the numbered blocks below and the human-facing table in
+    a double protocol. The list is the numbered blocks below and the human-facing table in
     `references/experiment-graph.md`; whichever of those you change, change both.
 
     Cited by contracts/contract_explore.py. Every finding names the card and what
@@ -1534,7 +1537,7 @@ def cmd_new(a):
     """What became a CONCLUSION since a point in time -- and what only became a number.
 
     This verb exists for one question, asked roughly fifteen times across the six
-    days of the round this skill came from: 「现在有什么新的结论了吗？」. It is the
+    days of the round this skill came from: "so what new conclusions are there?". It is the
     moment that most tempts the 🟪/✅ collapse. An arm has finished, its numbers
     are on the card, and the natural sentence is "e13h came back at 92.15" -- which
     reports a RESULT as a CONCLUSION. Often the verdict is genuinely not reachable
