@@ -1,125 +1,144 @@
-# 算力：容量、卡型、并行度、释放
+# Compute: capacity, GPU model, parallelism, release
 
-‼️ **在 MLClaw 里，这一层已经有主人了。** 租机器是 `/lease`（七个动词 + history），
-一次搜索同时握 N 台是 `scripts/shared/pool.py`，分层规则在
-`<mlclaw_root>/references/fleet.md`。**开臂之前读那份，不是这份。**
+‼️ **In MLClaw this layer already has an owner.** Renting a machine is `/lease` (seven verbs
+plus history), holding N of them for one search is `scripts/shared/pool.py`, and the layering
+rules are in `<mlclaw_root>/references/fleet.md`. **Read that one before opening an arm, not
+this one.**
 
-这份留下来的是 `fleet.md` **没有**的那半 —— 容量的判断，而不是持有的机制：
+What is left here is the half `fleet.md` does **not** cover — judging capacity, rather than the
+mechanics of holding it:
 
-| 这份管 | `fleet.md` 管 |
+| This file | `fleet.md` |
 |---|---|
-| 稳定容量的不等式：「抢占在位时长 < checkpoint 间隔」的臂产出是**结构性零** | slot 怎么拿、怎么还、心跳谁发 |
-| 容量的四种**静默**失败（分页截断、空集、配额边界、区域漂移） | owned-before-rented、抢占为什么是搜索的默认 |
-| 选卡判据是**时钟÷单价**，不是 FLOPS | 一次部分完成的 sweep 值多少 |
-| ‼️ 同组比较的臂**必须同卡型**（换卡就是换 kernel），要换整组一起换 | 被抢占的 trial **绝不能读成被证伪的假设** |
+| The stable-capacity inequality: an arm whose "preemptible residency < checkpoint interval" produces **structurally zero** | how a slot is taken and returned, who sends the heartbeat |
+| The four **silent** capacity failures (paging truncation, empty set, quota edge, region drift) | owned-before-rented, why preemptible is the search default |
+| GPU selection is decided by **clock ÷ price**, not FLOPS | what a partially finished sweep is worth |
+| ‼️ Arms compared within one group **must be the same GPU model** (a different card is a different kernel); to change it, change the whole group | a preempted trial **must never be read as a refuted hypothesis** |
 
-最后一行两边说的是同一件事的两面，而且都要遵守：`fleet.md` 说抢占不是证据，
-本文件的 `graph.py close --killed-by` 里没有「被抢占」这个死法 —— 那种臂**重新排队**，
-卡留在 `running`。
+The last row states two sides of one fact, and both must be honoured: `fleet.md` says
+preemption is not evidence, and in this file `graph.py close --killed-by` has no death called
+"preempted" — such an arm is **re-queued**, and the card stays `running`.
 
-一轮 ablation 的产出上限常常不由设计决定，而由**能不能稳定拿到卡**决定。
-这份文件写怎么判断、怎么编排、怎么确认真的释放了。
+The output ceiling of an ablation round is often decided not by its design but by **whether
+GPUs can be held stably**. This file is about judging that, orchestrating around it, and
+confirming things were really released.
 
-‼️ **这里的数字全是「要每次重量的判据」，不是常数。** 同一个池上午还是「零抢占 6 小时」，
-下午就变成「平均 28 分被抢一次」。读到具体数字先核日期。
+‼️ **Every number here is a criterion to be re-measured each time, not a constant.** The same
+pool can be "zero preemptions in six hours" in the morning and "preempted every 28 minutes on
+average" in the afternoon. Check the date before trusting any figure below.
 
 ---
 
-## 1. 开跑之前必须量的三个数
+## 1. Three numbers to measure before starting
 
-| 量 | 怎么拿 |
+| Quantity | How to get it |
 |---|---|
-| **稳定在位时长** | 从 watchdog 日志数 PREEMPTED 的间隔（本 repo：`state/watchdog.log`） |
-| **一个 epoch 多久** | tfevents 的 `wall_time` 直接算，掐掉前 20% 排除 warmup |
-| **checkpoint 间隔** | 读训练脚本 —— 常见的是**只在 epoch 边界写** |
+| **Stable residency** | count intervals between PREEMPTED entries in the watchdog log (this repo: `state/watchdog.log`) |
+| **Time per epoch** | compute directly from `wall_time` in tfevents, dropping the first 20% to exclude warmup |
+| **Checkpoint interval** | read the training script — commonly it writes **only on epoch boundaries** |
 
-### ‼️ 那个不等式：在位时长 < checkpoint 间隔 ⇒ **产出是结构性的零**
+### ‼️ The inequality: residency < checkpoint interval ⇒ **output is structurally zero**
 
-不是"进展慢"，是**数学上不可能有进展** —— 每次被抢，那个未完成的 epoch 全丢，
-有没有 checkpoint 文件都一样。
+Not "slow progress" — **progress is mathematically impossible**. Every preemption discards the
+whole unfinished epoch, whether or not a checkpoint file exists.
 
-本 repo 实测（2026-08-14，L40S 抢占池）：在位 **24–36 min** 对 一个 epoch **0.73–1.06 h**。
-七条臂里被抢间隔 28–50 分的**一条都写不出第一个 checkpoint**；而 `e0b/e1/e3/e5` 被抢 **0 次**。
+Measured in this repo (2026-08-14, L40S preemptible pool): residency **24–36 min** against
+**0.73–1.06 h** per epoch. Of seven arms, the ones preempted every 28–50 minutes **never wrote
+a first checkpoint**, while `e0b/e1/e3/e5` were preempted **zero times**.
 
-‼️ **第二条同样重要：churn 全发生在争夺剩余位子的臂之间，拿到位子的会一直拿着。**
-推论：**多开的臂不只自己零产出，还在搅动已经稳定的臂**。所以并行度超过稳定容量是**全损**，
-不是"排队慢一点"。
+‼️ **The second finding matters as much: all the churn happens among the arms competing for the
+leftover slots, and whoever holds a slot keeps holding it.** Which implies: **extra arms do not
+merely produce nothing themselves — they churn the arms that were already stable.** So
+parallelism above stable capacity is a **total loss**, not "the queue moves a bit slower".
 
 ---
 
-## 2. 容量的四种失败，全都不报错
+## 2. Four ways capacity fails, none of which raises an error
 
-| 失败 | 症状 | 判据 |
+| Failure | Symptom | Criterion |
 |---|---|---|
-| **静默放不下** | `create` 成功 → `STARTING` → **`STOPPED`**，没有错误 | 事前查 `capacity resource-advice`；报 `LOW` 就当拿不到 |
-| **`available` 是瞬时值不是配额** | 查到 `available: 1 / limit 32`，几分钟后变 0 | 它会被别人抢走。**查到有 ≠ 你能拿到** |
-| **抢占池不能就地转非抢占** | `instance update` 的 flag 里根本没有 preemptible | 非抢占箱永远是**新箱 + 空盘** ⇒ checkpoint 在旧盘上的臂要么从零跑，要么等旧箱腾位子再搬 |
-| **卡型未开通** | 计价 API 返回 `NotFound`（而正常卡型返回价格） | **查不到价 = 未开通**，不是缺配置。叠加编译期 arch 上限，可能拿到也跑不了 |
+| **Silent no-room** | `create` succeeds → `STARTING` → **`STOPPED`**, with no error | check `capacity resource-advice` beforehand; treat a `LOW` report as unobtainable |
+| **`available` is an instantaneous value, not a quota** | you see `available: 1 / limit 32`, and minutes later it is 0 | somebody else will take it. **Seeing it available ≠ you can get it** |
+| **A preemptible pool cannot be converted in place** | `instance update` has no preemptible flag at all | a non-preemptible box is always a **new box with an empty disk** ⇒ an arm whose checkpoint is on the old disk either restarts from zero or waits for the old box to free up so it can be moved |
+| **GPU model not enabled** | the pricing API returns `NotFound` (where a working model returns a price) | **no price = not enabled**, not a missing config. Combined with the compile-time arch ceiling, you may get one and still not be able to run on it |
 
 ---
 
-## 3. 选卡：判据是**时钟 ÷ 单价**，不是 FLOPS
+## 3. Choosing a GPU: the criterion is **clock ÷ price**, not FLOPS
 
-本 repo 实测（2026-08-14，单卡，同一份代码 / 数据 / config）：
+Measured in this repo (2026-08-14, single card, identical code / data / config):
 
-| | h/epoch（无 CDN / CDN） | $/h | 每 epoch 相对成本 |
+| | h/epoch (no CDN / CDN) | $/h | relative cost per epoch |
 |---|---|---|---|
 | L40S | **0.73 / 1.06** | 2.14 | 1.0× |
 | H100 | **0.92 / 1.13** | 3.85 | **2.3×** |
 
-**更贵更强的卡更慢**，慢 1.26×。原因量到了：H100 SM 时钟钉在 **1980 MHz**，L40S boost **~2520**，
-比值 **1.27×**，和实测 1.26× 吻合；同时 GPU 报 util 92–100% 但只吃 **209–274 W / 700 W**，
-`nproc=16` 下 load average 只有 1.68（**不是数据加载饿死**）。
+**The more expensive, more powerful card is slower** — by 1.26×. The cause was measured: the
+H100's SM clock is pinned at **1980 MHz** against the L40S's **~2520** boost, a ratio of
+**1.27×**, matching the observed 1.26×. Meanwhile the GPU reports 92–100% utilisation while
+drawing only **209–274 W of 700 W**, and load average is 1.68 at `nproc=16` (**so it is not
+data-loader starvation**).
 
-⇒ **这个负载是时钟受限的**，所以 FLOPS 和显存带宽都不是选卡判据。
-**换卡买不到速度，只买到「不会被抢占」** —— 这仍然可能值，因为零产出的臂再便宜也是浪费。
+⇒ **This workload is clock-bound**, so neither FLOPS nor memory bandwidth is a selection
+criterion. **Changing card buys no speed — it only buys "will not be preempted"**, which may
+still be worth it, because an arm producing nothing is wasted however cheap it was.
 
-### ‼️ 硬门：编译期 arch
+### ‼️ A hard gate: compile-time arch
 
-`TORCH_CUDA_ARCH_LIST` 决定自定义算子编到哪个 arch（本 repo：pointnet2）。
-**sm_89 vs sm_90 换卡就是换 kernel**，而每条结论都是差分出来的。
+`TORCH_CUDA_ARCH_LIST` decides which arch custom operators are compiled for (this repo:
+pointnet2). **sm_89 vs sm_90 means a different card is a different kernel**, and every
+conclusion here is a difference.
 
-⇒ **同一组要相互比较的臂必须同卡型。要换，整组一起换。**
-跨卡型的 delta 不可比 —— 这条比容量更硬，容量只影响能不能跑完，它影响跑完的数算不算数。
-
----
-
-## 4. 编排规矩
-
-1. **离线节点（0 GPU）不受容量限制**，永远优先、永远可以全部并行。
-   队列里「没事干」时的正确动作是推离线批，不是多开一条臂。
-2. **GPU 并行度 ≤ 稳定容量**（§1 那个不等式）。超了是全损。
-3. **同组同卡型**（§3）。
-4. ‼️ **噪声底不阻塞任何臂。** 它和主臂**不必同时跑** —— run card 把代码/数据/config 钉死了，
-   几天后补跑同样有效。噪声底只决定报数的措辞（`[T1 趋势]` vs 「测到了」）。
-   本 repo 曾因为把它当前置，觉得整轮被卡住。
-5. **每条臂开跑那一刻 declare 代码快照哈希。** 串行时你知道自己什么时候改的代码；
-   **并行时「当前代码」是模糊的**，几条臂跑的可能不是同一份，而这件事不会报错。
+⇒ **Arms that will be compared against each other must be on the same GPU model. To change it,
+change the whole group.** Cross-model deltas are not comparable — a harder rule than capacity,
+because capacity only decides whether a run finishes, while this decides whether the finished
+number counts.
 
 ---
 
-## 5. 释放：**别把它当收尾动作**
+## 4. Orchestration rules
 
-‼️ **「一轮结束时走一遍清单」这个形态本身就是那个 bug。** 清单要有人活着去执行，
-而漏关机器的场合恰恰是**没人在场**的场合：会话超上下文、你走开了、臂自己崩了。
-计费不需要任何人记得。所以云侧的巡检已经从清单里搬走，交给一个常驻进程：
+1. **Offline nodes (0 GPU) are not capacity-limited** — always first, always fully
+   parallelisable. When the queue has "nothing to do", the right move is to push the offline
+   batch, not to open another arm.
+2. **GPU parallelism ≤ stable capacity** (the inequality in §1). Exceeding it is a total loss.
+3. **One GPU model per comparison group** (§3).
+4. ‼️ **The noise floor blocks no arm.** It does **not** have to run alongside the main arms —
+   the run card pins code, data and config, so measuring it days later is equally valid. The
+   noise floor only decides the wording of a reported number (`[T1 trend]` vs "measured").
+   This repo once treated it as a precondition and believed the whole round was stuck.
+5. **Declare the code snapshot hash at the moment each arm starts.** Run things serially and
+   you know when you changed the code; **run them in parallel and "the current code" is
+   ambiguous** — several arms may not be running the same thing, and nothing raises.
 
-**`net.miniclaw.gpujanitor`**（mac-mini，每 15 分钟，只读）→ 结果落在
-`~/.claude/miniclaw/gpu_janitor.json`。**你要做的是读它，不是执行它。**
+---
+
+## 5. Release: **do not treat it as a wrap-up step**
+
+‼️ **"Walk a checklist at the end of the round" is itself the bug.** A checklist needs somebody
+alive to execute it, and the occasions when a machine is left running are precisely the ones
+where **nobody is present**: the session ran out of context, you walked away, the arm crashed
+on its own. Billing does not require anyone to remember. So the cloud-side sweep has been moved
+out of the checklist and given to a resident process:
+
+**`net.miniclaw.gpujanitor`** (mac-mini, every 15 minutes, read-only) → results land in
+`~/.claude/miniclaw/gpu_janitor.json`. **Your job is to read it, not to run it.**
 
 ```bash
 python3 -c 'import json;d=json.load(open("'"$HOME"'/.claude/miniclaw/gpu_janitor.json"));print(d["generated_at"],d["ok"],len(d.get("running",[])),d.get("alerts"))'
 ```
 
-‼️ **先看 `generated_at`。** 超过 ~45 分钟没动，说明 janitor 死了或者从没装过
-（它的存活信号就是这个时间戳，故意不加第二层监控）。这时才退回手动：
-`nebius_scan.py --running`（走完所有 project）+ `nebius_audit.py`（审计日志，
-唯一能回答"到底删没删"的源）。判据在 `nebius_server` 那份里，不重复。
+‼️ **Check `generated_at` first.** Nothing for more than ~45 minutes means the janitor died or
+was never installed (that timestamp *is* its liveness signal; a second layer of monitoring is
+deliberately absent). Only then fall back to doing it by hand: `nebius_scan.py --running`
+(walking every project) plus `nebius_audit.py` (the audit log, the only source that can answer
+"was it actually deleted"). The criteria live in the `nebius_server` document and are not
+repeated here.
 
-**收尾时仍然要人做的，只剩 janitor 看不见的那两条** —— 它只能枚举云资源，
-下面这两件在云 API 里根本不存在：
+**What a person still has to do at the end is only the two things the janitor cannot see** — it
+can enumerate cloud resources, and neither of the following exists in a cloud API at all:
 
-| | 查什么 |
+| | What to check |
 |---|---|
-| checkpoint | 要留的已经搬到持久位置（抢占盘会跟着实例消失，而且**滚动文件会被下一个 epoch 覆盖** —— 危险的是还在 RUNNING 的臂，不是停掉的） |
-| run card | 每条臂的 code hash / data hash 已落盘 —— **这是"几天后补噪声底"能成立的唯一凭据** |
+| checkpoints | anything worth keeping has been moved somewhere durable (a preemptible disk disappears with its instance, and **a rolling file is overwritten by the next epoch** — the dangerous case is an arm still RUNNING, not a stopped one) |
+| run cards | each arm's code hash and data hash are written to disk — **this is the only thing that makes "measure the noise floor days later" valid** |

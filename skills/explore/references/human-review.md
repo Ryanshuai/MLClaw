@@ -1,60 +1,82 @@
-# 人工视觉验收：怎么让人的几分钟值钱
+# Human visual review: how to make somebody's few minutes worth something
 
-`SKILL.md` Stage 6.5 指到这里。正文只留「什么时候必须叫人」；**这里是怎么组织那几分钟**。
+`SKILL.md` Stage 6.5 points here. The main document keeps only *when a person must be
+called in*; **this is how to organise those minutes**.
 
 ---
 
-#### 两把尺子是互补的，不是冗余的
+#### The two rulers are complementary, not redundant
 
-| | 分辨力 | 会不会整体错 |
+| | Resolution | Can it be wholesale wrong |
 |---|---|---|
-| **数值** | 高 —— 能分 0.25 AP | ‼️ **会**，而且错得很自信：和实现共享假设时整体错 |
-| **人眼** | 低 —— 说不出 5 mm 还是 8 mm | **不犯原则性错误**：框歪 90°、框跨在两个箱子中间、两个箱子当一个，人一眼就知道不对 |
+| **Numbers** | high — can separate 0.25 AP | ‼️ **Yes**, and confidently so: when they share assumptions with the implementation, they are wrong as a whole |
+| **A person's eye** | low — cannot tell 5 mm from 8 mm | **Makes no errors of principle**: a box rotated 90°, a box straddling two cartons, two cartons read as one — a person sees it instantly |
 
-所以顺序不是"数值不够了才叫人"，而是 **人先排除原则性错误，数值再谈分辨力**。
-反过来同样成立：**别拿人眼去裁小差异** —— 人的输出应该是二元/三元的
-（有没有原则性错误 / 盲评哪个更能抓），不是"好了 5%"。
+So the order is not "call a person once the numbers run out". It is **the person rules out
+errors of principle first, and the numbers then argue about resolution.** The reverse holds
+just as firmly: **do not use a person's eye to adjudicate small differences** — their output
+should be binary or ternary (is there an error of principle / which one catches more, blind),
+never "about 5% better".
 
-#### 分流：什么时候数值 + 辩论就够
+#### Triage: when numbers plus debate are enough
 
-| 决策 | 什么样 | 用什么 |
+| Decision | What it looks like | What to use |
 |---|---|---|
-| **简单** | 同一把尺子、同一种几何表示、只翻一个 flag，且预注册指标和 AP 同向 | 数值 + 辩论 ①，**不叫人** |
-| **复杂** | 下面四条任一 | **人眼盲评先行**，数值随后 |
+| **Simple** | same ruler, same geometric representation, one flag flipped, and the pre-registered metric moves the same way as AP | numbers + debate ①, **no person** |
+| **Complex** | any one of the four below | **blind human review first**, numbers after |
 
-必须叫人的四条（不是"最好叫人"）：
+The four that *require* a person (not "preferably"):
 
-1. **改了度量、改了几何表示、改了匹配口径** —— AABB→有向 就是这一类，此时所有历史数值同时作废；
-2. **预注册指标和 AP 反向**（一个涨一个跌）；
-3. ⑤ 的 A 角色把某处「致命」改判成「无关」；
-4. **T3 大跑之前的最后一道闸**。
+1. **The metric changed, the geometric representation changed, or the matching convention
+   changed** — AABB → oriented is exactly this, and every historical number is void at that
+   moment;
+2. **The pre-registered metric and AP move in opposite directions** (one up, one down);
+3. Role A in ⑤ re-classified something from "fatal" to "irrelevant";
+4. **The last gate before a large T3 run.**
 
-#### 怎么让人的几分钟值钱
+#### How to make those minutes worth something
 
-- ‼️ **预先选帧，而且必须带控制组**：(a) 预注册指标说变好的、(b) 说变差的、(c) **随机抽的对照帧**，
-  三类混在一起。只挑最好和最差的给人看，等于让人给你的结论盖章。
-- ‼️ **盲评**：不告诉人哪张是新版。**「独立标尺 + 内建对照 + 控制组」这三条对人和对脚本一样适用** ——
-  人知道哪个是新版之后，就会看到他期待的东西。
+- ‼️ **Choose the frames in advance, and always include a control group**: (a) ones the
+  pre-registered metric says improved, (b) ones it says got worse, and (c) **randomly sampled
+  control frames**, all three mixed together. Showing only the best and the worst is asking a
+  person to rubber-stamp your conclusion.
+- ‼️ **Blind it**: do not say which one is the new version. **"Independent ruler + built-in
+  control + control group" applies to people exactly as it applies to scripts** — once
+  somebody knows which is new, they will see what they expect to see.
 
-#### 盲评要用两个独立视觉通道（给人的反馈加一位校验码）
+#### Blind review needs two independent visual channels (a check digit on human feedback)
 
-‼️ **一个通道的盲评无法检错。** 只用颜色区分、人回一句"绿的那个好"时，
-你分不清这是真结论、还是人记反了 / 渲染映射写反了 / 转录串了台 —— **错的反馈会被静默算进比例里**。
+‼️ **A single-channel blind review cannot detect its own errors.** If the only distinction is
+colour and the person says "the green one is better", you cannot tell a real conclusion from
+somebody misremembering, from a reversed render mapping, from a transcription slip —
+**and wrong feedback gets counted silently into the ratio.**
 
-规矩：
+The rules:
 
-- **两个互不干扰的通道**，例：A 蓝 / B 绿（颜色）**加上** A 波浪线 / B 虚线（线型）。
-  颜色 + 透明度**不行** —— 透明度会改变感知到的颜色，两个通道就不独立了。
-- **每一帧独立重随机**两个通道到（新版, 旧版）的分配，映射表存盘、人看不到。
-- ‼️ **人必须同时报出两个通道**："绿色的、虚线的那个更好"。主 agent 拿映射表核对：
-  两个通道一致才计入，**不一致就丢掉这一帧**（这就是检错），别把它算进盲评比例。
-- **丢弃率本身是个指标**：丢弃率高 = 可视化设计有问题（两个通道视觉上打架、或不够显眼），
-  或者人在扫过去。这两种都得先修，再谈结论。
-- **左右位置不当身份通道** —— 口头描述最容易串台的就是"左边那个"，翻页/滚动之后含义就变了。
-  位置照样要随机化（防位置偏好），但不承担身份。
-- ‼️ **盲评的通道不能重用渲染器已有的语义配色。** 我们的 rrd 里绿/红/黄/白虚线**已经有含义**了
-  （匹配 / 错框 / 弱匹配 / 应该在的位置），拿它们当 A/B 身份会直接和读图冲突。
-- **一次不超过 ~20 帧**。超过这个量人会开始扫过去，反馈质量掉得比覆盖率涨得快。
-- ‼️ **人的判断要变成计数、写回 `findings.json`**，`source: "human"`、
-  `value: 0.70, unit: "盲评选新版比例", n: 20`。**人的反馈进同一个接口，这条流水线才闭环** ——
-  否则它就只是一句留在聊天记录里的"嗯这版看着好点"，下一轮没人能拿它跟今天比。
+- **Two channels that do not interfere**, e.g. A blue / B green (colour) **plus** A wavy /
+  B dashed (line style). Colour + opacity **does not work** — opacity changes perceived
+  colour, so the two channels stop being independent.
+- **Re-randomise both channels independently for every frame** across (new, old). The mapping
+  is stored and never shown to the reviewer.
+- ‼️ **The person must report both channels**: "the green one, the dashed one, is better."
+  The main agent checks that against the mapping: it counts only when the two channels agree,
+  and **the frame is discarded when they disagree** — that is the error detection. Never fold
+  a disagreeing frame into the blind-review ratio.
+- **The discard rate is itself a metric**: a high one means the visualisation is broken (the
+  two channels fight each other visually, or neither is salient enough) or the reviewer is
+  skimming. Both must be fixed before any conclusion is discussed.
+- **Do not use left/right position as an identity channel** — "the one on the left" is the
+  easiest thing to cross wires on when describing something aloud, and it changes meaning
+  after a scroll or a page turn. Randomise position anyway (to defeat positional bias), but
+  never let it carry identity.
+- ‼️ **A blind review's channels may not reuse the renderer's existing semantic colours.**
+  In our rrd, green / red / yellow / white-dashed **already mean something** (matched / wrong
+  box / weak match / where it should have been), so using them as A/B identity collides
+  directly with reading the picture.
+- **No more than ~20 frames at a time.** Past that people start skimming, and feedback quality
+  falls faster than coverage rises.
+- ‼️ **The person's judgement must become a count, written back to `findings.json`** with
+  `source: "human"` and `value: 0.70, unit: "blind-review share preferring the new version",
+  n: 20`. **Human feedback goes through the same interface, and that is what closes this
+  pipeline's loop** — otherwise it is one sentence in a chat log saying "yeah, this one looks
+  better", and nobody next round can compare it to today.

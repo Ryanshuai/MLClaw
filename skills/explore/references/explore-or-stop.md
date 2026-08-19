@@ -1,79 +1,92 @@
-# 继续探索，还是停？——多轮之后的收敛判断
+# Keep exploring, or stop? — judging convergence after several rounds
 
-跑完几条臂之后要回答的问题：**哪儿还值得挖，哪儿已经搜干净了。**
-这是判断，不是流程，所以这份文件写的是**判据**和**最容易骗到人的那几种假信号**。
+The question to answer once a few arms have run: **where is there still something to dig up,
+and where has the search been exhausted.** This is a judgement, not a procedure, so what this
+file holds is the **criteria** and **the false signals most likely to fool you**.
 
-‼️ **默认答案偏向「继续」**，因为「没有提升」在这条流水线上最常见的成因不是"搜完了"，
-而是**判据坏了**（§3）。要停，得主动通过 §2 的三问。
+‼️ **The default answer leans toward "keep going"**, because on this pipeline the most common
+cause of "no improvement" is not that the search is finished — it is that **the criterion is
+broken** (§3). Stopping requires actively passing the three questions in §2.
 
 ---
 
-## 1. 该继续的信号（任一成立就不许停）
+## 1. Signals that you must continue (any one of them forbids stopping)
 
-| 信号 | 为什么它比开新臂值钱 |
+| Signal | Why it is worth more than opening a new arm |
 |---|---|
-| ‼️ **赢了但没归因** | 有一条明显赢了，但它的**预注册主判据没动**，或者机理没被证实。这时候最便宜的下一步是**解释它**，不是再开一条。本 repo：CDN 赢了 +35 AP50，而它被提出来要解决的病（对比难负样本）实测**依然存在** ⇒ 它大概率不是靠那个机理赢的，`e3b` 在分离 |
-| **护栏动了没人解释** | 护栏的全部价值就在被触发的那一刻。动了不解释 = 白设 |
-| **🟪 堆积** | 有结果没裁决。队列还在往前跑，而没人知道已有的数意味着什么 |
-| **主判据和 AP 反向** | 说明我们不理解正在发生什么。这种时候的下一次测量，信息量高于任何一条新臂 |
-| **还有 oracle 上限 > 噪声底的条目没做** | 0 成本，且可能直接杀掉几条臂 |
+| ‼️ **Won, but unattributed** | Something clearly won, but its **pre-registered primary criterion did not move**, or the mechanism was never confirmed. The cheapest next step is to **explain it**, not to open another arm. In this repo: CDN won by +35 AP50 while the fault it was proposed to fix (contrastive hard negatives) **is still measurably there** ⇒ it probably did not win by that mechanism, and `e3b` is what separates the two |
+| **A guardrail moved and nobody explained it** | A guardrail's entire value is the moment it fires. Fired and unexplained = it was never worth setting |
+| **🟪 piling up** | Results in, verdicts not reached. The queue keeps running while nobody knows what the numbers already in hand mean |
+| **The primary criterion and AP move in opposite directions** | It means we do not understand what is happening. The next measurement taken in that state carries more information than any new arm |
+| **Items with oracle ceiling > noise floor still untouched** | Zero cost, and they may kill several arms outright |
 
 ---
 
-## 2. 停之前必须通过的三问（全是「否」才是真的搜完了）
+## 2. The three questions that must be passed before stopping (only "no" three times means the search is genuinely done)
 
-### 问一：**当前最大的失败计数，和这一轮开跑时是同一个吗？**
+### Question one: **is the largest failure count the same one as when this round started?**
 
-- **不是** ⇒ **病换了，回 Stage 1 重新审，不是在这一轮里继续挖。**
-  这是最容易被误判成"搜完了"的情形：原来的提案对现在的病不对症，于是每条都没效果，
-  读起来像"这条路走到头了"，其实是**走错了路口**。
-- 是 ⇒ 继续问二。
+- **No** ⇒ **the fault changed. Go back to Stage 1 and re-audit; do not keep digging inside
+  this round.** This is the case most often misread as "the search is finished": the original
+  proposals do not address the current fault, so none of them has any effect, and it reads as
+  "this avenue is exhausted" when in fact **you took the wrong turning**.
+- Yes ⇒ go to question two.
 
-### 问二：**桌上还有没有 oracle 上限大于噪声底的条目？**
+### Question two: **is there anything left on the table whose oracle ceiling exceeds the noise floor?**
 
-- **有** ⇒ 不能停。上限大于噪声底 = 还有可测量的空间。
-- 没有 ⇒ 继续问三。**注意这一问要求 oracle 真的量过**；"我觉得没什么空间了"不算。
+- **Yes** ⇒ you may not stop. A ceiling above the floor means there is still measurable room.
+- No ⇒ go to question three. **Note that this question requires the oracle to have actually
+  been measured**; "I don't think there's much room left" does not count.
 
-### 问三：**有没有「赢了没归因」或 🟪 没裁决的？**
+### Question three: **is anything "won but unattributed", or 🟪 with no verdict?**
 
-- 有 ⇒ 不能停（§1）。
-- 没有 ⇒ **可以停。**
+- Yes ⇒ you may not stop (§1).
+- No ⇒ **you may stop.**
 
 ---
 
-## 3. ‼️ 假的「搜完了」——本 repo 全都踩过
+## 3. ‼️ False "the search is finished" — this repo has stepped on every one
 
-| 假信号 | 真实情况 | 怎么识破 |
+| False signal | What is actually true | How to see through it |
 |---|---|---|
-| 「几条臂都没提升」 | **噪声底没测** ⇒ "没有显著提升"是**不可判定**，不是否定 | 报数措辞里有没有 `[T1 趋势]`。有 = 你还没有能力说"没提升" |
-| 「指标不动」 | **判据自我选择** —— 筛选步骤把该检出的失败先筛掉了；或空初值让判据恒真 | 判据里有没有 filter/阈值/初值。给判据本身写一个"它应该报警的"用例 |
-| 「这条机理试过了，不行」 | 试的是**便宜近似版**。近似版失败**不能证伪原版** | 卡上有没有标"近似" |
-| 「和上一版比没变好」 | **换了度量 / 换了数据 ⇒ 旧曲线作废**，你比的是两把尺子 | run card 的 data hash / 度量脚本 hash 是否一致 |
-| 「这个病在我们这儿不严重」 | **份额引自另一个语料**。本 repo：预测 47%，本语料实测 **4.62%**，差一个数量级 | 那个份额是在**本轮真正要跑的语料**上量的吗 |
-| 「测试全绿，所以没问题」 | 测试钉住的是**算术**，钉不住**输入分布来自哪个语料** | 测试是自己构造输入的吗？是 ⇒ 它对语料一无所知 |
+| "Several arms showed no improvement" | **The noise floor was never measured** ⇒ "no significant improvement" is **undecidable**, not negative | Look for `[T1 trend]` in the wording of the reported number. Present = you are not yet in a position to say "no improvement" |
+| "The metric will not move" | **The criterion selects itself** — a filtering step removed the very failures it should detect; or an empty initial value makes the criterion trivially true | Does the criterion contain a filter, a threshold, an initial value? Write the criterion its own test case: one it *should* fire on |
+| "We tried that mechanism, it doesn't work" | What was tried was the **cheap approximation**. An approximation failing **cannot refute the original** | Is the card marked as an approximation |
+| "No better than the last version" | **The metric changed, or the data changed ⇒ the old curve is void.** You are comparing two different rulers | Do the run card's data hash and metric-script hash match |
+| "That fault is not serious for us" | **The share was quoted from another corpus.** In this repo: predicted 47%, measured on this corpus **4.62%** — an order of magnitude | Was that share measured on **the corpus this round will actually run** |
+| "All tests are green, so nothing is wrong" | Tests pin the **arithmetic**. They cannot pin **which corpus the input distribution came from** | Does the test construct its own input? If so ⇒ it knows nothing about the corpus |
 
 ---
 
-## 4. 停 ≠ 结束，停是**切换**
+## 4. Stopping ≠ finishing. Stopping is **switching**
 
-一轮停下来的正确产出不是"没什么可做的了"，而是三样东西（Stage 8）：
+The correct output of a round that stops is not "there is nothing left to do" but three things
+(Stage 8):
 
-1. **FINDINGS 重量** —— 病变了没有？各项份额现在是多少？下一轮的排序按这个来。
-2. **P（先验）更新** —— 这一轮哪些先验被数据修正了。‼️ 包括**赢了的那些**：
-   赢了但机理没验上，先验应该降而不是升。
-3. **`revive_if` 写全** —— 每条 ❌ 都要能被将来的某个测量唤醒。
-   ‼️ 四类死法的复活条件完全不同，混着写等于没写（见 `experiment-graph.md` 的 CLOSE）。
+1. **Re-weigh FINDINGS** — did the fault change? What are the shares now? The next round's
+   ordering comes from this.
+2. **Update P (the priors)** — which priors did the data correct this round. ‼️ Including
+   **the ones that won**: a win whose mechanism was never confirmed should *lower* the prior,
+   not raise it.
+3. **Fill in every `revive_if`** — every ❌ must be wakeable by some future measurement.
+   ‼️ The four kinds of death have completely different revival conditions, and writing them
+   interchangeably is the same as not writing them (see CLOSE in `experiment-graph.md`).
 
-**做完这三样，这一轮才算停得住** —— 否则下一轮会从零开始，把已经杀过的提案再提一遍。
+**Only with those three done has the round actually stopped** — otherwise the next round
+starts from zero and re-proposes what was already killed.
 
 ---
 
-## 5. 一个反向的提醒：也别无限探索
+## 5. One reminder in the other direction: do not explore forever either
 
-上面偏向"继续"，但有两条硬的退出条件，触发就必须停：
+The above leans toward "keep going", but there are two hard exit conditions, and hitting either
+means you must stop:
 
-- ‼️ **病不在架构里。** 如果最大的失败计数指向**数据 / 标注 / 采集缺口**，那么再优雅的架构改动
-  也只是在拟合一个错的目标。本 repo 有一条现成的：深度标签在 **25.3%** 的框上歧义 74–210 mm，
-  而那是**信息不在里面**，不是训练问题 —— 任何架构都突破不了。
-- **边际收益 < 一次测量的成本。** 当每条新臂的预期 delta 已经小于噪声底，
-  正确的动作是**去补噪声底或换语料**，不是再开一条臂。
+- ‼️ **The fault is not in the architecture.** If the largest failure count points at a
+  **data / annotation / capture gap**, then the most elegant architectural change is still
+  only fitting a wrong target. This repo has one ready-made: the depth label is ambiguous by
+  74–210 mm on **25.3%** of boxes, and that is **information that is not in there** rather
+  than a training problem — no architecture breaks through it.
+- **Marginal return < the cost of one measurement.** Once each new arm's expected delta is
+  already smaller than the noise floor, the right move is **to go measure the noise floor or
+  change corpus**, not to open another arm.
