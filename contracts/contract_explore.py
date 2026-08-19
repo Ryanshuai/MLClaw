@@ -1611,5 +1611,84 @@ class AFloorMeasuredBeforeMLClawMustBeWritable(GraphCase):
         self.assertEqual(out["noise_floor"]["status"], "verified")
         self.assertEqual(out["noise_floor"]["origin"], "mlclaw")
 
+class AConditionIsRetiredOnTheRecord(GraphCase):
+    """references/experiment-graph.md -> CLOSE, `conditional_on`; and §3.5's own reason
+    for reporting a dispute as `major` rather than `critical` — a finding that stops the
+    whole graph is one people learn to route around.
+
+    `close` stamps `conditional_on` and nothing clears it automatically, which is the
+    design. That left it with no way to be cleared at all — `set` refuses every settled
+    card and a card carrying this field is settled by construction — so
+    `condition_resolved_unreviewed` would report `major` for the rest of the round about
+    a verdict somebody had already re-read and had no way to say so about. A permanently
+    red check is not a strict check; it is a check with no readers.
+    """
+
+    def _conditional(self):
+        a, b = self.add_complete(), self.add_complete()
+        self.g("set", "--id", b, "--set",
+               "depends_on=" + json.dumps([{"id": a, "blocks": "reading"}]))
+        self.run_it(b)
+        self.fill(b)
+        self.g("close", "--id", b, "--verdict", "won")
+        return a, b
+
+    def test_a_condition_cannot_be_retired_while_it_is_still_open(self):
+        """Re-reading a verdict against something that has not landed is not a
+        re-reading. `check` calling it `minor` is already the correct state."""
+        a, b = self._conditional()
+        rc, out, err = self.g("reread", "--id", b, "--condition", a, "--note", "n")
+        self.assertNotEqual(rc, 0)
+        self.assertIn(b, [x["card"] for x in self.g("check")[1]["findings"]])
+        self.assertEqual(self.card(b)["conditional_on"], [a], "nothing was retired")
+
+    def test_retiring_it_records_who_looked_and_what_they_found(self):
+        a, b = self._conditional()
+        self.run_it(a)
+        self.fill(a)
+        self.g("close", "--id", a, "--verdict", "won")
+        rc, out, _ = self.g("reread", "--id", b, "--condition", a,
+                            "--note", "the sigma was calibrated; the delta stands")
+        self.assertEqual(rc, 0)
+        self.assertEqual(self.card(b)["conditional_on"], [])
+        h = self.card(b)["history"][-1]
+        self.assertEqual(h["reread"], a)
+        self.assertEqual(h["note"], "the sigma was calibrated; the delta stands")
+        self.assertEqual(h["condition_verdict"], "won",
+                         "what it was re-read AGAINST is half the record")
+
+    def test_the_major_finding_clears_only_by_that_route(self):
+        a, b = self._conditional()
+        self.run_it(a)
+        self.fill(a)
+        self.g("close", "--id", a, "--verdict", "won")
+        before = [x["invariant"] for x in self.g("check")[1]["findings"] if x["card"] == b]
+        self.assertIn("condition_resolved_unreviewed", before)
+        self.g("reread", "--id", b, "--condition", a, "--note", "checked")
+        after = [x["invariant"] for x in self.g("check")[1]["findings"] if x["card"] == b]
+        self.assertNotIn("condition_resolved_unreviewed", after)
+        self.assertNotIn("verdict_is_conditional", after)
+
+    def test_the_field_has_one_author(self):
+        """Two spellings for retiring a condition is how one of them stops recording
+        anything. `set` refuses it even where the settled guard would not."""
+        a, b = self._conditional()
+        rc, out, err = self.g("set", "--id", b, "--set", "conditional_on=[]")
+        self.assertNotEqual(rc, 0)
+        self.assertEqual(self.card(b)["conditional_on"], [a])
+
+    def test_retiring_a_condition_never_revises_the_verdict(self):
+        """If re-reading changed the answer that is a `dispute`: the losing card KEEPS
+        its verdict and gains `superseded_by`. An overturned conclusion and one that
+        never existed are different information (§3.5)."""
+        a, b = self._conditional()
+        self.run_it(a)
+        self.fill(a)
+        self.g("close", "--id", a, "--verdict", "won")
+        rc, out, _ = self.g("reread", "--id", b, "--condition", a, "--note", "n")
+        self.assertEqual(self.card(b)["verdict"], "won")
+        self.assertIn("dispute", out["note"])
+
+
 if __name__ == "__main__":
     unittest.main()

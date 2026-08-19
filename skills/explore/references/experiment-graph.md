@@ -13,7 +13,7 @@ the file" has an executor:
 
 ```bash
 python <mlclaw_root>/scripts/explore/graph.py <verb> --project <PROJECT>
-#   add   set   ready   fill   close   check   status
+#   add   set   ready   fill   close   reread   check   status
 ```
 
 The **ADD / TAKE / FILL / CLOSE** of the four sections below correspond to `add`+`set` /
@@ -249,9 +249,23 @@ condition**, which is CLAUDE.md's "Never silently" rule about re-reading a statu
 3. the condition lands and nobody re-reviews → `check` escalates to
    `condition_resolved_unreviewed` (major).
 
-‼️ **Nothing clears `conditional_on` automatically** — clearing it is a
-`set --set conditional_on=[]` performed by a person after review. A field that clears itself is
-the same as not having the field.
+4. somebody re-reads it → `graph.py reread --id N07 --condition N06 --note "<what it
+   showed>"`, which retires that one condition and writes the note, the upstream's verdict
+   and the timestamp into the card's history.
+
+‼️ **Nothing clears `conditional_on` automatically** — a field that clears itself is the same
+as not having the field. But it had no way to be cleared *at all* before `reread` existed:
+`set` refuses every settled card and a card carrying this field is settled by construction, so
+step 3's `major` would have stood for the rest of the round on a verdict somebody had already
+re-read and had no way to say so about. **A permanently red finding is how a checker becomes
+the thing people route around** — the reason §3.5 reports a dispute as `major` rather than
+`critical`, one turn further on.
+
+‼️ `reread` retires a condition; it never revises a verdict. If re-reading changed the answer,
+that is `dispute` — the losing card **keeps** its verdict and gains `superseded_by`, because a
+conclusion that was overturned and one that never existed are different information. `--note`
+is required for the same reason `dispute --note` is: the verdict does not say *why*, and why is
+the only part the next round can re-check.
 
 What if the condition really does not hold: **say so and stop the arm.** An arm overturned by
 its condition costs its own machine time; an arm not opened because it was waiting for a

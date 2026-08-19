@@ -875,6 +875,16 @@ def cmd_set(a):
             node[k] = json.loads(v)
         except json.JSONDecodeError:
             node[k] = v
+        if k == "conditional_on":
+            # Defensive, and honestly so: a card carrying `conditional_on` is settled by
+            # construction (only `close` writes it), so the SETTLED guard above already
+            # refuses first. This catches the hand-edited graph -- the case this file
+            # keeps a `state_drift` report for -- and it keeps `reread` the only spelling
+            # anywhere, so the field cannot come to have two authors.
+            broke("conditional_on is not edited directly -- `graph.py reread --id "
+                  f"{a.id} --condition <ID> --note '<what re-reading showed>'`. The "
+                  "field exists because nothing clears it on its own, and clearing it "
+                  "silently is the one move that makes that pointless")
         if k == "depends_on":
             # Refuse an unparseable edge here rather than let `check` report it
             # later: an edge whose kind nobody can read gates like `launch`, so
@@ -1155,6 +1165,57 @@ def cmd_close(a):
                         "those verdicts now and clear their `conditional_on`."
                         % ", ".join(out["re_read"]))
     emit(out)
+
+
+# ---------------------------------------------------------------- REREAD
+
+def cmd_reread(a):
+    """Retire one condition from a verdict, on the record.
+
+    `close` stamps `conditional_on` when a verdict lands ahead of a `reading` upstream,
+    and NOTHING clears it automatically -- that is the whole design. Which left it with no
+    way to be cleared AT ALL: `set` refuses every settled card, and a card carrying this
+    field is settled by construction. So `check`'s `condition_resolved_unreviewed` would
+    have gone on reporting `major` for the rest of the round, on a verdict somebody had
+    already re-read and had no way to say so about.
+
+    ‼️ **A permanently red check is how a checker becomes the thing people route around**
+    -- §3.5 says exactly this about disputes and then reports them as `major` for that
+    reason. A finding nobody can clear teaches the same lesson faster.
+
+    The `--note` is the part the next round can actually check.
+
+    Deliberately narrow: it retires a condition, it does not revise a verdict. If
+    re-reading changes the answer, that is `dispute` -- the losing card KEEPS its verdict
+    and gains `superseded_by`, because a conclusion that was overturned and one that never
+    existed are different information (§3.5).
+    """
+    p = _paths(a.project, a.session)
+    graph = _load(p["graph"], "graph")
+    node = _node(graph, a.id)
+    cond = node.get("conditional_on") or []
+    if a.condition not in cond:
+        refuse(f"card {a.id} is not conditional on {a.condition}",
+               fix=f"its open conditions are {cond or 'none'}")
+    by_id = {n["id"]: n for n in graph["nodes"]}
+    up = by_id.get(a.condition)
+    if not up or up.get("state") not in SETTLED:
+        refuse(f"{a.condition} is {up.get('state') if up else 'not in this graph'}, "
+               f"not settled",
+               fix="a condition cannot be re-read against something still open. Leave it "
+                   "standing -- `check` reports it as minor, which is the correct state")
+
+    node["conditional_on"] = [c for c in cond if c != a.condition]
+    node["history"].append({"at": now_utc(), "to": node.get("state"),
+                            "reread": a.condition, "note": a.note,
+                            "condition_verdict": up.get("verdict") or up.get("killed_by")})
+    graph["updated_at"] = now_utc()
+    atomic_write_json(p["graph"], graph)
+    emit({"id": a.id, "retired": a.condition,
+          "still_conditional_on": node["conditional_on"] or None,
+          "note": "verdict unchanged. If re-reading changed the answer, that is "
+                  "`dispute` -- an overturned conclusion and one that never existed are "
+                  "different information, and this verb cannot tell them apart"})
 
 
 # ---------------------------------------------------------------- DISPUTE
@@ -1699,6 +1760,16 @@ def main():
     s.add_argument("--id", required=True)
     s.add_argument("--set", action="append", metavar="FIELD=VALUE")
     s.set_defaults(fn=cmd_set)
+
+    rr = sub.add_parser("reread", help="retire one condition from a verdict, on the record")
+    common(rr)
+    rr.add_argument("--id", required=True)
+    rr.add_argument("--condition", required=True, help="the settled upstream re-read against")
+    rr.add_argument("--note", required=True,
+                    help="what re-reading it against that upstream showed. Required for "
+                         "the same reason `dispute --note` is: the verdict does not say "
+                         "WHY, and why is the only part the next round can re-check")
+    rr.set_defaults(fn=cmd_reread)
 
     r = sub.add_parser("ready", help="the ready set, and deadlocks")
     common(r)
