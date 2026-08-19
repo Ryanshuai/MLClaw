@@ -917,7 +917,7 @@ class TheDefaultPathCannotQuietlyAnswerAWeakerQuestion(ReproCase):
 
     Splitting the verdict words was half a fix. `measure_via` still DEFAULTED to
     `eval`, so the default path of a skill called `/repro` — the one a user reaches
-    by typing "复现一下" — ran inference over a val set and stamped a verdict that
+    by typing "just reproduce it" — ran inference over a val set and stamped a verdict that
     sounds like the one they asked for. A strict standard that the default route
     walks around is not a standard.
 

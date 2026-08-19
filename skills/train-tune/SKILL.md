@@ -33,7 +33,8 @@ is also the precondition this skill cannot check for itself.
 
 ## What this skill is not: `/explore`
 
-**`/train-tune` answers 「这个模型怎么配」. `/explore` answers 「这个模型该是什么」** —
+**`/train-tune` answers *how should this model be configured*. `/explore` answers *what should
+this model BE*** —
 structure, components, and network selection, down to whether this is the right family of
 model at all. Same layer, different unit and different precondition: `/explore`'s unit is a
 **proposal** (a hypothesis, a pre-registered criterion, a guardrail, a kill condition), and

@@ -353,7 +353,7 @@ def cmd_bundle(a):
                              or "not verified"),
             f"- clearance: **{cl.get('verdict') or 'not decided'}**"]
     if cl.get("blocked_by"):
-        note += ["", "‼️ 未放行："] + [f"- {b}" for b in cl["blocked_by"]]
+        note += ["", "‼️ NOT CLEARED:"] + [f"- {b}" for b in cl["blocked_by"]]
 
     rc, payload = _ara("build", "--project", project, "--root", root, "--out", out,
                        "--title", f"{rec.get('project')} — evacuated from "

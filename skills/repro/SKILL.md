@@ -126,7 +126,7 @@ Three metric verdicts, and the middle one is the loop:
 | `metric_verdict` | Meaning | Next |
 |---|---|---|
 | `reproduced` | the recorded value is inside the measured interval | Step 4 |
-| `inconclusive` | outside, but within one spread of the edge | **more repeats.** The interval is not yet wide enough to answer either way — this is what "反复做" is for |
+| `inconclusive` | outside, but within one spread of the edge | **more repeats.** The interval is not yet wide enough to answer either way — this is what repeating the whole procedure is for |
 | `diverged` | further out than the whole spread | Step 5 |
 
 `band` also reports how the declared tolerance compares to measured reality. Show that line to the user — it is usually the most surprising output of the whole session ("your ±0.5% default is 1.9× wider than this pipeline's real noise; it would have accepted a divergence twice the size of noise as a pass").

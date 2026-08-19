@@ -137,7 +137,7 @@ around, and nothing in the record says so afterwards.
 
 | | `/train-tune` | `/explore` |
 |---|---|---|
-| The question | **这个模型怎么配** — where is this model's operating point | **这个模型该是什么** — structure, components, network selection |
+| The question | **How should this model be configured** — where is its operating point | **What should this model BE** — structure, components, network selection |
 | Precondition | the architecture is **settled** | it is not, and settling it is the work |
 | Unit | one point in `runtime_params` | one **proposal**: a hypothesis, a pre-registered criterion, a guardrail, a kill condition |
 | What holds still | code SHA + dataset + split + mode + scope — the comparability contract that makes trials one *series* | nothing by construction: each arm is judged against its own control and a measured noise floor |
@@ -159,7 +159,7 @@ identity and the next round will read it as such.
 **`/explore` searches parameters too** — "necessary parameter search is part of exploring."
 Three shapes, and only the middle one is `/train-tune`'s:
 
-1. **The parameter IS the proposal** — 「是不是容量不够」, 「这个模块没用，是不是因为 lr 定得太保守」. That is a claim about *why* something came out flat, not an optimization; it gets a card and a pre-registered criterion like any other proposal, and it stays in `/explore`.
+1. **The parameter IS the proposal** — "maybe it just does not have the capacity", "maybe that module looks useless only because the lr was set too conservatively". That is a claim about *why* something came out flat, not an optimization; it gets a card and a pre-registered criterion like any other proposal, and it stays in `/explore`.
 2. **The architecture is settled and you want the best point on it** — `/train-tune`. This is the only shape whose output is a config.
 3. **A scoped tune inside one arm, so a ported component is judged at a fair operating point.** Legitimate and often necessary: a technique that is good at the paper's lr can be worthless at this repo's, and calling that a refutation is a false negative. Two conditions, both load-bearing — the result belongs to the **card**, not to the model (it does not become the project's config), and **the control arm gets the same budget**. Tuning only the treatment arm and comparing it against a control on defaults manufactures an improvement out of the search budget, and afterwards the two arms' records look identical.
 

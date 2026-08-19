@@ -97,7 +97,8 @@ class EvacCase(TempDirCase):
 # ---------------------------------------------------------------------------
 
 class AFileThatExistsIsNotAFileThatArrived(EvacCase):
-    """The recorded failure, several times over: 「拉一半，然后不管了」.
+    """The recorded failure, several times over: it transfers half-way, and then
+    nobody looks.
 
     `os.path.exists` returns true for a half-written checkpoint, and so does any
     check built on 「is it there」. The file has a plausible name, a plausible

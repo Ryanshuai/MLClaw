@@ -20,14 +20,15 @@ __pycache__/
 # not be committed is the ~200-directory materialised env under it.
 .pixi/
 
-# agent-refactor 工作目录（脚本产物 + state.json）
+# agent-refactor's working directory (script output + state.json)
 .agent-refactor/
 
-# skill-creator 的脚手架和工作目录
+# skill-creator's scaffolding and working directory
 .claude/skills/skill-creator/
 skill-creator-workspace/
 
-# SkillOpt-Sleep 的工作目录（staging 产物 + handoff 中间态，含每晚归档的 .doneNN 变体）
+# SkillOpt-Sleep's working directory (staging output + handoff intermediates,
+# including the nightly-archived .doneNN variants)
 .skillopt-sleep/
 .skillopt-sleep-handoff/
 .skillopt-sleep-handoff.night*.done/
