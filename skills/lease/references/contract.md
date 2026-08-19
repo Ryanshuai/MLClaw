@@ -5,7 +5,7 @@ provider under `scripts/lease/provider_<name>.py`, plus one machine-type table
 `machines_<name>.json`.
 
 Everything else in MLClaw is provider-blind. Run skills already reach a machine with
-SSH + rsync + tmux (`references/run-mechanics.md` "Path Mapping (Cross-Machine Execution)", `/train-run` Execution Modes); this
+SSH + rsync + tmux (`<mlclaw_root>/references/run-mechanics.md` "Path Mapping (Cross-Machine Execution)", `/train-run` Execution Modes); this
 contract only answers **where that machine comes from and when it dies**. Nothing
 downstream of `addr` may branch on provider name.
 
@@ -51,7 +51,7 @@ If a run skill ever needs to know whether it's on rented hardware, the contract 
 
 `history` is the odd one and the reason the count changed: the other seven describe
 machines that exist, and it is the only one that can speak about a machine that does
-not. See `references/fleet.md` "The two questions, and why one list cannot answer both".
+not. See `<mlclaw_root>/references/fleet.md` "The two questions, and why one list cannot answer both".
 
 | Verb | Signature | Must hold |
 |---|---|---|
@@ -332,7 +332,7 @@ agent disappears, the box expires on its own. This is strictly stronger than a t
 ledger row, which id-matching cannot do (one lease may hold many units). Project and run travel
 as separate metadata. `sweep` queries the cloud by tag prefix and must
 succeed with no local state at all. This is why the lease file is not a violation of
-MLClaw's "no separate index" doctrine (`references/run-mechanics.md` "Listing runs (no separate index)") — the cloud API is the
+MLClaw's "no separate index" doctrine (`<mlclaw_root>/references/run-mechanics.md` "Listing runs (no separate index)") — the cloud API is the
 source of truth, the file is a hint list.
 
 Rented boxes genuinely cannot be enumerated by scanning `run.json`: a box outlives its

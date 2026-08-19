@@ -236,7 +236,7 @@ behind it was right.
   training run cites a snapshot and this skill does not make one. On INCOMPLETE or UNARCHIVED,
   nothing — those are the user's to act on, and offering a next skill buries them.
 
-Per `references/skill-graph.md` -> "Workflow State Protocol", push to the stack on entry and pop on exit. Use
+Per `<mlclaw_root>/references/skill-graph.md` -> "Workflow State Protocol", push to the stack on entry and pop on exit. Use
 `stage: null` and `execution: <census_id>` once a scan has run; `step` is one of `declare` / `scan`
 / `snapshot`. **Pop before reporting a long verdict list** — a census is not unfinished work, and
 leaving it on the stack opens the next session with a false resume prompt.

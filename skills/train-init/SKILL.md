@@ -47,7 +47,7 @@ Ask one question at a time. Training has more knobs than infer/eval (lr, bs, epo
 
 ## On entry
 
-Follow `references/skill-graph.md` -> "Workflow State Protocol": push to stack, check dependencies (project.json exists, code available), locate project, resolve code directory.
+Follow `<mlclaw_root>/references/skill-graph.md` -> "Workflow State Protocol": push to stack, check dependencies (project.json exists, code available), locate project, resolve code directory.
 
 **Settle `provenance.json -> source_mode` first** — it decides whether the steps below ask or excavate. Infer a default and confirm in one line rather than asking cold:
 
@@ -127,7 +127,7 @@ Determine:
 - **distributed**: `single_gpu`, `ddp`, `fsdp`, `deepspeed_zero{1,2,3}`, `tensor_parallel`, or `""` if single-process
 - **Resources** → fill `config.json -> resources` (gpu_count, gpu_memory_gb, expected_duration_h)
 - **Artifacts** → pretrained backbone, tokenizer, base ckpt (for fine-tune / training extension)
-  - **If there is a base ckpt, this stage is a fine-tune, and that changes what `output.json` has to carry.** `/train-run` will measure that base on this run's data before launching, so work out *how* now, while the eval path is in front of you, and record it as `output.json -> baseline_measurement`: the command or API call, and the settings dict it must use. `null` is a legitimate answer with a reason — what is not legitimate is leaving it unasked, because at launch time the question surfaces as "skip it, we can measure later", and later never comes. Rationale and the two refusals it feeds: `references/run-mechanics.md` → "Baseline measurement (fine-tune only)".
+  - **If there is a base ckpt, this stage is a fine-tune, and that changes what `output.json` has to carry.** `/train-run` will measure that base on this run's data before launching, so work out *how* now, while the eval path is in front of you, and record it as `output.json -> baseline_measurement`: the command or API call, and the settings dict it must use. `null` is a legitimate answer with a reason — what is not legitimate is leaving it unasked, because at launch time the question surfaces as "skip it, we can measure later", and later never comes. Rationale and the two refusals it feeds: `<mlclaw_root>/references/run-mechanics.md` → "Baseline measurement (fine-tune only)".
   - Fill the settings from what the **base checkpoint itself records**, not from the library's defaults — most frameworks bury evaluation-shaping flags (mask overlap, NMS iou, letterboxing, max detections) in defaults that differ from what the weights were trained under, and a measurement taken at the default produces a plausible number that is not comparable to anything published for those weights.
 - **Inputs** → train images/text + train labels + val images/text + val labels
 - **Ground truth pairing** → directory parallel / coco json / hf datasets / yolo txt
@@ -333,7 +333,7 @@ This step has no equivalent in infer-init / eval-init. Training emits metrics co
 
 Record in `output.json -> metrics.log_format` and `metrics.log_path`. Both name
 **the source** — what the code writes. What `/train-run` reads is the normalized
-stream; see `references/run-mechanics.md` → "Metric stream".
+stream; see `<mlclaw_root>/references/run-mechanics.md` → "Metric stream".
 
 **Record what you found, then say what it costs.** `references/schemas.md` →
 `output.json -> metrics` owns the per-row detail (what "never executed" means for

@@ -156,7 +156,7 @@ Ask what else to check. Domain checks are the point of a conversational tool —
 "aspect ratio over 10:1", "anything the vendor touched last week". Write and run it. Record it in
 `audit.json -> ad_hoc`; when the same one recurs across audits, that is the signal to promote it to a
 numbered step above, which is the same promotion rule as `steps.ad_hoc` in
-`references/skill-graph.md`.
+`<mlclaw_root>/references/skill-graph.md`.
 
 Keep asking until the user says done.
 
@@ -228,7 +228,7 @@ promotion by recurring, it earns a script.
   - clean → whatever the user was heading for: `/train-run`, `/eval-run`.
   - `/data-audit-report` whenever there is anything a person should look at rather than read.
 
-Per `references/skill-graph.md` → "Workflow State Protocol", push on entry and pop on exit.
+Per `<mlclaw_root>/references/skill-graph.md` → "Workflow State Protocol", push on entry and pop on exit.
 `stage: null` (a dataset is not a stage — same reason as `/data-check`), `execution: <audit_id>`,
 `step` one of `integrity` / `compatibility` / `consistency` / `statistics` / `schema_diff` /
 `ad_hoc` / `record`. Unlike a census, an audit **does** have a step chain and is resumable: it is a

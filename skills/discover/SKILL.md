@@ -406,6 +406,6 @@ rather than a fixed string.
   `/ask-human` for anything `gone` or still only `claim`ed, while there is somebody to ask;
   `/resources` when `sources` says the blocker is credentials.
 
-Per `references/skill-graph.md` -> "Workflow State Protocol", push on entry and pop on exit. `stage: null`,
+Per `<mlclaw_root>/references/skill-graph.md` -> "Workflow State Protocol", push on entry and pop on exit. `stage: null`,
 `execution: null` — a sweep is an observation, not an execution to resume, and the leads file is what
 persists.

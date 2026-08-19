@@ -14,7 +14,7 @@ description: >
 
 Execute one round of refactoring on `stages/refactor/code/`. Each invocation = one round.
 
-One question at a time. Push/pop `history.json` stack per "Workflow State Protocol" in `references/skill-graph.md`. **And only what only they know** — a value you can read is not a question, and a value nobody has is recorded absent rather than asked for: CLAUDE.md "Decide what evidence can decide".
+One question at a time. Push/pop `history.json` stack per "Workflow State Protocol" in `<mlclaw_root>/references/skill-graph.md`. **And only what only they know** — a value you can read is not a question, and a value nobody has is recorded absent rather than asked for: CLAUDE.md "Decide what evidence can decide".
 
 **Requires**: `plan.json` exists with non-empty `modules` (otherwise offer `/refactor-init`). Credentials checked lazily.
 
@@ -123,7 +123,7 @@ Verification uses a cost-efficient hierarchy — only escalate when the current 
 
 **Tier 0 can short-circuit everything**: if static analysis proves the deletion is safe (zero surviving references), skip Tiers 1-3 entirely and go straight to commit.
 
-When a tier requires actually launching the user's code (Tier 1+ smoke / mini / full benchmark), follow `references/run-mechanics.md` "Run Skill Internal Dependencies" Step 2 (`code_snapshot.py` for SHA + dirty patch) and Step 3 (`cwd` = unified code_dir, `output_dir` = absolute under `<RUN_DIR>/output/`). Refactor-run is the exception in that the code_dir is `stages/refactor/code/` directly (no `_source` symlink — refactor edits in place); the cwd / output_dir / snapshot rules still apply.
+When a tier requires actually launching the user's code (Tier 1+ smoke / mini / full benchmark), follow `<mlclaw_root>/references/run-mechanics.md` "Run Skill Internal Dependencies" Step 2 (`code_snapshot.py` for SHA + dirty patch) and Step 3 (`cwd` = unified code_dir, `output_dir` = absolute under `<RUN_DIR>/output/`). Refactor-run is the exception in that the code_dir is `stages/refactor/code/` directly (no `_source` symlink — refactor edits in place); the cwd / output_dir / snapshot rules still apply.
 
 Read `references/verification-tiers.md` for detailed tier descriptions, Phase 1 vs Phase 2 variants, graph comparison methods, tensor snapshot procedures, tolerance values, and JSON recording schemas.
 
@@ -137,7 +137,7 @@ Step key: `compare`. Only applies when Tier 3 or Tier 4 was run; skip if only Ti
 
 For **Tier 3, compare against a pre-refactor mini baseline** instead: the same fixed subset, run on the original code before this round. That comparison is valid, and it's what mini benchmarks are actually for — detecting regression, not verifying absolute correctness. Record the subset identity (explicit sample list, or seed + count) in `run.json -> scope` so later rounds reuse the identical subset; a mini baseline over a *different* 100 samples is not a baseline. If no pre-refactor mini baseline exists yet, produce one from `original/` before judging this round.
 
-Also set `run.json -> mode` / `scope` on the verification run: Tier 3 → `mode: "debug"` with the subset in `scope`; Tier 4 → `mode: "production"`. This keeps mini numbers out of every downstream comparison automatically (`references/run-mechanics.md` "Metric comparability").
+Also set `run.json -> mode` / `scope` on the verification run: Tier 3 → `mode: "debug"` with the subset in `scope`; Tier 4 → `mode: "production"`. This keeps mini numbers out of every downstream comparison automatically (`<mlclaw_root>/references/run-mechanics.md` "Metric comparability").
 
 Tier 4 — extract metrics (same as `/eval-run` Step 4), compare against `plan.json -> paper.benchmarks`:
 ```
@@ -172,7 +172,7 @@ Step key: `commit_or_revert`.
 
 Step key: `finalize`.
 
-1. Finalize `run.json` via `python <mlclaw_root>/scripts/shared/finalize_run.py <RUN_DIR>/run.json completed` (status, duration, metrics), then fill `metrics` by hand. Read the script's `warnings` — a null `duration_s` with no stated reason is indistinguishable from a round that never started. Round dirs are likewise created with `shared/create_run.py`, not by hand: it allocates a collision-free `run_id` and writes `created_at` as UTC-with-offset, which is what makes cross-machine ordering correct. No separate index file — `run.json` is the source of truth (see `references/run-mechanics.md` "Listing runs (no separate index)").
+1. Finalize `run.json` via `python <mlclaw_root>/scripts/shared/finalize_run.py <RUN_DIR>/run.json completed` (status, duration, metrics), then fill `metrics` by hand. Read the script's `warnings` — a null `duration_s` with no stated reason is indistinguishable from a round that never started. Round dirs are likewise created with `shared/create_run.py`, not by hand: it allocates a collision-free `run_id` and writes `created_at` as UTC-with-offset, which is what makes cross-machine ordering correct. No separate index file — `run.json` is the source of truth (see `<mlclaw_root>/references/run-mechanics.md` "Listing runs (no separate index)").
 2. Pop from `history.json` stack, append `completed`.
 
 Show progress:

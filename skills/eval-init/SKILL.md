@@ -24,7 +24,7 @@ Ask one question at a time. Users find it overwhelming when asked to fill multip
 
 ## On entry
 
-Follow `references/skill-graph.md` -> "Workflow State Protocol": push to stack, check dependencies (project.json exists, code available), locate project, resolve code directory. These are all documented in CLAUDE.md — follow them, don't duplicate them here.
+Follow `<mlclaw_root>/references/skill-graph.md` -> "Workflow State Protocol": push to stack, check dependencies (project.json exists, code available), locate project, resolve code directory. These are all documented in CLAUDE.md — follow them, don't duplicate them here.
 
 ## Output: 4 JSON files
 
@@ -193,7 +193,7 @@ This matters more in eval than anywhere else, because **eval params shape the me
 
 Cheap checks: `grep -rn "conf_thres\|confidence\|nms" --include=*.py <code_dir>` then read the use site; `python eval.py --help` confirms which flags actually exist.
 
-**3d. Record**: selected params → `config.json → runtime_params` (**effective values** — what the code runs with, not what the yaml declares) with `${artifact.xxx}` / `${input.xxx}` references. Each key also gets a `config.json → param_injection.items` entry recording `via` / flag-or-key / `overridable` / `evidence` (`path:line`), per `references/run-mechanics.md` "Launch contract (Step 3 detail)" rule 3. Params found `overridable: false` must **not** go into `runtime_params` — keep them in `param_injection` with a note and tell the user which line to edit to change them. Unselected params stay in original config files untouched.
+**3d. Record**: selected params → `config.json → runtime_params` (**effective values** — what the code runs with, not what the yaml declares) with `${artifact.xxx}` / `${input.xxx}` references. Each key also gets a `config.json → param_injection.items` entry recording `via` / flag-or-key / `overridable` / `evidence` (`path:line`), per `<mlclaw_root>/references/run-mechanics.md` "Launch contract (Step 3 detail)" rule 3. Params found `overridable: false` must **not** go into `runtime_params` — keep them in `param_injection` with a note and tell the user which line to edit to change them. Unselected params stay in original config files untouched.
 
 ## Step 4: Present Each File for Review
 
@@ -248,4 +248,4 @@ Don't save if there are broken references — the user needs to fix those first,
 
 ## Step 6: Save
 
-Write all 4 JSON files to `{project.root}/stages/evaluation/`. Create `stages/evaluation/assets/` if needed. Update workflow state per `references/skill-graph.md`. Offer `/eval-run` as next step.
+Write all 4 JSON files to `{project.root}/stages/evaluation/`. Create `stages/evaluation/assets/` if needed. Update workflow state per `<mlclaw_root>/references/skill-graph.md`. Offer `/eval-run` as next step.

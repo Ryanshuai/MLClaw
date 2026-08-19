@@ -9,7 +9,7 @@ Generate a self-contained HTML report documenting the entire refactoring process
 
 Ask one question at a time — multiple questions at once overwhelms users. **And only what only they know** — a value you can read is not a question, and a value nobody has is recorded absent rather than asked for: CLAUDE.md "Decide what evidence can decide".
 
-Follow `references/skill-graph.md` -> "Workflow State Protocol": push on entry, update step as you progress, pop on completion.
+Follow `<mlclaw_root>/references/skill-graph.md` -> "Workflow State Protocol": push on entry, update step as you progress, pop on completion.
 
 **Requires**: at least one `{PROJECT}/stages/refactor/runs/*/run.json`. If none, offer `/refactor-run`.
 

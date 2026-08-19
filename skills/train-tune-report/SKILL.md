@@ -31,7 +31,7 @@ do reasoning, but humans read this to understand what happened.
 
 ## On entry
 
-Follow `references/skill-graph.md` -> "Workflow State Protocol". Stage = `training`. Upstream check:
+Follow `<mlclaw_root>/references/skill-graph.md` -> "Workflow State Protocol". Stage = `training`. Upstream check:
 at least one run with `lineage.session = <id>` must exist.
 
 ## Step 1: Resolve Session

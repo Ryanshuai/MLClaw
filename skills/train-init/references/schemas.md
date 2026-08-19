@@ -281,7 +281,7 @@ For items inherited from someone else — a handed-over checkpoint, a paper's re
 | `claimed` | the author's / wandb's recorded number, not re-checked |
 | `asked` | told verbally, no artifact backs it |
 
-**`scope` and `confidence` are both required.** Without scope, the number can't be compared to anything (see `references/run-mechanics.md` "Metric comparability"). Without confidence, a `claimed` number gets treated as ground truth — and inherited unverified metrics are the most damaging fake metrics there are, because everything downstream is calibrated against them. Authors misremember, hand over the wrong file, or forget TTA was enabled.
+**`scope` and `confidence` are both required.** Without scope, the number can't be compared to anything (see `<mlclaw_root>/references/run-mechanics.md` "Metric comparability"). Without confidence, a `claimed` number gets treated as ground truth — and inherited unverified metrics are the most damaging fake metrics there are, because everything downstream is calibrated against them. Authors misremember, hand over the wrong file, or forget TTA was enabled.
 
 **Promote `claimed` → `verified` by re-running eval with this ckpt.** That single run validates the preprocessing chain, the data, the metric definition, and the environment simultaneously — it's the best acceptance test a handover has. Record the verifying run's ID in `source` when you do.
 
@@ -358,7 +358,7 @@ What happens to an input before the model sees it. Read out of code, so every bl
 `log_format` names **the source** — what the training code itself writes. It says
 nothing about what `/train-run` reads: that is always the normalized stream at
 `<RUN_DIR>/stream.jsonl`, one shape regardless of source. See
-`references/run-mechanics.md` → "Metric stream" for the vocabulary and
+`<mlclaw_root>/references/run-mechanics.md` → "Metric stream" for the vocabulary and
 the normalizer's rules.
 
 | Value | What the code does | Normalizer |

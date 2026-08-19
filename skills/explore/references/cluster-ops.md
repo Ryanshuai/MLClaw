@@ -2,7 +2,7 @@
 
 ‼️ **在 MLClaw 里，这一层已经有主人了。** 租机器是 `/lease`（七个动词 + history），
 一次搜索同时握 N 台是 `scripts/shared/pool.py`，分层规则在
-`references/fleet.md`。**开臂之前读那份，不是这份。**
+`<mlclaw_root>/references/fleet.md`。**开臂之前读那份，不是这份。**
 
 这份留下来的是 `fleet.md` **没有**的那半 —— 容量的判断，而不是持有的机制：
 

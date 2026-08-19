@@ -122,5 +122,5 @@ plan does, so read the plan.
 - **Suggests**: `/data-check scan` again afterwards, so the census reflects the disk; then `/data`,
   which will now report anything the deletion pushed below its replication floor.
 
-Per `references/skill-graph.md` -> "Workflow State Protocol", push on entry and pop on exit. `stage: null`,
+Per `<mlclaw_root>/references/skill-graph.md` -> "Workflow State Protocol", push on entry and pop on exit. `stage: null`,
 `execution: <retire_id>`.

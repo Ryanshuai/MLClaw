@@ -40,7 +40,7 @@ python $S/lease.py renew   <lease_id> --ttl-s <n>
 python $S/lease.py release <lease_id>
 ```
 
-`up` returns a `reach://` handle; from there proceed exactly as `references/run-mechanics.md` "Path Mapping (Cross-Machine Execution)" and
+`up` returns a `reach://` handle; from there proceed exactly as `<mlclaw_root>/references/run-mechanics.md` "Path Mapping (Cross-Machine Execution)" and
 `/train-run` Execution Modes already specify. Nothing downstream may branch on provider name.
 
 **Re-resolve with `addr` rather than storing what `up` returned.** A stop/start hands the
@@ -50,7 +50,7 @@ checking, ssh then connects to a stranger's machine without complaining.
 **Holding several at once is not this layer's job.** `scripts/shared/pool.py`
 is the caller above — it fills owned hardware before anything that bills, states the cost
 of the whole fleet once before acquiring it, and knows that a preempted trial is not a
-refuted one. `references/fleet.md` is its authority; read that, not this file,
+refuted one. `<mlclaw_root>/references/fleet.md` is its authority; read that, not this file,
 before a search opens more than one machine.
 
 **What L3 owns, and L2 deliberately does not:**

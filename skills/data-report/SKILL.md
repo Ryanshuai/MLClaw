@@ -125,5 +125,5 @@ never more than a day behind the world. That is real freshness. Polling is not.
   line"), and this page is a reading surface, not a router. When the user's question narrows from
   "what is the state of everything" to one dataset, hand over to `/data`.
 
-Per `references/skill-graph.md` -> "Workflow State Protocol", push on entry and pop on exit — `stage: null`,
+Per `<mlclaw_root>/references/skill-graph.md` -> "Workflow State Protocol", push on entry and pop on exit — `stage: null`,
 `execution: null`. Rendering is not an execution to resume.

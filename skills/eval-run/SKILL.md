@@ -17,7 +17,7 @@ Execute an evaluation run: resolve sources (including ground truth), run the eva
 
 **One question at a time** — asking multiple questions at once is overwhelming. Ask one, record, ask next. **And only what only they know** — a value you can read is not a question, and a value nobody has is recorded absent rather than asked for: CLAUDE.md "Decide what evidence can decide".
 
-**Workflow state, dependency checks, locate project, variable references** — follow `references/skill-graph.md` (state protocol + the requires/suggests table) and `references/layout.md` (Variable Reference Syntax). Stage = `evaluation`, upstream = `/eval-init` (check `config.json -> entry_command` non-empty).
+**Workflow state, dependency checks, locate project, variable references** — follow `<mlclaw_root>/references/skill-graph.md` (state protocol + the requires/suggests table) and `<mlclaw_root>/references/layout.md` (Variable Reference Syntax). Stage = `evaluation`, upstream = `/eval-init` (check `config.json -> entry_command` non-empty).
 
 ## Fork Check
 
@@ -29,15 +29,15 @@ If skip: fresh run, `fork_of = null`.
 
 ## Steps 1-3: Shared Run Mechanics
 
-Follow `references/run-mechanics.md` "Run Skill Internal Dependencies" for the shared step flow:
+Follow `<mlclaw_root>/references/run-mechanics.md` "Run Skill Internal Dependencies" for the shared step flow:
 
 1. **Resolve Assets** (step `resolve_assets`) — fill concrete paths in `artifacts.json`, `input.json` sources, AND `input.json -> ground_truth -> sources`. Ground truth sources are what makes eval different from inference.
 
-   **`/eval-init` Step 1b now fills `candidates`, so choose from them rather than asking for paths** — every `match` value routes somewhere and none may be silently filtered: `references/run-mechanics.md` → "Asset resolution (Step 1 detail)". Two of them are specific to this stage and both are refusals, not questions: a checkpoint cited as `run:training/<run_id>` must belong to a `mode: "production"` run, and a data candidate whose `samples` differs from `config.json -> dataset.num_samples` is measuring something else — that is `mismatch`, and running it produces a real number that is comparable to no baseline. Only fall back to asking path by path when there is no `candidates` block at all (an `input.json` written before Step 1b existed).
+   **`/eval-init` Step 1b now fills `candidates`, so choose from them rather than asking for paths** — every `match` value routes somewhere and none may be silently filtered: `<mlclaw_root>/references/run-mechanics.md` → "Asset resolution (Step 1 detail)". Two of them are specific to this stage and both are refusals, not questions: a checkpoint cited as `run:training/<run_id>` must belong to a `mode: "production"` run, and a data candidate whose `samples` differs from `config.json -> dataset.num_samples` is measuring something else — that is `mismatch`, and running it produces a real number that is comparable to no baseline. Only fall back to asking path by path when there is no `candidates` block at all (an `input.json` written before Step 1b existed).
 
    For server matching, connectivity tests, and credential flows, see run-mechanics "Run Skill Internal Dependencies" Step 1. Scripts in `scripts/shared/` (test_connection.py, etc). If any script fails, do the same work manually with Bash.
 2. **Create Run** (step `create_run`) — create run dir, initialize run.json, code snapshot, env snapshot, dependency check. Scripts: `create_run.py`, `capture_env.py`, `check_deps.py` (all in `scripts/shared/`). For code source resolution and environment resolution, see CLAUDE.md conventions.
-3. **Build & Execute** (step `execute`) — resolve `${}` references, then build the command **per-param from `config.json -> param_injection.items`** (`references/run-mechanics.md` "Launch contract (Step 3 detail)" rule 3), not by guessing from `config_format`. A `runtime_params` key with no entry, or one marked `overridable: false`, is an error — stop and ask. For eval this is the difference between a real threshold sweep and five runs that silently share one threshold. Set `run.json -> mode` and `scope` before launching. Save `config_snapshot.json` and `sources.json` (including GT sources), confirm with user.
+3. **Build & Execute** (step `execute`) — resolve `${}` references, then build the command **per-param from `config.json -> param_injection.items`** (`<mlclaw_root>/references/run-mechanics.md` "Launch contract (Step 3 detail)" rule 3), not by guessing from `config_format`. A `runtime_params` key with no entry, or one marked `overridable: false`, is an error — stop and ask. For eval this is the difference between a real threshold sweep and five runs that silently share one threshold. Set `run.json -> mode` and `scope` before launching. Save `config_snapshot.json` and `sources.json` (including GT sources), confirm with user.
 
 ### Execution Modes
 
@@ -61,7 +61,7 @@ Then ask local or server:
 - **Local**: run in background (`run_in_background`), log to `{RUN_DIR}/logs/`. Return immediately so the user can continue working. They can check back with `/eval-run` again, or `/loop 5m /eval-run` for auto-polling.
 - **Remote**: resolve server from resources.json, use `python_path` from server entry. SCP config + run.sh to server, launch in tmux. Return immediately.
 
-For local/remote execution details and path mapping, see `references/run-mechanics.md` "Run Skill Internal Dependencies" Step 3 and "Path Mapping".
+For local/remote execution details and path mapping, see `<mlclaw_root>/references/run-mechanics.md` "Run Skill Internal Dependencies" Step 3 and "Path Mapping".
 
 ### Status Check
 
@@ -98,7 +98,7 @@ After execution finishes:
        mAP_small: 0.289  (-0.003, -1.0%)  <- regression
      ```
 
-6. **Alias** — ask user for optional alias/description; write into `run.json -> alias` / `description`. No separate index file to update — `run.json` files are the source of truth, queried on demand via `shared/list_runs.py` (see `references/run-mechanics.md` "Listing runs (no separate index)").
+6. **Alias** — ask user for optional alias/description; write into `run.json -> alias` / `description`. No separate index file to update — `run.json` files are the source of truth, queried on demand via `shared/list_runs.py` (see `<mlclaw_root>/references/run-mechanics.md` "Listing runs (no separate index)").
 
 7. **Offer baseline update** — "Set this run as the new baseline?" **Only offer this for `mode: "production"` runs at full `scope`.** A debug run must never become the baseline: every future comparison would silently inherit the error, and the person reading those diffs months later has no way to see why the numbers look off. If the current run is debug, skip this step and say why. If yes, update `output.json -> metrics.baseline` to this run's ID.
 
@@ -114,7 +114,7 @@ After execution finishes:
    Outputs: results.json (45KB), confusion_matrix.png (120KB)
    ```
 
-9. **Downstream suggestion** — offer `/eval-report` (per `references/skill-graph.md` -> "Skill Dependency Graph"). If user accepts, invoke as sub-skill following Workflow State Protocol.
+9. **Downstream suggestion** — offer `/eval-report` (per `<mlclaw_root>/references/skill-graph.md` -> "Skill Dependency Graph"). If user accepts, invoke as sub-skill following Workflow State Protocol.
 
 10. Pop from workflow stack, append `completed` to history.
 

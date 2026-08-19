@@ -86,7 +86,7 @@ One question at a time, and **only what only they know** — a value you can rea
 
 **The spec is not paperwork.** Two annotation batches labeled under different guidelines are
 different distributions. Train on the union and the model degrades with nothing raised anywhere —
-the identical failure shape as `references/run-mechanics.md` "Preprocessing contract (cross-stage)", one domain over.
+the identical failure shape as `<mlclaw_root>/references/run-mechanics.md` "Preprocessing contract (cross-stage)", one domain over.
 `send` refuses without either `--spec` or an explicit `--no-spec`, so that its absence is
 something someone typed rather than something that just didn't happen. When the user has no
 written spec, the right move is usually to write one with them in three lines and snapshot that —
@@ -195,7 +195,7 @@ entry, and the consuming run cites `handoffs/<handoff_id>` in `run.json -> linea
   `/eval-init` if the stage is unconfigured, `/train-run` or `/eval-run` if it is. On
   `close --reject`, `send --rework`.
 
-Per `references/skill-graph.md` -> "Workflow State Protocol", push to the stack on entry and pop on exit. Use
+Per `<mlclaw_root>/references/skill-graph.md` -> "Workflow State Protocol", push to the stack on entry and pop on exit. Use
 `execution: <handoff_id>` and `stage: <the stage it serves, or null>`; `step` is one of
 `send` / `await` / `receive` / `close`. A handoff sitting at `await` is the expected long-lived
 state and is **not** unfinished work to resume — the stack entry should be popped after `send`

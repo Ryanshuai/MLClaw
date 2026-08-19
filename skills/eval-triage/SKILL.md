@@ -122,4 +122,4 @@ Then hand each pile to its owner:
 - **Requires**: an evaluation run with `status: "completed"`, and `stages/evaluation/output.json -> per_sample.path` non-null. Missing the second is `/eval-init` Step 1c — offer it rather than ranking something invented.
 - **Suggests**: whatever the piles named. `/data-label` on `label_wrong`; the data line on `sample_hard`; `/train-init` or a `/train-run` fork on `model_wrong`. **Never `/eval-run` "to try again"** — the same rule `/repro` follows, and for the same reason: re-measuring is not a fix.
 
-Per `references/skill-graph.md` -> "Workflow State Protocol", push on entry and pop on exit — `stage: "evaluation"`, `execution: <eval run_id>`, `step: null` (a triage has no step chain; its state is `status`, because the work is a person looking at images and there is no process to step through).
+Per `<mlclaw_root>/references/skill-graph.md` -> "Workflow State Protocol", push on entry and pop on exit — `stage: "evaluation"`, `execution: <eval run_id>`, `step: null` (a triage has no step chain; its state is `status`, because the work is a person looking at images and there is no process to step through).

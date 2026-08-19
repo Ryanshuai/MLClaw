@@ -54,6 +54,50 @@ __pycache__/
 .idea/
 """
 
+# Written into every project root. A POINTER, never a copy: the ten "Never
+# silently" rules duplicated here would drift from the ones that are enforced,
+# and a stale copy of a safety rule is worse than none.
+#
+# It exists because installing MLClaw as a plugin makes the SKILLS reach a
+# project directory but not the CONTEXT they assume. `CLAUDE.md` is read from
+# the working directory and its parents, so standing in a project the routing
+# table and the delete rules are simply absent -- and nothing reports it.
+# `references/layout.md` -> "Working directory" is where that is written down.
+PROJECT_CLAUDE_MD = """\
+# {name} — an MLClaw project
+
+A **record**, not a codebase: JSON configs, run records, and what was measured.
+The code that trains lives elsewhere, reached through `stages/<stage>/code/_source`.
+
+## ‼️ Read this before touching anything here
+
+```
+{mlclaw_root}/CLAUDE.md
+```
+
+Everything that says what must never happen *silently* — deleting a checkpoint
+nothing ranked, recording a metric nobody read, letting somebody's word become a
+checked fact, releasing a machine you did not evacuate — is in that file and is
+**absent from this directory**. Installed as a plugin, MLClaw's skills reach you
+anywhere; its rules do not, because `CLAUDE.md` is read from the working
+directory and its parents. Nothing reports the difference. That is the whole
+reason this file exists.
+
+Its routing table is also what says which reference to open next, and every
+skill's requirement check sits one hop past it.
+
+## If that path is wrong
+
+Recorded when this project was created. If the MLClaw checkout moved, or this
+project was copied to another machine, re-resolve and correct the line above:
+
+```bash
+python <any MLClaw checkout>/scripts/shared/workspaces.py register-tool
+python <any MLClaw checkout>/scripts/shared/workspaces.py tool
+```
+"""
+
+
 # Project-level templates copied from lifecycle/ into a new project root.
 # resources.json is deliberately absent: it is workspace-level, not
 # project-level (see bootstrap_workspace_resources).
@@ -456,6 +500,22 @@ def main():
 
     with open(os.path.join(root, ".gitignore"), "w") as f:
         f.write(GITIGNORE)
+
+    # Never over an existing one: a project root may predate this invocation and
+    # carry a CLAUDE.md the user wrote. Warn instead -- the pointer is worth
+    # having, but not at the price of silently replacing somebody's own file.
+    claude_md = os.path.join(root, "CLAUDE.md")
+    if os.path.exists(claude_md):
+        warnings.append("CLAUDE.md already exists at %s — left untouched. It "
+                        "should point at %s/CLAUDE.md, or a session standing "
+                        "here loses the routing table and the delete rules "
+                        "with nothing reporting it." % (root, mlclaw_root))
+    else:
+        with open(claude_md, "w", encoding="utf-8") as f:
+            f.write(PROJECT_CLAUDE_MD.format(
+                name=project.get("name") or os.path.basename(root),
+                mlclaw_root=portable_path(mlclaw_root)))
+        tracked.append("CLAUDE.md")
 
     git_report = git_init_and_commit(root, tracked)
     for failure in git_report["failures"]:

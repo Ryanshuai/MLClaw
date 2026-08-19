@@ -55,7 +55,7 @@ When filling sources during init, if the user provides a server path that was sy
 ```
 
 - **`handoff_id`** — the record holding the party, manifest, rounds, and the reconciliation. Only ever accept a path from a handoff whose `status` is `accepted`; anything else means the data on disk is a partial download of work still in progress.
-- **`spec_version`** — the guideline the labels were produced under. Two batches under different specs are different distributions, and merging them silently degrades the model. This is the `preprocessing` mismatch rule (`references/run-mechanics.md` "Preprocessing contract (cross-stage)") applied to labels instead of pixels: when a stage draws on more than one handoff, diff the spec versions and surface any difference **before** the run, not after a confusing metric three weeks later.
+- **`spec_version`** — the guideline the labels were produced under. Two batches under different specs are different distributions, and merging them silently degrades the model. This is the `preprocessing` mismatch rule (`<mlclaw_root>/references/run-mechanics.md` "Preprocessing contract (cross-stage)") applied to labels instead of pixels: when a stage draws on more than one handoff, diff the spec versions and surface any difference **before** the run, not after a confusing metric three weeks later.
 - **`coverage`** — `1.0` unless the batch was accepted partial. A 0.94 batch that reads as complete downstream produces a dataset whose recorded composition is not its real one.
 
 The consuming run also cites `handoffs/<handoff_id>` in `run.json -> lineage.parents`. The source entry says where the data came from; the lineage edge is what turns "did the new batch make it worse" into a DAG walk.

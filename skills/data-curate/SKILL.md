@@ -212,5 +212,5 @@ is the loop and the record, not the transform.
   where the new dataset lands on the line. After a Step 2b campaign that ended
   `degraded_to_rework`, `/data-label` for the rework round the unresolved findings describe.
 
-Per `references/skill-graph.md` -> "Workflow State Protocol", push on entry and pop on exit. `stage: "curate"` when the
+Per `<mlclaw_root>/references/skill-graph.md` -> "Workflow State Protocol", push on entry and pop on exit. `stage: "curate"` when the
 transform runs as an MLClaw run, `execution: <run_id>`; `stage: null` when it does not.

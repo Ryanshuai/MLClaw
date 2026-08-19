@@ -102,4 +102,4 @@ Per prefix: it did not answer / it answered and the prefix is not there / it ans
 - **Requires**: `datasets/<id>/dataset.json` (the identity contract both sides count with), plus `resources.json` when the source is a server. A frozen snapshot is *not* required to take a reading — only to compare one.
 - **Suggests**: a drift comparison against a frozen snapshot; `/data-collect --cite-window` when the interesting units are worth pulling and labeling; `/ask-human` for a `decision` when `retain_until` or vendor access is in question.
 
-Per `references/skill-graph.md` -> "Workflow State Protocol", push on entry and pop on exit. `stage: null`, `execution: null` — a reading is a dated observation, not an execution to resume, so there is no step chain and nothing to continue from.
+Per `<mlclaw_root>/references/skill-graph.md` -> "Workflow State Protocol", push on entry and pop on exit. `stage: null`, `execution: null` — a reading is a dated observation, not an execution to resume, so there is no step chain and nothing to continue from.

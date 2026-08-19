@@ -537,6 +537,102 @@ class ScriptPathsAreResolvedNotAssumed(unittest.TestCase):
             self.assertEqual(self._resolve(d), os.path.realpath(d))
 
 
+class RootReferencesAreResolvedNotRelative(unittest.TestCase):
+    """references/layout.md -> "Workspace and tool-repo location": the five root
+    reference documents are cited through `<mlclaw_root>`, never by a bare
+    relative path.
+
+    Same failure as ScriptPathsAreResolvedNotAssumed, one layer up and reached
+    the same way: installing MLClaw as a plugin makes the skills reach a project
+    directory, and a skill that says "follow `references/skill-graph.md`" then
+    resolves that against the project, where there is no `references/`. The
+    fallback rule turns the miss into "do the same work manually", so what
+    surfaces is an agent proceeding without the requires/suggests table rather
+    than an error.
+
+    ‼️ Two namespaces, and only one of them is wrong relative. A skill's OWN
+    `skills/<name>/references/*.md` resolves against the skill directory and is
+    the official convention -- 100+ of those citations are correct as written.
+    Only the five at the repo root need resolving, which is why this matches on
+    their filenames rather than on the word `references/`.
+    """
+
+    ROOT_DOCS = ("run-mechanics", "skill-graph", "layout", "fleet", "data-line")
+    BARE = re.compile(r"(?<![/>])\breferences/(" + "|".join(ROOT_DOCS) + r")\.md")
+
+    def test_no_bare_relative_citation_of_a_root_reference(self):
+        bad = []
+        targets = glob.glob(os.path.join(REPO_ROOT, "skills", "**", "*.md"),
+                            recursive=True) + [os.path.join(REPO_ROOT, "CLAUDE.md")]
+        for path in sorted(targets):
+            with open(path, encoding="utf-8") as fh:
+                for n, line in enumerate(fh, 1):
+                    if self.BARE.search(line):
+                        bad.append(f"{os.path.relpath(path, REPO_ROOT)}:{n}")
+        self.assertEqual(bad, [], "cite root references as "
+                                  "`<mlclaw_root>/references/…` — a relative "
+                                  "path reads against whatever directory the "
+                                  "session is standing in")
+
+    def test_the_skill_local_namespace_is_left_alone(self):
+        """The check must not have swept up the convention it is not about."""
+        local = glob.glob(os.path.join(REPO_ROOT, "skills", "*", "references",
+                                       "*.md"))
+        self.assertTrue(local, "skills bundle their own references; if this is "
+                               "empty the fixture is wrong, not the repo")
+        for path in local:
+            self.assertFalse(os.path.basename(path)[:-3] in self.ROOT_DOCS,
+                             f"{path} collides with a root reference name — "
+                             "the filename-based rule above stops being safe")
+
+
+class AProjectCarriesAPointerBackToTheRules(unittest.TestCase):
+    """CLAUDE.md -> "Never silently": those rules matter most when no skill is
+    running, and `CLAUDE.md` is read from the working directory and its parents.
+
+    Installing MLClaw as a plugin moves the skills to where the user stands and
+    leaves the rules behind. `init_project.py` closes it for project directories
+    by writing a pointer -- and a POINTER is the contract, not a copy: rules
+    duplicated into every project drift from the enforced ones, and a stale copy
+    of a delete rule is worse than no copy.
+    """
+
+    def _make(self, root, extra=None):
+        cfg = {"name": "demo", "root": root, "workspace": os.path.dirname(root),
+               "stages": {"training": {"enabled": True}}}
+        cfg.update(extra or {})
+        return subprocess.run(
+            [sys.executable, os.path.join(REPO_ROOT, "scripts", "project-init",
+                                          "init_project.py"),
+             json.dumps(cfg), REPO_ROOT],
+            capture_output=True, text=True)
+
+    def test_it_writes_a_pointer_and_not_a_copy(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = os.path.join(d, "demo")
+            self._make(root)
+            p = os.path.join(root, "CLAUDE.md")
+            self.assertTrue(os.path.isfile(p), "a project must carry the pointer")
+            with open(p, encoding="utf-8") as fh:
+                body = fh.read()
+            self.assertIn("/CLAUDE.md", body, "it must name the file to read")
+            self.assertNotIn("## Never silently", body,
+                             "a POINTER, not a copy — a duplicated rule drifts "
+                             "from the one that is enforced")
+
+    def test_it_never_overwrites_a_claude_md_that_is_already_there(self):
+        """A project root may predate the run and carry the user's own file."""
+        with tempfile.TemporaryDirectory() as d:
+            root = os.path.join(d, "demo")
+            os.makedirs(root)
+            with open(os.path.join(root, "CLAUDE.md"), "w") as fh:
+                fh.write("mine\n")
+            out = self._make(root)
+            with open(os.path.join(root, "CLAUDE.md")) as fh:
+                self.assertEqual(fh.read(), "mine\n")
+            self.assertIn("already exists", out.stderr)
+
+
 if __name__ == "__main__":
     if "--report" in sys.argv:
         sys.exit(report())

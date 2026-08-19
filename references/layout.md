@@ -19,15 +19,15 @@ mlclaw_root  = $(python "${CLAUDE_PLUGIN_ROOT:-<repo>}/scripts/shared/workspaces
 
 ‼️ The order is not cosmetic. Step 2 is **sticky across copies**: with MLClaw both installed and checked out, a skill loaded from the plugin cache would resolve its scripts to the development tree — two copies inside one flow, and nothing raises. Step 1 is what closes that.
 
-**Working directory** — the MLClaw repo, always. Not the ML project (that is `--project`), and the skills are not copied into `~/.claude/skills/`. The repo is what makes three things resolve, and only the third of them fails loudly:
+**Working directory** — the MLClaw repo when you are working *on* MLClaw. Standing in a project under `workspace_root` is now supported, and what makes it so is that two of the three below stopped depending on cwd:
 
 | | |
 |---|---|
-| `CLAUDE.md` | loaded from the working directory and its parents. Elsewhere, the *Never silently* rules and the routing table are simply absent — and they were put in the always-loaded file for the case where nothing else is loaded |
-| `references/*.md` | read on demand by relative path, including this file |
+| `CLAUDE.md` | loaded from the working directory and its parents — **still cwd-bound, and no plugin install changes that.** Standing anywhere else, the *Never silently* rules and the routing table are simply absent. Closed for projects only: `init_project.py` writes a project-root `CLAUDE.md` whose one job is to point at `<mlclaw_root>/CLAUDE.md`, a POINTER and never a copy, because a duplicated safety rule drifts from the enforced one. Anywhere that is neither the repo nor a project, this is still absent and still silent |
+| `<mlclaw_root>/references/*.md` | resolved, not relative — enforced by `contract_docs.RootReferencesAreResolvedNotRelative`. A bare `references/run-mechanics.md` reads against whatever directory you happen to stand in, and the fallback rule turns the miss into "do the same work manually". Note the two are different namespaces: a skill's OWN `skills/<name>/references/*.md` stays relative, which is the official convention and correct |
 | `scripts/…` | resolved through `<mlclaw_root>`, so these are portable — enforced by `contract_docs.ScriptPathsAreResolvedNotAssumed` |
 
-‼️ The first two fail SILENTLY, which is why this is written down rather than left to Quick Start. Skills copied to a global directory are still discovered by name and still run; what disappears is everything that decides *which* one and *what must not happen*. Nothing reports the difference.
+‼️ All three used to fail SILENTLY and the first still does outside a project, which is why this is written down rather than left to Quick Start. Skills reach you anywhere once the plugin is installed; what does not follow them is everything that decides *which* one to run and *what must not happen*. Nothing reports the difference.
 
 **Path portability**: `init_project.py` rewrites any `$HOME`-relative path in `project.json` to `~/`-prefixed form (`root`, `workspace`, every `stages.<>.code_source.path`). Always `os.path.expanduser` before using these paths.
 
@@ -208,6 +208,7 @@ scripts/                             ← the executable half. Root-level and not
   shared/                         ← the run step chain lives here, not under any one run skill
     _records.py                   ← emit/refuse/broke (the exit-code contract), UTC time, atomic json io
     _dataset_paths.py             ← dataset dir + THE definition of "the newest census"
+    _vocab.py                     ← value sets two or more scripts must agree on; a one-author vocabulary stays in its script
     create_run.py                 ← create run directory + initialize run.json (UTC-offset timestamps)
     capture_env.py                ← capture ML environment snapshot
     check_deps.py                 ← compare required vs installed packages

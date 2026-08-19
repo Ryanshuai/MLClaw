@@ -57,7 +57,7 @@ three shapes calls *this* skill: a **scoped** tune inside one arm, so a ported c
 judged at a fair operating point rather than at the paper's. When invoked that way, the
 result belongs to that card, not to the model — it does not become the project's config —
 and the control arm gets the same budget. The full three shapes and the dividing test:
-`references/skill-graph.md` -> "`/train-tune` vs `/explore`".
+`<mlclaw_root>/references/skill-graph.md` -> "`/train-tune` vs `/explore`".
 
 ## Re-entry behavior
 
@@ -72,7 +72,7 @@ When invoked again, route by `--session <id>` arg (or auto-detect latest):
 
 ## On entry
 
-Follow `references/skill-graph.md` -> "Workflow State Protocol". Stage = `training`. Upstream:
+Follow `<mlclaw_root>/references/skill-graph.md` -> "Workflow State Protocol". Stage = `training`. Upstream:
 - `/train-init` done (`stages/training/config.json -> entry_command` non-empty)
 - At least one prior `/train-run` completed (so we have a baseline configuration to fork from). If none, suggest user run a baseline first.
 - **The architecture is settled.** Nothing declares this, but one thing can contradict it: if `stages/exploration/graph.json` exists, read it —
@@ -121,7 +121,7 @@ optional `--name` arg or "tune"). Create dir + initial `state.json`:
 
 Skip this entirely when `max_concurrent == 1` and the local machine can hold the job —
 one box needs no fleet, and `/train-run` already reaches it. Read
-`references/fleet.md` before doing anything here; it is the authority for
+`<mlclaw_root>/references/fleet.md` before doing anything here; it is the authority for
 everything below and states what each rule costs when broken.
 
 `scripts/shared/pool.py` holds the machines; it is provider-blind, so an owned
@@ -259,7 +259,7 @@ loop:
 sized in hours and a search runs overnight; the loop is the only thing that knows the
 search is still alive, so a missed heartbeat kills every trial in flight. It is one call
 for the whole pool precisely so it cannot be half-forgotten
-(`references/fleet.md` "Whose dead-man switch, and what renews it").
+(`<mlclaw_root>/references/fleet.md` "Whose dead-man switch, and what renews it").
 
 **A trial ending does not release its machine.** `pool.py release` returns the *slot*, not
 the lease — the next trial wants that box, already provisioned and already staged. The
@@ -366,7 +366,7 @@ own preferences:
    the poisoned belief is indistinguishable from a real one. `pool.py release --outcome
    preempted` is what keeps them apart, and its `trial_counts_as_evidence: false` is the
    field to read. `scope` on the run records what it actually completed, so the existing
-   comparability rules refuse it too (`references/run-mechanics.md` "Record
+   comparability rules refuse it too (`<mlclaw_root>/references/run-mechanics.md` "Record
    integrity").
 
 (Single-seed-best detection lives in `/train-tune-report`'s Open Questions section — it's a reporting concern that fires regardless of session status, not a stop-condition for the search loop. The agent can still proactively launch `[verify]` re-runs as a `refine_best` decision if budget allows, but it's no longer mandatory before stopping.)

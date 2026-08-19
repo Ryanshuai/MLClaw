@@ -101,7 +101,7 @@ Two orderings are not staleness and must not be reported as clean either:
   resolution, so the ordering is unknown. Unknown counts as stale.
 - **a timestamp missing or without a UTC offset** — reported as `staleness_undetermined`, its own
   blocker. Recording it as "not stale" would be the extraction-failure-vs-absence bug from
-  `references/run-mechanics.md` "Record integrity", committed by the checker itself.
+  `<mlclaw_root>/references/run-mechanics.md` "Record integrity", committed by the checker itself.
 
 ## Gates
 
@@ -166,6 +166,6 @@ runs, and an open handoff still refuses.
 - **Suggests**: whatever `next_skill` names, or the blocker's owner from the table above. Both come
   from the script's output so this file does not carry a second copy of the routing table.
 
-Per `references/skill-graph.md` -> "Workflow State Protocol", push on entry and pop on exit. Use `stage: null` and
+Per `<mlclaw_root>/references/skill-graph.md` -> "Workflow State Protocol", push on entry and pop on exit. Use `stage: null` and
 `execution: null` — like a census, an assessment is a dated observation, not an execution to
 resume. **Pop before reporting**, or a routing question leaves a false resume prompt behind it.

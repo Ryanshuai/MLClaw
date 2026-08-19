@@ -292,7 +292,7 @@ executed while the stdout path is contract-covered — and because a repo that
 writes tfevents *and* prints its metrics needs no tfevents parsing at all: read
 stdout for the stream, and TensorBoard reads the code's own events for free.
 Record every format you found; pick the readable one as `log_format`. See
-`references/run-mechanics.md` → "Metric stream".
+`<mlclaw_root>/references/run-mechanics.md` → "Metric stream".
 
 ## Record-type detection (for Step 4c)
 

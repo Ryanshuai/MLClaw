@@ -108,6 +108,6 @@ tailnet IP through it. Same split as `rig.json -> host.server` and `/data-label`
   is; this skill pulls once somebody knows. A `verified` lead is exactly what `--from` / `--at` need.
   Don't go hunting from here — that is a sweep, and there is one.
 
-Per `references/skill-graph.md` -> "Workflow State Protocol", push on entry and pop on exit. `stage: null`,
+Per `<mlclaw_root>/references/skill-graph.md` -> "Workflow State Protocol", push on entry and pop on exit. `stage: null`,
 `execution: <session>`; `step` is `plan` / `pull`. A long pull is the one thing here that can be
 interrupted — on resume just re-run `pull`, which is incremental by construction.

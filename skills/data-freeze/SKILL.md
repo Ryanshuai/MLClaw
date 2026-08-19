@@ -123,5 +123,5 @@ dropped: the snapshot id and `unverified_units`. Schema: `/eval-init` references
 - **Suggests**: `/train-init` or `/train-run` for the stage that wanted the set; `/data` to confirm
   the dataset now reads as `ready`.
 
-Per `references/skill-graph.md` -> "Workflow State Protocol", push on entry and pop on exit. `stage: null`,
+Per `<mlclaw_root>/references/skill-graph.md` -> "Workflow State Protocol", push on entry and pop on exit. `stage: null`,
 `execution: <snapshot_id>`.
