@@ -1649,6 +1649,121 @@ def cmd_resolve(a):
 
 # ---------------------------------------------------------------- CHECK
 
+def cmd_land(a):
+    """What may be merged back, in what order, and what must not be deleted.
+
+    ‼️ `claim` takes a tree; nothing returned one. This is the other end, and it
+    is the end where a round quietly loses things -- the same shape as
+    `/evacuate`, where DOING NOTHING is the destructive act. A branch nobody
+    merged and nobody archived is a round's whole output sitting in a directory
+    that the next `git clean` takes.
+
+    Plans; merges nothing. The git lines are printed, exactly as `claim` prints
+    its `worktree add` -- `/explore` executes nothing, and a verb here that ran
+    `git merge` would be the second run machinery this stage exists not to be.
+
+    Three rules from SKILL.md Stage 8 become refusals rather than prose:
+
+      the round is settled first   a merge moves the base under every arm still
+                                   running, and Stage 6's control is defined by
+                                   the base. Landing mid-round voids the arms
+                                   that have not finished, which is the most
+                                   expensive way to discover this rule
+      one at a time, re-verified   with every new flag off, bit-exact against the
+                                   pre-merge state -- the refactor gate's own
+                                   acceptance criterion, because a merge IS a
+                                   code change between two experiments
+      two winners is a third arm   the combination of both flags was run by
+                                   nobody. It is not blocked, it is NAMED, and
+                                   what it names is the next round's first card
+    """
+    p = _paths(a.project, a.session)
+    graph = _load(p["graph"], "graph")
+    nodes = graph.get("nodes", [])
+    by_id = {n["id"]: n for n in nodes}
+    corpus = graph.get("corpus") or {}
+    base = (graph.get("base") or {}).get("commit")
+
+    open_cards = [n["id"] for n in nodes
+                  if _derive_state(n, by_id, corpus)[0] not in SETTLED]
+    if open_cards:
+        refuse(f"{open_cards} are still open -- a merge moves the base under every "
+               f"one of them, and Stage 6's control is defined by the base. Landing "
+               f"now voids the arms that have not finished",
+               open=open_cards,
+               fix="settle them (`close`, or `close --killed-by`), then plan again. "
+                   "An arm you no longer want is a `killed` card with a `revive_if`, "
+                   "not an arm left open")
+
+    won = [n for n in nodes if n.get("verdict") == "won"]
+    # ‼️ Every branch this round produced, not only the winners'. A `killed` card
+    # carries `revive_if`, and reviving means going back to that code -- so the
+    # losing branches are the ones most likely to be tidied up and the ones whose
+    # loss is silent. run-card.md rule 4: a patch depends on its commit still
+    # existing, so after a deleted branch or a GC `checkout` fails where a tarball
+    # would not.
+    keep = [{"id": n["id"], "branch": (n.get("tree") or {}).get("branch"),
+             "head": (n.get("tree") or {}).get("head"),
+             "state": n.get("state"), "verdict": n.get("verdict"),
+             "why": ("won -- merged below, and the branch still resolves the "
+                     "pre-merge code" if n.get("verdict") == "won" else
+                     "killed, and `revive_if` means going back to this code"
+                     if n.get("state") == "killed" else
+                     "closed %s -- the record of what was tried and did not work"
+                     % (n.get("verdict") or "?"))}
+            for n in nodes
+            if n.get("kind") in CODE_KINDS and (n.get("tree") or {}).get("branch")]
+
+    blocked = []
+    for n in won:
+        t = n.get("tree") or {}
+        if not t.get("branch"):
+            blocked.append(f"{n['id']} won and names no tree -- there is nothing "
+                           f"identified to merge FROM")
+        elif base and t.get("base") and t["base"] != base:
+            blocked.append(f"{n['id']} forked from {t['base'][:12]} and this round's "
+                           f"base is {base[:12]} -- merging it brings in whatever "
+                           f"else moved between the two")
+    if blocked:
+        refuse("winners that cannot be landed as recorded", blocked=blocked, keep=keep,
+               fix="fix the cards against what is actually in git -- `check` believes "
+                   "the run snapshot over the card, and so should you")
+
+    order = [{"n": i + 1, "id": n["id"], "branch": (n.get("tree") or {})["branch"],
+              "merge": "git merge --no-ff %s" % (n.get("tree") or {})["branch"],
+              "then": ("re-run the control with EVERY new flag off and assert "
+                       "bit-exact against the pre-merge state. A merge is a code "
+                       "change between two experiments and takes the refactor "
+                       "gate's acceptance criterion")}
+             for i, n in enumerate(won)]
+
+    out = {"round": {"base": base, "cards": len(nodes), "won": len(won)},
+           "order": order, "keep": keep}
+    if not won:
+        out["nothing_to_land"] = (
+            "no card won. The base does not move, and that is a result rather than "
+            "a failure -- what the round produced is the `killed` cards' "
+            "`revive_if`, and `/conclude` is where it goes")
+    if len(won) > 1:
+        out["untested_combination"] = (
+            "%s all won SEPARATELY. With every one merged, the flag combination "
+            "that exists in the tree was run by nobody -- Stage 8's "
+            "flag-combination explosion, arriving on day one. ‼️ Not blocked and "
+            "not a defect: it is the next round's first card, and writing it is "
+            "how this stops being a hallucination incubator"
+            % [n["id"] for n in won])
+    out["next_base"] = (
+        "after the last merge, the resulting sha is the NEXT round's "
+        "`base.commit`. Freeze it there before claiming anything, or the next "
+        "round's arms fork from four different places")
+    out["do_not_delete"] = (
+        "none of the branches in `keep` -- a `killed` card's `revive_if` means "
+        "going back to that code, and run-card.md rule 4 says what a patch is "
+        "worth once its commit has been GC'd. ‼️ A branch is not a retention "
+        "policy: `/ara build` is what makes these survive a clone")
+    emit(out)
+
+
 def cmd_check(a):
     """Every invariant this record can be held to. Reports; repairs nothing.
 
@@ -2251,6 +2366,11 @@ def main():
     c.add_argument("--killed-by", dest="killed_by", choices=sorted(KILLED_BY))
     c.add_argument("--revive-if", dest="revive_if")
     c.set_defaults(fn=cmd_close)
+
+    ld = sub.add_parser("land", help="what may be merged back, in what order, and "
+                                     "which branches must not be deleted")
+    common(ld)
+    ld.set_defaults(fn=cmd_land)
 
     k = sub.add_parser("check", help="the invariants; reports, never repairs")
     common(k)

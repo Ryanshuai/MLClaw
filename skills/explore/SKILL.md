@@ -155,6 +155,7 @@ python <mlclaw_root>/scripts/explore/graph.py <verb> --project <PROJECT>
 | `ready` | compute the ready set. Empty set + non-empty queue = **deadlock**, and it says whether that is a cycle or one shared predecessor. ‼️ Also hands out **one `git worktree add` per code-writing card** — this is where parallel arms are given out, so it is where the isolation belongs |
 | `fill` | results onto the card, **plus a list of what this result may have voided** (whatever depends on it, whatever cites it in prose, the constants that came from this run) |
 | `close` | a verdict, or one of the four deaths |
+| ‼️ `land` | **give the trees back**: what may be merged, in what order, each with its re-verification, and which branches must not be deleted. Refuses while the round is still open. Plans; merges nothing |
 | `check` | ‼️ **every invariant in `references/experiment-graph.md` → §4. Reports, never repairs** |
 | `status` | a one-screen summary. ⬜🟨🟩 are **computed live** (the same function as `ready`), and a stored label lagging the derivation is reported separately as `state_drift` |
 
@@ -1080,7 +1081,10 @@ Two hard constraints:
   one thing at a time").
 - **No refactor before this round's conclusions are fully written back**, and none while a large run is
   in flight — otherwise the code that ran and the record of it do not match.
-- ‼️ **A merge is a code change between two experiments, so it obeys both rules above.** The
+- ‼️ **A merge is a code change between two experiments, so it obeys both rules above** — and
+  `graph.py land` is the executor: it refuses while the round is still open, orders the merges,
+  attaches each one's re-verification, names the flag combination two winners create, and lists
+  the branches that may not be deleted. The
   winning arms land at **close-out, not on winning**: `graph.json → base.commit` is frozen for the
   round, and moving it under an arm still running voids that arm's control by exactly the
   criterion this stage is judged on. Merge them **one at a time, each re-verified with every new

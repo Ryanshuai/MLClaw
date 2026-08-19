@@ -2008,5 +2008,101 @@ class TwoArmsMayNotShareAWorkingTree(GraphCase):
 
 
 
+class ARoundLandsAtCloseOutOrNotAtAll(GraphCase):
+    """SKILL.md -> Stage 8, the technical-debt gate's merge rules, and
+    references/experiment-graph.md -> §1.5.
+
+    ‼️ `claim` takes a tree and nothing returned one, which is the end where a
+    round quietly loses things — the same shape as `/evacuate`, where doing
+    nothing IS the destructive act. A branch nobody merged and nobody archived is
+    a round's whole output sitting somewhere the next `git clean` takes.
+    """
+
+    def _settled_arm(self, verdict="won", by="agent"):
+        nid = self.add_complete()
+        self._hand_write_tree((nid,), None)
+        self.g("claim", "--id", nid, "--by", by)
+        self.run_it(nid, run_id="run_" + nid)
+        self.g("fill", "--id", nid, "--result", '{"x":1}', "--tier", "T1")
+        if verdict == "won":
+            self.g("close", "--id", nid, "--verdict", "won")
+        else:
+            self.g("close", "--id", nid, "--killed-by", "faithful_but_inert",
+                   "--revive-if", "a changed metric")
+        return nid
+
+    def _hand_write_tree(self, ids, tree):
+        g = self.graph()
+        for n in g["nodes"]:
+            if n["id"] in ids:
+                if tree is None:
+                    n.pop("tree", None)
+                else:
+                    n["tree"] = dict(tree)
+        self.write_json(os.path.join("stages", "exploration", "graph.json"), g)
+
+    def test_landing_mid_round_is_refused(self):
+        """A merge moves the base under every arm still running, and Stage 6's
+        control is DEFINED by the base. This is the most expensive way to find
+        that out, so it is a refusal rather than a note."""
+        won = self._settled_arm()
+        still_open = self.add_complete()
+        self.run_it(still_open, run_id="run_" + still_open)
+        rc, out, _ = self.g("land")
+        self.assertEqual(rc, 1)
+        self.assertIn(still_open, out["refused"])
+        self.assertNotIn(won, out["refused"])
+
+    def test_two_winners_are_named_as_an_untested_combination_not_blocked(self):
+        """Stage 8's flag-combination explosion arriving on day one. ‼️ Naming it
+        is the point: it is not a defect, it is the next round's first card."""
+        a, b = self._settled_arm(by="A"), self._settled_arm(by="B")
+        rc, out, _ = self.g("land")
+        self.assertEqual(rc, 0)
+        self.assertEqual([o["id"] for o in out["order"]], [a, b])
+        self.assertIn("untested_combination", out)
+        self.assertIn(a, out["untested_combination"])
+        self.assertIn(b, out["untested_combination"])
+
+    def test_every_merge_carries_its_re_verification(self):
+        """A merge IS a code change between two experiments, so it takes the
+        refactor gate's acceptance criterion: every new flag off, bit-exact."""
+        self._settled_arm()
+        rc, out, _ = self.g("land")
+        self.assertIn("bit-exact", out["order"][0]["then"])
+
+    def test_the_losing_branches_are_listed_as_what_must_not_be_deleted(self):
+        """A `killed` card carries `revive_if`, and reviving means going back to
+        that code — so the losing branches are the ones most likely to be tidied
+        up and the ones whose loss is silent."""
+        won = self._settled_arm()
+        dead = self._settled_arm(verdict="killed", by="B")
+        rc, out, _ = self.g("land")
+        kept = {k["id"]: k["why"] for k in out["keep"]}
+        self.assertIn(dead, kept)
+        self.assertIn("revive_if", kept[dead])
+        self.assertIn("ara", out["do_not_delete"].lower())
+
+    def test_a_round_nobody_won_says_so_rather_than_erroring(self):
+        """A common and legitimate outcome. The base does not move, and what the
+        round produced is the killed cards' `revive_if`."""
+        self._settled_arm(verdict="killed")
+        rc, out, _ = self.g("land")
+        self.assertEqual(rc, 0)
+        self.assertEqual(out["order"], [])
+        self.assertIn("nothing_to_land", out)
+
+    def test_a_winner_off_another_base_may_not_be_landed(self):
+        nid = self._settled_arm()
+        g = self.graph()
+        for n in g["nodes"]:
+            if n["id"] == nid:
+                n["tree"]["base"] = "b" * 40
+        self.write_json(os.path.join("stages", "exploration", "graph.json"), g)
+        rc, out, _ = self.g("land")
+        self.assertEqual(rc, 1)
+        self.assertIn("brings in whatever else moved", json.dumps(out["blocked"]))
+
+
 if __name__ == "__main__":
     unittest.main()

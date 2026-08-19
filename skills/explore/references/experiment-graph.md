@@ -132,6 +132,28 @@ the round's), `head` (what actually ran — compared against the run's snapshot)
 the worktree is, so somebody else can find it), and `claimed_by` / `claimed_at` (who is in it —
 the field that makes `ready` say *taken* instead of handing the card out twice).
 
+#### Giving the tree back  ·  `graph.py land`
+
+`claim` takes a tree and until `land` existed **nothing returned one** — which is the end where a
+round quietly loses things, the same shape as `/evacuate`: *doing nothing is the destructive
+act*. A branch nobody merged and nobody archived is a round's whole output sitting where the next
+`git clean` takes it.
+
+`land` plans and merges nothing — it prints the `git merge` lines the way `claim` prints its
+`worktree add`. Three of Stage 8's rules stop being prose and become refusals:
+
+| | |
+|---|---|
+| **the round is settled first** | refused while any card is open. A merge moves the base under every arm still running, and Stage 6's control is *defined* by the base — landing mid-round voids the arms that have not finished |
+| **one at a time, each re-verified** | every merge carries its acceptance criterion: **every new flag off, bit-exact against the pre-merge state.** A merge is a code change between two experiments and takes the refactor gate's own test |
+| **two winners is a third arm** | the combination of both flags was run by nobody. ‼️ **Named, not blocked** — it is not a defect, it is the next round's first card, and writing it down is how this stops being a hallucination incubator |
+
+It also prints `keep`: every branch this round produced and **why it may not be deleted** —
+including the losing ones, which are the branches most likely to be tidied up and the ones whose
+loss is silent. And it says where the next round's `base.commit` comes from: the sha after the
+last merge, frozen before anything is claimed, or the next round's arms fork from four different
+places.
+
 #### The round's `base`, and why it is frozen
 
 `graph.json → base.commit` is the twin of `corpus`: that one pins what every `premise_share` was
