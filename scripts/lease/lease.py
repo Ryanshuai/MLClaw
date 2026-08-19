@@ -48,6 +48,9 @@ import time
 from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(
+    os.path.abspath(__file__))), "shared"))
+from _records import atomic_write_json  # noqa: E402
 from _common import (DEFAULT_TTL_S, TAG_PREFIX, add_shape_args, die, emit,  # noqa: E402
                      fan_out, load_resources, resources_from_workspace_root, shape_flags,
                      sweep_storage_known)
@@ -81,14 +84,7 @@ def read_ledger(res_path):
 
 def write_ledger(res_path, data):
     """Atomic: a torn ledger is the one state that hides a billing instance."""
-    path = ledger_path(res_path)
-    tmp = f"{path}.tmp.{os.getpid()}"
-    with open(tmp, "w") as fh:
-        json.dump(data, fh, indent=2)
-        fh.write("\n")
-        fh.flush()
-        os.fsync(fh.fileno())
-    os.replace(tmp, path)
+    atomic_write_json(ledger_path(res_path), data, fsync=True)
 
 
 def open_rows(ledger):

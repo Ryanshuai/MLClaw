@@ -48,6 +48,8 @@ LEASE = os.path.join(HERE, "..", "lease", "lease.py")
 # constraint and nothing anywhere says so.
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), "lease"))
 from _common import SHAPE_FLAGS, add_shape_args, shape_flags  # noqa: E402
+sys.path.insert(0, HERE)
+from _records import atomic_write_json  # noqa: E402
 
 DEFAULT_TTL_S = 14400          # matches L2's default; renewed by `heartbeat`
 PROBE_TIMEOUT = 10
@@ -106,15 +108,8 @@ def read_pool(session):
 def write_pool(session, data):
     """Atomic. A torn pool record is the one state that hides a billing box from the
     only thing that knows its lease id."""
-    path = pool_path(session)
     os.makedirs(session, exist_ok=True)
-    tmp = f"{path}.tmp.{os.getpid()}"
-    with open(tmp, "w") as fh:
-        json.dump(data, fh, indent=2, ensure_ascii=False)
-        fh.write("\n")
-        fh.flush()
-        os.fsync(fh.fileno())
-    os.replace(tmp, path)
+    atomic_write_json(pool_path(session), data, fsync=True)
 
 
 # --- planning -------------------------------------------------------------------

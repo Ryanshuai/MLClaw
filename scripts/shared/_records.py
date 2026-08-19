@@ -186,7 +186,12 @@ def atomic_write_json(path, payload, *, fsync=False, ensure_ascii=False):
     """
     parent = os.path.dirname(path)
     os.makedirs(parent or ".", exist_ok=True)
-    tmp_path = path + ".tmp"
+    # PID in the tmp name, from the two copies this replaced: two processes writing
+    # the same record would otherwise share one `.tmp` and tear it -- exactly the
+    # state this function exists to prevent. `.tmp` stays LAST so that every reader
+    # keying off the real suffix still skips it (`_dataset_paths.census_paths`
+    # admits on `.json`, so `census_X.json.4242.tmp` is excluded as before).
+    tmp_path = f"{path}.{os.getpid()}.tmp"
     with open(tmp_path, "w", encoding="utf-8") as fh:
         json.dump(payload, fh, indent=2, ensure_ascii=ensure_ascii)
         fh.write("\n")
