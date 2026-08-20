@@ -1,14 +1,20 @@
 ---
 name: eval-init
 description: >
-  Use this skill to analyze evaluation code and configure the evaluation stage. Triggers when the user
-  wants to set up evaluation for a model — analyzing what an eval script needs (model weights, data,
-  ground truth), what metrics it computes, and filling the 4 JSON config files. Use for: "analyze eval
-  code", "set up evaluation", "configure eval stage", "what does this eval script need", "分析评估代码",
-  "配置评估", "初始化eval". Not for running evaluation (use eval-run) or generating reports (use eval-report).
+  Stand up the EVALUATION stage, whose defining precondition is GROUND TRUTH: decide the
+  metric and how it aggregates, pin the test set so two runs stay comparable, locate the
+  labels, and write the 4 JSON configs. The question this stage answers is "how good is it,
+  measured against truth" — not "does it run" and not "how fast". Use for: "analyze eval
+  code", "set up evaluation", "configure eval stage", "what does this eval script need",
+  "分析评估代码", "配置评估", "初始化eval".
 ---
 
 # /eval-init — Evaluation Stage Initialization
+
+## 边界（原在 description 里，移到正文以免稀释触发面）
+
+> Running the evaluation is `/eval-run`; the write-up is `/eval-report`. Prediction without labels — throughput, latency, output contract — is `/infer-init`.
+
 
 Analyze evaluation code and fill 4 JSON config files (schema only) in `stages/evaluation/`. The goal is to understand what the code needs and produces, so `/eval-run` can execute it correctly later.
 

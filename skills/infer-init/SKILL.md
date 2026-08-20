@@ -1,15 +1,21 @@
 ---
 name: infer-init
 description: >
-  Use this skill to analyze inference code and configure the inference stage. Triggers when the user
-  wants to set up inference for a model — analyzing what a prediction script needs (model weights,
-  input data), what outputs and performance metrics it produces, and filling the 4 JSON config files.
-  Use for: "analyze inference code", "set up inference", "configure inference stage", "what does this
-  script need to run", "分析推理代码", "配置推理", "初始化infer", "设置推理流程". Not for running inference
-  (use infer-run) or evaluation with ground truth (use eval-init).
+  Stand up the INFERENCE stage, which has NO LABELS: settle the input/output contract (what
+  goes in, what shape comes out, where predictions land), the weights it loads, and its
+  throughput / latency envelope, then write the 4 JSON configs. The question this stage
+  answers is "can it produce predictions on new data, at what cost" — correctness against
+  truth is somebody else's stage. Use for: "analyze inference code", "set up inference",
+  "configure inference stage", "what does this script need to run", "分析推理代码",
+  "配置推理", "初始化infer", "设置推理流程".
 ---
 
 # /infer-init — Inference Stage Initialization
+
+## 边界（原在 description 里，移到正文以免稀释触发面）
+
+> Running it is `/infer-run`. Scoring predictions against ground truth is `/eval-init`.
+
 
 Analyze inference code and fill 4 JSON config files (schema only) in `stages/inference/`. The goal is to understand what the code needs and produces, so `/infer-run` can execute it correctly later.
 

@@ -1,30 +1,26 @@
 ---
 name: explore
 description: >
-  Use this skill for ARCHITECTURE SEARCH — the model is NOT settled yet, and settling it
-  is the work: structure, components, and network selection, down to which family of model
-  this should be. It turns "our results are bad" or "the architecture is still primitive"
-  into a numbered, pre-registered, controlled list of changes, then sources the paper plus
-  its open-source code, ports one flag at a time, and ablates. Trigger for: what is worth
-  borrowing, what technique are we missing, should we adopt X, which backbone / which
-  network should we use, is this improvement real, did we port it correctly. Also trigger
-  for Chinese requests like "什么值得借鉴", "缺什么技巧", "要不要上 X", "架构是不是太原始",
+  ARCHITECTURE SEARCH: the model is not settled yet and settling it is the work — structure,
+  components, network selection, down to which family of model this should be. Turns "our
+  results are bad" or "the architecture is still primitive" into a numbered, pre-registered,
+  controlled list of proposals, sources the paper plus its open-source code, ports one flag
+  at a time, and ablates. Trigger for: what is worth borrowing, what technique are we
+  missing, should we adopt X, which backbone should we use, is this improvement real, did we
+  port it correctly — "什么值得借鉴", "缺什么技巧", "要不要上 X", "架构是不是太原始",
   "换个网络试试", "选哪个模型", "把某篇论文的做法移植进来", "这版比上版好吗",
-  "这个提升是真的吗", "搬对了没有".
-  Parameter search belongs here too when the parameter IS the hypothesis — "是不是容量不够",
-  "这个模块没用是不是 lr 太保守", a width / depth / layer-count sweep — because those decide
-  what the model is, not how to configure a settled one.
-  Pushy trigger: invoke it even when the user only pasted a screenshot or a paper quote
-  and asked "你看这个对吗" — that is exactly the moment the proposal list gets made from
-  vibes instead of counts, which is the failure this skill exists to prevent. Also invoke
-  before writing any port of a published technique into an existing training codebase.
-  Not for tuning a model that is already settled — finding the best lr / batch size /
-  warmup on a fixed architecture is /train-tune, which runs AFTER this skill, never before.
-  Not for data or label quality (use /data-audit), pure engineering speedups that do not
-  change prediction quality, or a one-line change whose location is already known.
+  "这个提升是真的吗", "搬对了没有", "你看这个对吗". A parameter sweep belongs here when the parameter IS
+  the hypothesis — "是不是容量不够", "这个模块没用是不是 lr 太保守", a width / depth /
+  layer-count sweep — because those decide what the model is, not how to configure a
+  settled one.
 ---
 
 # /explore — architecture search: from a measured failure to a ported technique
+
+## 边界（原在 description 里，移到正文以免稀释触发面）
+
+> Invoke it even when the user only pasted a screenshot or a paper quote and asked "你看这个对吗" — that is exactly the moment the proposal list gets made from vibes instead of counts, which is the failure this skill exists to prevent. Also invoke before porting any published technique into an existing training codebase.
+> Not for tuning a model that is already settled — best lr / batch size / warmup on a fixed architecture is `/train-tune`, which runs AFTER this skill, never before. Not for data or label quality (`/data-audit`), pure engineering speedups that do not change prediction quality, or a one-line change whose location is already known.
 
 The commonest mistake in changing a model's architecture is not changing it wrongly. It is
 **changing it correctly without knowing why it worked**, or **copying a technique to treat a

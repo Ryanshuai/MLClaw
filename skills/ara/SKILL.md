@@ -1,18 +1,21 @@
 ---
 name: ara
 description: >
-  Assemble a round's work into an Agent-Native Research Artifact — the five layers, an
-  ARTIFACT.md a person can read a year later, and a check that says whether the frozen copy
-  still agrees with the live record. Trigger at the end of an exploration or a tune session,
-  after /conclude, and whenever somebody says "把这轮的东西整理成一份", "出一份工件",
-  "交接给别人", "这轮的产出在哪", "ARA", "整理成可复现的一份", "归档这一轮". Also trigger
-  before citing an old artifact, because its statuses and tiers were frozen at build time and
-  do not update themselves. Not for getting bytes off a machine before it is destroyed
-  (that is /evacuate, which calls this) and not for writing the conclusions themselves
-  (that is /conclude, which fills the logic layer).
+  Assemble a round's scattered output into one Agent-Native Research Artifact — five layers,
+  an ARTIFACT.md a person can still read a year later, and a freshness check that says whether
+  the frozen copy still agrees with the live record. This is the packaging step, not the
+  thinking step: it moves and freezes what already exists. Trigger for "把这轮的东西整理成一份",
+  "出一份工件", "交接给别人", "这轮的产出在哪", "ARA", "整理成可复现的一份", "归档这一轮",
+  and before citing an old artifact, whose statuses and tiers were frozen at build time and do
+  not update themselves.
 ---
 
 # /ara — a round's work, made into an artifact somebody can read
+
+## 边界（原在 description 里，移到正文以免稀释触发面）
+
+> Writing the conclusions themselves is `/conclude` (it fills the logic layer; run it first). Getting bytes off a machine before it is destroyed is `/evacuate`, which calls this skill. Finding out what exists in the first place is `/discover`.
+
 
 ARA (arXiv:2604.24658) argues that **the artifact is itself the object of research**, not a
 by-product of it. It gives four layers: `logic/` (what is claimed), `src/` (what produced
@@ -30,7 +33,7 @@ an artifact another person can read.
 | `evidence/` | `stream.jsonl`, metrics, `tb/`, **the raw logs**. Logs belong here because MLClaw's grounding rule requires a number to cite the transcribed line it came from — **that line is the evidence** |
 | `logic/` | `knowledge/conclusions.json` — what `/conclude` produced |
 | `trace/` | every dated record of a multi-step process: `/explore`'s `graph.json`, `findings.json`, `baseline.json`, `audit.json` — **and a tune session's `state.json` + `chain.md`, a repro loop's `session.json`, an adaptation campaign's.** **This layer decides whether that ablation is still legible a year from now** |
-| **`weights/`** | **‼️ ARA does not have this layer.** Not an oversight: a paper's artifact is **knowledge**, and knowledge regrows from `src + evidence`. **A checkpoint does not.** It is the one layer that cannot be rebuilt |
+| **`weights/`** | **‼️ ARA does not have this layer.** Not an oversight: a paper's artifact is **knowledge**, and knowledge regrows from `src + evidence`. **A 4GB checkpoint does not.** It is the one layer that cannot be rebuilt |
 
 Plus one bucket that is deliberately **not** a layer: `unclassified` — whatever the rules did
 not recognise is **kept anyway, and named**. A sweep that keeps only what it recognises is

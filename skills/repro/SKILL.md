@@ -1,21 +1,22 @@
 ---
 name: repro
 description: >
-  Answer whether a past run can still be reproduced, and when its number moves, say which axis
-  moved it. Audits five axes of rot (data, code, env, params, upstream artifacts), then drives a
-  loop: re-measure the number, judge it against a band this pipeline measured on itself, run a
-  frozen probe set through both artifacts so a person can see whether the predictions agree, and
-  pin one axis per iteration until the divergence is attributed. Composes /data-check, /eval-run,
-  /infer-run and /train-run; executes nothing itself. Trigger for: reproducing a result, checking
-  whether an old run still holds up, verifying a number somebody claims, a paper or handover
-  number you want to confirm, "why did this get worse", and "can we still rebuild that model".
-  Also trigger for Chinese requests like "复现一下", "这个结果还能复现吗", "三个月前那个跑不出来了",
-  "为什么数字不一样", "验一下这个 mAP", "老板要复现那个实验", "这个 checkpoint 还能重现吗".
-  Not for comparing two different configs (that is /train-compare) and not for refactoring against
-  a paper target (use /refactor-run).
+  Answer whether a PAST run still reproduces, and when its number moves, name the axis that
+  moved it. Audits five axes of rot — data, code, env, params, upstream artifacts — then
+  loops: re-measure, judge the gap against a band this pipeline measured on itself, push a
+  frozen probe set through both artifacts so a person can see whether the predictions agree,
+  and pin one axis per iteration until the divergence is attributed. Trigger for: reproducing
+  a result, whether an old run still holds up, verifying a number somebody claims, a paper or
+  handover number, "why did this get worse" — "复现一下", "这个结果还能复现吗",
+  "三个月前那个跑不出来了", "为什么数字不一样", "验一下这个 mAP", "老板要复现那个实验",
+  "这个 checkpoint 还能重现吗", "can we still rebuild that model".
 ---
 
 # /repro — Can this still be reproduced, and if not, what moved
+
+## 边界（原在 description 里，移到正文以免稀释触发面）
+
+> Composes `/data-check`, `/eval-run`, `/infer-run` and `/train-run`; executes nothing itself. Comparing two different configs is `/train-compare`; refactoring toward a paper target is `/refactor-run`; recording a belief is `/conclude`.
 
 **Running inference over a val set is not a reproduction, and this skill refuses to call it one.** Re-measuring a training run's artifact re-runs nothing about the training — a hyperparameter or dataset recorded wrongly, and a recipe that would no longer produce this model, are all invisible to it. That session is real and often what you want, but it closes as `remeasured*` and needs `--remeasure-only` typed at `open`, exactly as its expensive twin needs `--i-accept-the-cost`. Neither combination is the default, because which question this is cannot be defaulted. `references/verdicts.md` → "Re-measuring is not reproducing".
 

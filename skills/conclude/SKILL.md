@@ -1,18 +1,20 @@
 ---
 name: conclude
 description: >
-  Record what a round CONCLUDED — the belief, its evidence with quotes, what would overturn
-  it, and what it rests on — as a checkable artifact rather than a sentence. Trigger at the
-  end of an exploration, a tune session, an eval round, or an audit; whenever somebody says
-  "所以结论是什么", "这轮学到了什么", "记一下这个结论", "把结论写下来", "以后别再试这个了";
-  and whenever a past conclusion is being quoted — "我们试过了没用", "那个不是早就否掉了吗",
-  "这个还成立吗" — because the answer depends on a corpus, a tier and a noise floor that the
-  sentence does not carry. Also trigger when a dataset is retired or a run deleted, to find
-  which conclusions just became unverifiable. Not for recording what HAPPENED (that is the run
-  record) or which arm won (that is /explore's graph).
+  Record what a round CONCLUDED as a checkable artifact: the belief, the quotes it rests on,
+  and what would overturn it. Fires at the close of an exploration, a tune session, an eval
+  round or an audit — "所以结论是什么", "这轮学到了什么", "记一下这个结论", "把结论写下来",
+  "以后别再试这个了" — and whenever a past conclusion is being quoted as settled fact:
+  "我们试过了没用", "那个不是早就否掉了吗", "这个还成立吗". Also fires when a dataset is
+  retired or a run deleted, to list which stored conclusions just lost the evidence under them.
 ---
 
 # /conclude — the belief layer
+
+## 边界（原在 description 里，移到正文以免稀释触发面）
+
+> Not for recording what HAPPENED — that is the run record — or which arm won, which is `/explore`'s graph. Verifying whether an old number still reproduces is `/repro`.
+
 
 A run record says **what happened**. A graph card says **which arm won**. Neither records
 **what is now believed** — and six weeks later, the belief is the only one anybody repeats,

@@ -1,22 +1,24 @@
 ---
 name: train-init
 description: >
-  Use this skill to analyze training code and configure the training stage — including taking over
-  someone else's code, where it sweeps every reachable source (repo, git history, company docs, S3,
-  W&B, compute) and records which values were read from code versus guessed. Triggers when the user
-  wants to set up training for a model: what the script needs (data, labels, pretrained weights),
-  what it produces (checkpoints, logs, streaming metrics), how it signals completion, which params
-  actually take effect, and what landmines the code carries. Produces 4 JSON configs plus a
-  provenance sidecar and a recipe.md handover document. Also covers **setting up a fine-tune** —
-  configuring a repo whose training starts from a pretrained or foreign base model, where the base,
-  the frozen/trainable surface (LoRA rank, `target_modules`, `freeze_backbone`) and whether the code
-  actually honors them are all part of what Step 1 has to establish. Use for: "analyze training
-  code", "set up training", "configure training stage", "what does this training script log", "take
-  over this repo", "接手训练代码", "分析训练代码", "配置训练", "初始化train", "配一下微调",
-  "微调要怎么设". Not for running training (use train-run) or evaluation (use eval-init).
+  Stand up the TRAINING stage — the only stage that WRITES a model. Read the training code
+  until you know what it consumes (data, labels, a pretrained base), what it emits
+  (checkpoints, streaming metrics, logs), how it signals completion, which params actually
+  take effect, and what landmines it carries; then write the 4 JSON configs, a provenance
+  sidecar that separates values read from code from values guessed, and a recipe.md a
+  stranger can follow. Covers taking over somebody else's repo, and setting up a fine-tune:
+  the base model, the frozen/trainable surface (LoRA rank, `target_modules`,
+  `freeze_backbone`) and whether the code honors them. Use for: "analyze training code",
+  "set up training", "configure training stage", "what does this training script log",
+  "take over this repo", "接手训练代码", "分析训练代码", "配置训练", "初始化train",
+  "配一下微调", "微调要怎么设".
 ---
 
 # /train-init — Training Stage Initialization
+
+## 边界（原在 description 里，移到正文以免稀释触发面）
+
+> Launching a training run is `/train-run`; searching hyperparameters on a settled model is `/train-tune`; measuring the result against ground truth is `/eval-init`.
 
 Analyze training code and fill 4 JSON config files, a `provenance.json` sidecar, and a `recipe.md` handover document in `stages/training/`. The goal is to understand what the code needs, what it streams during a long run, what it produces, and **how much of that you actually know versus inferred** — so `/train-run` can launch, monitor, and select checkpoints correctly, and so a person can tell months later which numbers to trust.
 

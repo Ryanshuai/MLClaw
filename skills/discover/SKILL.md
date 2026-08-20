@@ -1,20 +1,23 @@
 ---
 name: discover
 description: >
-  Find out what exists when nobody can tell you — the taking-over case. Sweeps every reachable
+  Find out WHAT EXISTS when nobody can tell you — the taking-over case. Sweeps every reachable
   source (repo code and git history, docs and wikis, S3, cloud consoles, servers, ten tracking
-  backends, the people who might know), records each lead with its evidence, then probes it and
-  classifies it verified / gone / unreachable. Finds data, weights, somebody's recorded results,
-  and the credentials the other probes turned out to need — one lead register, because a missing
-  key and the runs behind it are one fact. Trigger for: inheriting someone else's project, a handover, data
-  nobody documented, "where is the training data", "what data do we even have", a path in a config
-  that may not exist any more, or a wiki page you do not trust. Also trigger for Chinese requests
-  like "接手别人的工作", "翻历史数据", "数据在哪都不知道", "到处找数据", "有什么数据",
-  "以前的数据还在吗", "文档里说的那个 bucket 还有吗". Not for censusing a dataset you have already
-  described (use /data-check) and not for pulling data (use /data-collect).
+  backends, the people who might know) into one lead register: each lead carries its evidence,
+  then gets probed and classified verified / gone / unreachable. Finds data, weights, somebody
+  else's recorded results, and the credentials the other probes turn out to need — a missing key
+  and the runs behind it are one fact. Trigger for inheriting someone else's project, a handover,
+  data nobody documented, a config path that may no longer exist, a wiki page you do not trust —
+  "where is the training data", "what data do we even have", "接手别人的工作", "翻历史数据",
+  "数据在哪都不知道", "到处找数据", "有什么数据", "以前的数据还在吗",
+  "文档里说的那个 bucket 还有吗".
 ---
 
 # /discover — data archaeology
+
+## 边界（原在 description 里，移到正文以免稀释触发面）
+
+> Censusing a dataset you have already described is `/data-check`; pulling data in is `/data-collect`; packaging a finished round is `/ara`.
 
 **The case this exists for.** You have taken over a project. There is a Confluence page from two
 years ago, three repos with hardcoded paths, an S3 bucket you have partial credentials for, a cloud
