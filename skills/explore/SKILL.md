@@ -1341,3 +1341,13 @@ Two destinations; do not mix them:
 - **everything else goes into the document `config.json -> design_doc` points at**, with no separate
   file — keeping proposals and current state apart means nobody can reconcile them two weeks later. The
   machine-readable half is `graph.json`, written exclusively by `graph.py`.
+
+<!-- SKILLOPT-SLEEP:LEARNED START -->
+## Learned preferences & procedures
+
+_This block is maintained by SkillOpt-Sleep. Edits here are proposed offline, validated against your past tasks, and adopted only after you approve them. Hand-edits outside this block are never touched._
+
+- OVERRIDE (status/arm questions): when asked 'where are we' or to identify running arms by name (e.g. 'sm/sl/sm1/sl1/sb 都是什么配置'), the reply's arms table MUST, for every single arm named or currently open, give the concrete parent-relative diff as EXPANDED numeric values pulled verbatim from that card's `varies` field — e.g. 'lr: 3e-5 → 7e-4', 'width: 256 → 512' — never a bare flag name or a vague label like 'lr change'. Re-derive this from the card every time, even post-compaction; never answer from memory.
+- The arms table answering a 'what's running / what configs' question must be COMPLETE, not partial: enumerate every arm the user named (all of sm, sl, sm1, sl1, sb if all were asked) plus run_id and serves for each, in one response. Do not stop partway through the list — a table that covers only some of the named arms is an incomplete answer even if the rows it does contain are correctly formatted.
+- When explaining what Stage 3's proposal-table deliverable must contain, always enumerate ALL required fields by their exact names — premise; premise's share on this corpus; primary criterion + predicted direction; guardrail; parent (single-key delta); depends_on (id + what it blocks: launch/reading/nothing); oracle ceiling; what result counts as killing it — rather than summarizing a subset in prose. Also state explicitly both destinations it lands in: the human-readable design_doc chapter AND the machine-readable graph.json card (via `graph.py add`), since they are not copies of each other.
+<!-- SKILLOPT-SLEEP:LEARNED END -->

@@ -280,3 +280,14 @@ The `-p` is required; the default pattern is `test*.py` and would silently find 
 **When a check fails, the first question is "is the contract still right?", not "how do I make this pass."** If the contract changed, edit this file and let the check follow — the contract is upstream. That is the intended workflow, not a defeat. A check whose failure doesn't tell you which side to change is itself a liability; delete it.
 
 **What earns a check**: a record written now and read later by someone who can no longer verify it, or an irreversible action. That is the whole bar — see `<mlclaw_root>/references/run-mechanics.md` "Record integrity". Most of this file is *not* enforceable (one question at a time, never guess a value, confirm before saving). **A green run means the record layer is intact. It does not mean MLClaw is correct.**
+
+<!-- SKILLOPT-SLEEP:LEARNED START -->
+## Learned preferences & procedures
+
+_This block is maintained by SkillOpt-Sleep. Edits here are proposed offline, validated against your past tasks, and adopted only after you approve them. Hand-edits outside this block are never touched._
+
+- OVERRIDE (applies to every reply, and supersedes this file's own habit of naming stages/scripts/files up front): the FIRST sentence of any answer must be the plain-language verdict, answer, or status — never a stage number, script name, or JSON key (e.g. never open with 'Stage 3', 'config.json', 'graph.py add/ready/status/fill'). Cite the mechanism only afterward, as evidence for a claim already stated in plain language.
+- When the user asks an overall-status/progress question (e.g. '现在到哪了', '进行到哪一步了', or 'X/Y/Z 都是什么配置' about several running items), the reply's first sentence must be a self-contained progress summary — current phase, how many items are running/done/blocked, and what happens next — stated before any per-item table or breakdown. A well-formatted per-item table is a supplement, never a substitute, for this summary sentence.
+- When the user asks a direct yes/no or 'can I proceed now' question, the very first clause of the reply must be the explicit verdict (是/可以 or 否/还不行, or the equivalent in whatever language the user used) — never let the verdict be only inferable from reasoning that follows.
+- Close any reply that implies a further action (a field to fill, a command to run, a record to write, a next verb) with an explicit final line naming the exact field/command/file the action targets — do not leave the required action only implied by the preceding explanation.
+<!-- SKILLOPT-SLEEP:LEARNED END -->
