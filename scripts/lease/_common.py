@@ -200,6 +200,40 @@ def shape_flags(args):
     return out
 
 
+# --- attribution --------------------------------------------------------------
+
+# WHO MADE THIS BOX, asked of `sweep`. The flags live here for the same reason
+# `SHAPE_ARGS` does: three adapters must accept the identical spelling or L2's
+# fan-out breaks on whichever one it was not added to -- and it breaks by making
+# the WHOLE sweep fail, so a missing attribution flag reads as "that provider has
+# no machines". One table cannot disagree with itself.
+ATTRIBUTE_WINDOW_S = 5 * 86400
+
+
+def add_attribute_args(parser):
+    parser.add_argument("--attribute", action="store_true",
+                        help="join each row against the lifecycle log to name who "
+                             "created it. Costs an audit query; opt-in for that reason")
+    parser.add_argument("--attribute-window-s", type=int, default=ATTRIBUTE_WINDOW_S,
+                        help="how far back the log is read; a resource older than this "
+                             "is UNKNOWN, never unowned and never yours")
+
+
+def attribution_unsupported(why):
+    """The envelope an adapter with no lifecycle log returns for `--attribute`.
+
+    Says so the same way `history` does rather than guessing from a name or a
+    timestamp (contract, "Ownership on a shared account"). ‼️ The rows are left with
+    NO `operator` key at all -- that is the third state, "nobody asked", and it is
+    what stops a caller reading `operator: null` off a provider that structurally
+    cannot answer as "looked, did not find".
+    """
+    return {"supported": False, "why": why, "complete": False,
+            "checked": [], "unreached": [{"scope": "*", "why": why}],
+            "note": "no operator on any row here -- this provider cannot attribute, "
+                    "which is UNKNOWN, not unowned and not yours"}
+
+
 def parse_arch(spec):
     """'sm_90' | '90' | '9.0' -> 90. Contract-level vocabulary, so it lives here rather
     than in whichever adapter needed it first."""

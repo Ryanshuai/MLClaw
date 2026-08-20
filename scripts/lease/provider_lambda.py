@@ -46,7 +46,7 @@ next trap found on either side is fixed for both.
   provider_lambda.py up --machine-type T --ttl-s N [--tag ...] [--run ...] [--project ...]
   provider_lambda.py addr|state|down <instance_id>
   provider_lambda.py renew <instance_id> --ttl-s N
-  provider_lambda.py sweep [--tag-prefix <prefix>]
+  provider_lambda.py sweep [--tag-prefix <prefix>] [--attribute]
   provider_lambda.py history [--tag-prefix P] [--instance-id ID] [--window-s N]
 """
 
@@ -62,7 +62,8 @@ import urllib.error
 import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from _common import (SSH_OPTS, TAG_PREFIX, add_shape_args, die, emit,  # noqa: E402
+from _common import (SSH_OPTS, TAG_PREFIX, add_attribute_args, add_shape_args,  # noqa: E402
+                     attribution_unsupported, die, emit,
                      load_resources, parse_arch, resources_from_workspace_root,
                      sweep_result)
 
@@ -622,7 +623,16 @@ def v_sweep(args):
     # `complete: true` with no `unreached` is a real claim here, not a shortcut: one API
     # key reaches one account, and neither endpoint is paginated or region-scoped. There
     # is no scope tree to walk and therefore no corner to miss.
-    emit(sweep_result(units, checked=["account"], unreached=[], storage=storage))
+    payload = sweep_result(units, checked=["account"], unreached=[], storage=storage)
+    if args.attribute:
+        # No audit log on this API — the same gap that makes `history` unsupported, and
+        # it bites harder here: this account has one static key that everybody shares,
+        # so EVERY box looks equally like yours. There is no field to tell them apart.
+        payload["attribution"] = attribution_unsupported(
+            "this API exposes no audit or lifecycle log — the same gap that makes "
+            "`history` unsupported. On a shared static key nothing distinguishes a "
+            "colleague's box from yours")
+    emit(payload)
 
 
 def v_history(args):
@@ -668,6 +678,7 @@ def main():
 
     s = sub.add_parser("sweep"); s.set_defaults(fn=v_sweep)
     s.add_argument("--tag-prefix", default=TAG_PREFIX)
+    add_attribute_args(s)
 
     h = sub.add_parser("history"); h.set_defaults(fn=v_history)
     h.add_argument("--tag-prefix", default=TAG_PREFIX)

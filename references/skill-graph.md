@@ -98,6 +98,7 @@ level up: `skills/explore/references/experiment-graph.md` → TAKE.
 | `/project-init` | — (root) | `/resources`, then any `-init` |
 | `/resources` | — (workspace-level utility) | return to caller |
 | `/lease` | — (utility, on demand) | return to caller |
+| `/roll-call` | — (workspace-level utility, human-invoked). Never automatic: it puts questions to people, and a pass that runs itself files questions nobody asked for | `/evacuate` then `/lease release`, and **only for rows in `held`**. Never a teardown for the other three |
 | `/ask-human` | project.json | whatever `why` said was blocked |
 | `/infer-init` | project.json, code available. May call `/discover` per run — infer inputs change every run, so it has **no `candidates` by design** | `/infer-run` |
 | `/infer-run` | infer-init done | (done) |
@@ -160,15 +161,16 @@ plus a worklist.
 
 **On exit** — check `suggests` column. Offer the next skill. If user accepts, invoke it as a sub-skill.
 
-**`/resources`**, **`/lease`** and **`/discover`** are utility skills — called on-demand, invoked standalone too, and none appears in a stage's dependency chain; they interrupt one and return. But they are three different jobs and the first two used to be described as one:
+**`/resources`**, **`/lease`**, **`/discover`** and **`/roll-call`** are utility skills — called on-demand, invoked standalone too, and none appears in a stage's dependency chain; they interrupt one and return. But they are four different jobs and the middle two used to be described as one:
 
 | Skill | Job |
 |---|---|
 | **`/discover`** | **goes and looks.** The sweep: leads, probes, four verdicts, and the access worklist that falls out of every `unreachable` naming what it was missing |
 | **`/resources`** | **keeps the registry.** `resources.json` is the declaration of what is configured and usable, which every run skill reads through `${}`. Verified sweep results are written *into* it |
 | **`/lease`** | **acquires.** A machine that does not exist yet, with a dead-man switch |
+| **`/roll-call`** | **says whose it is.** The register above the ledger: what a box is FOR, joined against the provider's log, in four states where an orphan list used to have two. Asks a holder only what no probe could answer, and **releases nothing** |
 
-The first two split the way `census.py` and `dataset.json` do — one is a dated observation that may be partial, the other is the durable contract — and for the same reason: a missing credential is not the substrate beneath discovery, it is discovery's most common **finding**.
+`/discover` and `/resources` split the way `census.py` and `dataset.json` do — one is a dated observation that may be partial, the other is the durable contract — and for the same reason: a missing credential is not the substrate beneath discovery, it is discovery's most common **finding**.
 
 Two reasons the sweep is not `/train-init`'s, and be precise about the first: **`/train-init` was the only skill that ever owned one**, so nothing was de-duplicated — what it recorded was a *plan to copy it into `/eval-init` later*, and extracting it **prevented the fork rather than repairing one**. A second copy drifts, so the copy never happened. The binding reason is the second, and it holds however many copies exist: **a lead outlives an init.** Access arrives weeks after a handover starts, and `discovery/leads.json` carries the unresolved ones forward where a `provenance.json` written once and declared done cannot. So the data half moved out; the model half (weights, params, tracking, compute, hazards) stayed.
 

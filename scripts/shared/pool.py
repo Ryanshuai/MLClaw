@@ -349,6 +349,13 @@ def v_close(args):
     if busy and args.abandon:
         pool.setdefault("abandoned", []).extend(
             [dict(b, why=args.abandon, at=int(time.time())) for b in busy])
+        # Same writeback as `release`, for the trials that never got one. An abandoned
+        # trial still RAN on that box, and the box is about to be destroyed -- so this is
+        # the last moment its provenance can be written anywhere that survives.
+        for slot_ in pool["slots"]:
+            if slot_["state"] == "busy" and slot_.get("lease_id") and slot_.get("run"):
+                lease("use", slot_["lease_id"], "--run", slot_["run"],
+                      "--session", pool["session"], "--outcome", "abandoned")
 
     released, stuck = [], []
     for lease_id in sorted({s["lease_id"] for s in pool["slots"] if s.get("lease_id")}):
@@ -550,15 +557,38 @@ def v_release(args):
     slot = next((s for s in pool["slots"] if s["slot"] == args.slot), None)
     if slot is None:
         fail(f"no slot {args.slot} in this pool")
-    if slot["history"]:
-        slot["history"][-1]["outcome"] = args.outcome
-        slot["history"][-1]["artifacts"] = args.artifacts
-        slot["history"][-1]["ended_at"] = int(time.time())
+    now = int(time.time())
+    last = slot["history"][-1] if slot["history"] else None
+    if last:
+        last["outcome"] = args.outcome
+        last["artifacts"] = args.artifacts
+        last["ended_at"] = now
+    # Push the finished trial DOWN into the ledger, which outlives this session.
+    #
+    # `up --run` stamps one run at create, so a box that drains twelve trials records
+    # the first one's name forever; `slot["history"]` knows the other eleven and dies in
+    # `pool.json` when the search ends. That made "which machines did that search use"
+    # answerable only from a live session -- which is precisely when nobody asks it. The
+    # question arrives weeks later, reconstructing a round, with every box long gone.
+    #
+    # Non-fatal by design: this is a record improving, and losing a slot's provenance
+    # must never be a reason a trial fails to be released. Per CLAUDE.md's fallback rule
+    # it is reported, never swallowed.
+    used = None
+    if last and slot.get("lease_id"):
+        ok, data = lease("use", slot["lease_id"], "--run", last.get("run") or args.slot,
+                         "--session", pool["session"],
+                         "--from-epoch", last.get("at") or now, "--to-epoch", now,
+                         *(["--outcome", args.outcome] if args.outcome else []))
+        used = True if ok else {"recorded": False, "detail": data}
     slot["run"] = None
     slot["state"] = "preempted" if args.outcome == "preempted" else "free"
     write_pool(args.session, pool)
     out = {"slot": slot["slot"], "state": slot["state"], "outcome": args.outcome,
            "artifacts": args.artifacts,
+           # `true` = the ledger now knows this trial ran on that box. Anything else is
+           # a provenance gap, said out loud rather than left to be inferred from silence.
+           "usage_recorded": used,
            "trial_counts_as_evidence": args.outcome != "preempted",
            "safe_to_destroy_the_box": args.artifacts == "recovered",
            "note": ("infrastructure outcome — re-place and re-run this trial; do NOT "

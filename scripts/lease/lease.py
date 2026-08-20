@@ -31,9 +31,15 @@ Usage
   lease.py renew LEASE_ID [--ttl-s N]
   lease.py release LEASE_ID
   lease.py addr LEASE_ID
-  lease.py reap [--tag-prefix <prefix>]
+  lease.py reap [--tag-prefix <prefix>] [--attribute]
   lease.py history [--since-days N]
   lease.py cost [--project NAME] [--tag T] [--since-epoch S]
+
+  lease.py claim --provider P --instance-id ID --purpose "..." [--holder WHO]
+                 [--project N] [--run ID] [--session DIR] [--review-days N] [--supersede]
+  lease.py disclaim CLAIM_ID [--why "..."]
+  lease.py use LEASE_ID --run RUN_ID [--outcome ok|preempted|crashed|abandoned]
+  lease.py whose [--instance-id ID | --run ID | --project N | --session S]
 
 leases.json sits beside resources.json; both are located per `_common.resources_path`.
 """
@@ -87,9 +93,16 @@ def ledger_path(res_path):
 def read_ledger(res_path):
     try:
         with open(ledger_path(res_path), encoding="utf-8") as fh:
-            return json.load(fh)
+            data = json.load(fh)
     except (FileNotFoundError, json.JSONDecodeError):
-        return {"leases": []}
+        data = {}
+    # `claims` lives in the SAME file as `leases` rather than beside it. Two files
+    # would mean two atomic writers for one question -- "what does this ledger know
+    # about that box" -- and CLAUDE.md's own record of that mistake is three writers
+    # that drifted three ways. One reader, one writer, one fsync.
+    data.setdefault("leases", [])
+    data.setdefault("claims", [])
+    return data
 
 
 def write_ledger(res_path, data):
@@ -99,6 +112,105 @@ def write_ledger(res_path, data):
 
 def open_rows(ledger):
     return [r for r in ledger["leases"] if r["state"] in OPEN_STATES]
+
+
+# --- registry: what accounts for a machine ------------------------------------
+
+# The four states a swept resource can be in, and the whole reason this section
+# exists. `reap` used to have TWO -- orphan or not -- and an orphan list is read as a
+# kill list, so everything that was not this ledger's own open lease landed on it.
+#
+# ‼️ THE TAG PROVES MLCLAW MADE IT, NOT THAT THIS LEDGER DID. `TAG_PREFIX` is a
+# property of the TOOL, so two people running MLClaw against one tenant stamp boxes
+# that are indistinguishable by prefix, and neither `leases.json` knows about the
+# other's. So the default `reap` -- the one wired into conversation start -- reports
+# a colleague's live training box as a forgotten one. That is not a hypothetical; it
+# is what "no open lease row" means on a shared account.
+#
+# Ordered by how much they entitle you to do. Only the first is yours.
+HOLDS = ("held", "claimed", "attributed", "unaccounted")
+
+# Why nothing named a holder. Four, not one, and they are not interchangeable --
+# the same split `census.py` keeps between a machine that did not answer and a
+# directory that is genuinely empty.
+UNACCOUNTED_WHY = (
+    "not_attributed",             # nobody asked -- run with --attribute
+    "attribution_unsupported",    # this provider structurally cannot say
+    "no_create_event_in_window",  # LOOKED, did not find. Not unowned, not yours
+    "attribution_unreached",      # the log did not answer
+)
+
+CLAIM_OPEN = "open"
+
+
+def open_claims(ledger):
+    return [c for c in ledger["claims"] if c["state"] == CLAIM_OPEN]
+
+
+def claim_key(provider, instance_id):
+    """Keyed on provider + instance id, never on a name. fleet.md "Group by id, never
+    by name": a failed box deleted and its name reused an hour later makes a name-keyed
+    claim report the LIVE machine as somebody's released one."""
+    return (provider, instance_id)
+
+
+def classify(row, open_tags, claims_by_key, attribution_supported):
+    """One row -> who accounts for it, and on what evidence. THE SINGLE AUTHOR of that
+    judgement; `status` and `reap` both read it, so they cannot disagree about whose a
+    box is.
+
+    No judgement beyond the join -- this layer is bookkeeping (see the module docstring)
+    and never decides that a box may be destroyed. It says which of four buckets the
+    evidence puts it in and what the evidence WAS, and L3 decides with the user.
+
+    ‼️ `attributed` is about CREATION, not current use. "She made it on Tuesday" does
+    not mean she still needs it, and a box whose owner has moved on looks identical to
+    one mid-run. That gap is what `/roll-call` exists to close, and it is why the
+    evidence kind travels with the holder forever rather than collapsing to a name.
+    """
+    key = claim_key(row.get("provider"), row.get("instance_id"))
+    if row.get("tag") and row["tag"] in open_tags:
+        return {"hold": "held", "holder": None, "holder_evidence": "open_lease_row"}
+    claim = claims_by_key.get(key)
+    if claim:
+        return {"hold": "claimed", "holder": claim.get("holder"),
+                # A registration is somebody's WORD. `/ask-human`'s vocabulary, for
+                # `/ask-human`'s reason: nothing other than a person confirmed it, so it
+                # can never be `verified` and must not read as one.
+                "holder_evidence": "claim",
+                "claim_id": claim["claim_id"], "purpose": claim.get("purpose"),
+                "review_at": claim.get("review_at")}
+    status = row.get("operator_status")
+    if status == "audit_create" and row.get("operator"):
+        return {"hold": "attributed", "holder": row["operator"],
+                "holder_evidence": "audit_create"}
+    why = ("no_create_event_in_window" if status == "no_create_event_in_window"
+           else "attribution_unsupported" if attribution_supported is False
+           else "attribution_unreached" if attribution_supported == "unreached"
+           else "not_attributed")
+    return {"hold": "unaccounted", "holder": None, "holder_evidence": None,
+            "unaccounted_why": why}
+
+
+def attribution_state(payloads):
+    """Merge the per-provider attribution envelopes into one tri-state per provider.
+
+    `True` (it answered), `False` (this provider structurally cannot), `"unreached"`
+    (it can and did not), `None` (nobody asked). Four, because collapsing the middle
+    two is how "the audit log timed out" comes to read as "this box has no owner".
+    """
+    out = {}
+    for name, payload in payloads.items():
+        att = (payload or {}).get("attribution")
+        if att is None:
+            out[name] = None
+        elif att.get("supported") is False:
+            out[name] = False
+        elif att.get("complete"):
+            out[name] = True
+        else:
+            out[name] = "unreached"
+    return out
 
 
 # --- adapters -----------------------------------------------------------------
@@ -155,10 +267,16 @@ def collect(names, res, verb, *extra):
     identity is L2's knowledge, so a copy-pasted adapter that still self-names cannot
     misroute a later `release`.
 
-    Returns `(rows, errors, scope)`. The scope is the merged answer to "did we actually
-    look everywhere", and **a provider that errored is an unreached corner** — not just
-    a line in `errors`. Without that, `reap` printed `orphans: []` beside a failed
-    adapter and the empty list was the part anyone read.
+    Returns `(rows, errors, scope, storage, payloads)`. The scope is the merged answer to
+    "did we actually look everywhere", and **a provider that errored is an unreached
+    corner** — not just a line in `errors`. Without that, `reap` printed `orphans: []`
+    beside a failed adapter and the empty list was the part anyone read.
+
+    `payloads` is each provider's raw envelope, kept because the **attribution** envelope
+    must not be merged into `scope` (contract, "Ownership on a shared account"): scope
+    answers "did I enumerate every resource", attribution answers "do I know who made
+    them", and folding the second into the first makes every audit-log hiccup declare the
+    resource count a lower bound when it is not.
 
     `sweep` and `history` must arrive in the envelope (`_common.sweep_result`); a bare
     list from those verbs is treated as **incomplete**, because an adapter written before
@@ -172,7 +290,7 @@ def collect(names, res, verb, *extra):
     Making it `complete: false` is what turns that total into a stated lower bound.
     """
     scoped = verb in ("sweep", "history")
-    rows, store, errors, checked, unreached = [], [], {}, [], []
+    rows, store, errors, checked, unreached, payloads = [], [], {}, [], [], {}
     results = fan_out(names, lambda n: call(n, res, verb, *extra))
     for name, (ok, data) in zip(names, results):
         if not ok:
@@ -180,6 +298,7 @@ def collect(names, res, verb, *extra):
             unreached.append({"provider": name, "scope": "*",
                               "why": data.get("error", "transient")})
             continue
+        payloads[name] = data if isinstance(data, dict) else None
         if isinstance(data, dict) and "units" in data:
             units, sc = data["units"], data.get("scope") or {}
         elif isinstance(data, (list, type(None))):
@@ -208,8 +327,8 @@ def collect(names, res, verb, *extra):
                 unreached.append({"provider": name, "scope": "storage",
                                   "why": "adapter does not report storage; residual "
                                          "billing after teardown is unmeasured"})
-    return rows, errors, {"complete": not unreached,
-                          "checked": checked, "unreached": unreached}, store
+    return (rows, errors, {"complete": not unreached,
+                           "checked": checked, "unreached": unreached}, store, payloads)
 
 
 def storage_orphans(stored, open_tags, live_instance_ids):
@@ -272,7 +391,7 @@ def v_capacity(args):
     if not names:
         die("permission", "no providers registered — run /resources first",
             hint="resources.json -> compute, or -> servers for owned hardware")
-    rows, errors, scope, _ = collect(names, args.res, "capacity", *shape_flags(args))
+    rows, errors, scope, _, _p = collect(names, args.res, "capacity", *shape_flags(args))
     # viable first, then cheapest — the order L3 should present to the user
     rows.sort(key=lambda r: (-(r.get("avail") or 0),
                              r.get("price_hr") if r.get("price_hr") is not None
@@ -361,8 +480,9 @@ def v_status(args):
     # One sweep answers most of what a per-lease `state` would, and it is issued anyway
     # for the untracked half. Only leases the sweep does not mention fall through to an
     # individual `state` call — which keeps this correct for a tag-filtered sweep.
-    swept, errors, scope, stored = collect(providers(res), res, "sweep",
-                                           "--tag-prefix", args.tag_prefix)
+    swept, errors, scope, stored, payloads = collect(
+        providers(res), res, "sweep", "--tag-prefix", args.tag_prefix,
+        *(["--attribute"] if args.attribute else []))
     by_tag = {}
     for row in swept:
         by_tag.setdefault(row.get("tag"), []).append(row)
@@ -394,7 +514,15 @@ def v_status(args):
     # L2 issued, never on an instance id whose format the adapter owns — a multi-unit
     # lease reports one id but many swept rows.
     open_tags = {r.get("tag") for r in open_rows(ledger)}
-    untracked = [r for r in swept if r.get("tag") not in open_tags]
+    claims_by_key = {claim_key(c["provider"], c["instance_id"]): c
+                     for c in open_claims(ledger)}
+    att = attribution_state(payloads)
+    # Not one list any more. `untracked` said only "this ledger did not open it", and a
+    # colleague's box and a box forgotten by a dead session of your own produce the same
+    # row -- see HOLDS. Each is stamped with which of the four accounts for it and on
+    # what evidence, by the same function `reap` uses.
+    untracked = [{**r, **classify(r, open_tags, claims_by_key, att.get(r.get("provider")))}
+                 for r in swept if r.get("tag") not in open_tags]
 
     # Storage the ledger cannot know about. `held` prices what was leased; a volume is
     # billed under no lease at all once its instance is gone, so it is a separate line
@@ -405,6 +533,11 @@ def v_status(args):
     storage_usd, storage_unpriced = usd_hr(residual)
 
     emit({"held": live, "untracked": untracked,
+          "untracked_by_hold": {h: sum(1 for r in untracked if r["hold"] == h)
+                                for h in HOLDS if any(r["hold"] == h for r in untracked)}
+                               or None,
+          "attribution": {name: att[name] for name in sorted(att)} if args.attribute
+                         else {"asked": False},
           "residual_storage": residual,
           # `held` comes from the ledger and is whole; `untracked` comes from the sweep
           # and is only as complete as the sweep was. Saying which is which is the
@@ -589,25 +722,68 @@ def v_reap(args):
     names = providers(res)
     skipped = sorted(n for n in names if n in NON_BILLING) if args.billing_only else []
     names = [n for n in names if n not in skipped]
-    rows, errors, scope, stored = collect(names, res, "sweep",
-                                          "--tag-prefix", args.tag_prefix)
+    rows, errors, scope, stored, payloads = collect(
+        names, res, "sweep", "--tag-prefix", args.tag_prefix,
+        *(["--attribute"] if args.attribute else []))
 
-    orphans = []
+    claims_by_key = {claim_key(c["provider"], c["instance_id"]): c
+                     for c in open_claims(ledger)}
+    att = attribution_state(payloads)
+
+    # FOUR buckets, and only `orphans` is a kill list. The old two-way split put
+    # everything that was not this ledger's own open lease into `orphans`, which on a
+    # shared tenant means a colleague's live box -- see HOLDS above for why the tag
+    # cannot carry that weight.
+    orphans, claimed, others, unaccounted = [], [], [], []
     for row in rows:
-        reason = ("expired" if row.get("expired") else
-                  "no open lease row" if row.get("tag") not in open_tags else None)
-        if reason:
-            orphans.append({**row, "orphan_reason": reason})
+        who = classify(row, open_tags, claims_by_key, att.get(row.get("provider")))
+        entry = {**row, **who}
+        if who["hold"] == "held":
+            if row.get("expired"):
+                # Ours, expired, still there. The one case the dead-man switch was
+                # supposed to close and did not.
+                orphans.append({**entry, "orphan_reason": "expired"})
+            continue
+        if who["hold"] == "claimed":
+            claimed.append({**entry, "review_due": bool(
+                who.get("review_at") and who["review_at"] <= int(time.time()))})
+        elif who["hold"] == "attributed":
+            others.append(entry)
+        else:
+            unaccounted.append(entry)
 
-    live_ids = {r.get("instance_id") for r in rows} - {o.get("instance_id") for o in orphans}
+    # ‼️ THE KILL LIST AND THE MONEY METER ARE DIFFERENT QUESTIONS, and splitting the
+    # first must never shrink the second. Everything swept here bills the account —
+    # a colleague's box costs exactly what a forgotten one costs — so the meter runs
+    # over all four buckets while only `orphans` is proposed for teardown. Summing the
+    # meter over `orphans` alone was a `$0.00/hr` printed beside four running boxes,
+    # which is the one failure fleet.md says this verb exists to not have:
+    # "the whole point of `reap` is to be trusted when it says zero".
+    billing = orphans + claimed + others + unaccounted
+    live_ids = {r.get("instance_id") for r in rows} - {b.get("instance_id") for b in billing}
     orphan_storage = storage_orphans(stored, open_tags, live_ids)
-    compute_usd, compute_unpriced = usd_hr(orphans)
+    compute_usd, compute_unpriced = usd_hr(billing)
     storage_usd, storage_unpriced = usd_hr(orphan_storage)
 
     # `orphans: []` is the whole product of this verb, and it is exactly the shape a
     # sweep that reached nothing also produces. `complete` is what separates "there are
     # no forgotten boxes" from "nobody looked" -- state it before quoting the count.
     emit({"orphans": orphans,
+          # ‼️ THE THREE LISTS BELOW ARE NOT A KILL LIST, and splitting them out is the
+          # whole point of this verb having been rewritten. Reported beside `orphans`
+          # rather than inside it, each with the evidence that put it there.
+          "claimed": claimed or None,
+          "attributed_to_others": others or None,
+          "unaccounted": unaccounted or None,
+          # What the money figures below actually cover: every swept row that no open
+          # lease of ours accounts for, whosever it is. Stated because the four lists
+          # above invite the reading that the total is only about `orphans`.
+          "billing_rows": len(billing),
+          # Whether anything even ASKED who made these. Without it a caller reading
+          # `attributed_to_others: null` cannot tell "everything here is ours" from
+          # "nobody ran the join", and the second one is the default.
+          "attribution": {name: att[name] for name in sorted(att)} if args.attribute
+                         else {"asked": False},
           "orphan_storage": orphan_storage,
           # Named, never silent. `complete` stays the answer to "did every provider we
           # swept answer"; this is the different fact that we chose not to sweep one, so
@@ -631,6 +807,195 @@ def v_reap(args):
           "unpriced_rows": (compute_unpriced + storage_unpriced) or None,
           "total_is_lower_bound": bool(compute_unpriced or storage_unpriced
                                        or not scope["complete"])},
+         indent=2)
+
+
+def v_claim(args):
+    """Register what a machine is FOR, when no lease of ours opened it.
+
+    The gap this fills: `up` stamps `mlclaw_run` at create and that label is never
+    written again. A pool box drains twelve trials under the first one's name; a box
+    opened from a console or by another tool carries no label at all; and a colleague's
+    box on a shared tenant carries the same `TAG_PREFIX` yours does. In all three
+    the sweep produces a row nothing accounts for, and an unaccounted row on an orphan
+    list is a box somebody kills.
+
+    ‼️ A CLAIM IS SOMEBODY'S WORD AND STAYS ONE. It is recorded with `/ask-human`'s
+    vocabulary and can never become `verified` here, because nothing other than a person
+    said it -- see CLAUDE.md "Never let somebody's word become a checked fact". The only
+    independent evidence about a box is the provider's own lifecycle log, it is a
+    separate field (`operator`), and it answers **who created it**, which is a different
+    question from what it is for now.
+
+    Claiming moves nothing and starts nothing. It is a sentence in the ledger.
+    """
+    res = args.res
+    ledger = read_ledger(res)
+    key = claim_key(args.provider, args.instance_id)
+
+    held = next((r for r in open_rows(ledger)
+                 if r["provider"] == args.provider
+                 and args.instance_id in (r.get("instance_ids") or [])), None)
+    if held:
+        # `held` already answers this question with better evidence than a claim, and
+        # writing one on top would give "what holds this box" two authors that nothing
+        # reconciles. Amend the lease instead -- that is what `use` is for.
+        die("permission",
+            f"{args.instance_id} is held under lease {held['lease_id']}; that is stronger "
+            f"evidence than a claim. Record the work with `use {held['lease_id']} --run ...`",
+            lease_id=held["lease_id"])
+
+    existing = next((c for c in open_claims(ledger)
+                     if claim_key(c["provider"], c["instance_id"]) == key), None)
+    if existing and not args.supersede:
+        # Refusing rather than overwriting: silently replacing somebody's "this is mine"
+        # is the failure this whole verb exists to stop, one layer in.
+        die("permission",
+            f"{args.instance_id} is already claimed by {existing.get('holder') or 'someone'} "
+            f"({existing['claim_id']}): {existing.get('purpose')}. Pass --supersede to "
+            f"replace it, and say why in --note",
+            claim_id=existing["claim_id"], holder=existing.get("holder"))
+
+    now = int(time.time())
+    if existing:
+        existing["state"], existing["closed_at"] = "superseded", now
+        existing["closed_why"] = args.note or "superseded"
+
+    claim = {
+        "claim_id": f"claim_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{secrets.token_hex(2)}",
+        "provider": args.provider, "instance_id": args.instance_id,
+        "holder": args.holder, "purpose": args.purpose,
+        "project": args.project, "run": args.run, "session": args.session,
+        # Fixed and not a parameter. See the docstring: there is no --status flag on
+        # purpose, so no call site can launder a claim into a verified fact.
+        "evidence": "claim",
+        "state": CLAIM_OPEN, "claimed_at": now,
+        # When somebody should be asked again whether this is still true. A claim with
+        # no review date is a claim that ages into furniture.
+        "review_at": now + args.review_days * 86400 if args.review_days else None,
+        "supersedes": existing["claim_id"] if existing else None,
+        "note": args.note, "closed_at": None, "closed_why": None,
+    }
+    ledger["claims"].append(claim)
+    write_ledger(res, ledger)
+    emit({"ok": True, **claim,
+          "claimed_iso": iso(now),
+          "review_iso": iso(claim["review_at"]) if claim["review_at"] else None,
+          "note_to_caller": "recorded as a CLAIM — nobody verified it, and nothing was "
+                            "started, moved or reserved on the machine"}, indent=2)
+
+
+def v_disclaim(args):
+    """Close a claim. ‼️ THIS DOES NOT TOUCH THE MACHINE.
+
+    Named `disclaim` and not `release` for that reason: the box goes on running and goes
+    on billing. All that changes is that the ledger stops saying somebody needs it — so
+    the next sweep files it under `unaccounted`, which is the honest state and still not
+    a licence to destroy it.
+    """
+    ledger = read_ledger(args.res)
+    claim = next((c for c in ledger["claims"] if c["claim_id"] == args.claim_id), None)
+    if claim is None:
+        die("permission", f"no claim {args.claim_id} in the ledger")
+    if claim["state"] != CLAIM_OPEN:
+        emit({"ok": True, "claim_id": args.claim_id, "note": f"already {claim['state']}"})
+        return
+    claim["state"], claim["closed_at"] = "closed", int(time.time())
+    claim["closed_why"] = args.why
+    write_ledger(args.res, ledger)
+    emit({"ok": True, "claim_id": args.claim_id, "instance_id": claim["instance_id"],
+          "note_to_caller": "the claim is closed; THE MACHINE IS UNTOUCHED and still "
+                            "bills. Releasing it is `release`, and `/evacuate` comes "
+                            "first"}, indent=2)
+
+
+def v_use(args):
+    """Record that a run used this lease. Appended, never replaced.
+
+    `up --run` stamps ONE run at create and a pooled box drains many: twelve trials
+    through one lease record the first trial's name forever, and after the search's
+    session dies `pool.json` -- the only thing that knew the other eleven -- is a file
+    in a directory nobody opens. So "which machines did that search use" was answerable
+    only from a live session, which is exactly when nobody asks.
+
+    Called by `pool.py release` per trial. Cheap and local; no provider call.
+    """
+    ledger = read_ledger(args.res)
+    row = next((r for r in ledger["leases"] if r["lease_id"] == args.lease_id), None)
+    if row is None:
+        die("permission", f"no lease {args.lease_id} in the ledger")
+    now = int(time.time())
+    entry = {"run": args.run, "outcome": args.outcome,
+             "from": args.from_epoch or None, "to": args.to_epoch or now,
+             "session": args.session, "recorded_at": now}
+    row.setdefault("used_by", []).append(entry)
+    write_ledger(args.res, ledger)
+    emit({"ok": True, "lease_id": args.lease_id, "used_by": len(row["used_by"]),
+          "recorded": entry}, indent=2)
+
+
+def v_whose(args):
+    """The two-way join, read from the ledger alone. **No network, ever.**
+
+    Both directions of the question the registry exists for:
+
+      --instance-id  -> what accounts for that box: lease rows, claims, and every run
+                        that ran on it
+      --run/--project/--session -> which machines that work used
+
+    Local-only is the load-bearing part, twice over. It is what makes this safe to call
+    at conversation start, and it is what keeps the second direction answerable **after
+    every box is gone** -- which is when somebody reconstructing a round actually asks.
+    A verb that had to reach the provider would answer "which machines did that search
+    use" with silence for every search that finished.
+    """
+    ledger = read_ledger(args.res)
+    leases, claims = ledger["leases"], ledger["claims"]
+
+    def uses(row):
+        return row.get("used_by") or []
+
+    if args.instance_id:
+        leases = [r for r in leases if args.instance_id in (r.get("instance_ids") or [])]
+        claims = [c for c in claims if c["instance_id"] == args.instance_id]
+    else:
+        def hit(row):
+            if args.run:
+                return row.get("run") == args.run or any(
+                    u.get("run") == args.run for u in uses(row))
+            if args.project:
+                return row.get("project") == args.project
+            if args.session:
+                return row.get("session") == args.session or any(
+                    u.get("session") == args.session for u in uses(row))
+            return True
+        leases = [r for r in leases if hit(r)]
+        claims = [c for c in claims
+                  if (args.run and c.get("run") == args.run)
+                  or (args.project and c.get("project") == args.project)
+                  or (args.session and c.get("session") == args.session)
+                  or not (args.run or args.project or args.session)]
+
+    emit({"filter": {k: getattr(args, k) for k in
+                     ("instance_id", "run", "project", "session") if getattr(args, k)}
+                    or {"all": True},
+          "leases": [{"lease_id": r["lease_id"], "provider": r["provider"],
+                      "state": r["state"], "instance_ids": r["instance_ids"],
+                      "machine_type": r.get("machine_type"),
+                      "project": r.get("project"), "run_at_create": r.get("run"),
+                      "requested_iso": iso(r["requested_at"]),
+                      "released_iso": iso(r["released_at"]) if r.get("released_at") else None,
+                      "used_by": uses(r)} for r in leases],
+          "claims": [{k: c[k] for k in ("claim_id", "provider", "instance_id", "holder",
+                                        "purpose", "project", "run", "session",
+                                        "evidence", "state", "review_at")}
+                     for c in claims],
+          # ‼️ The ledger is the only thing read here, so silence means "this ledger has
+          # no record", never "that machine was not used". A box opened outside MLClaw
+          # and never claimed produces exactly this empty answer.
+          "scope": {"source": "leases.json only", "network": False,
+                    "complete_for": "what this ledger was told",
+                    "blind_to": "anything opened elsewhere and never claimed"}},
          indent=2)
 
 
@@ -701,6 +1066,11 @@ def main():
 
     s = sub.add_parser("status"); s.set_defaults(fn=v_status)
     s.add_argument("--tag-prefix", default=TAG_PREFIX)
+    s.add_argument("--attribute", action="store_true",
+                   help="ask each provider's lifecycle log who created the boxes it "
+                        "swept. Off by default: it is the slowest call in the layer. On "
+                        "a SHARED account leave it on — without it every untracked row "
+                        "is `unaccounted`, which is not the same as unowned")
 
     n = sub.add_parser("renew"); n.set_defaults(fn=v_renew)
     n.add_argument("lease_id")
@@ -716,10 +1086,49 @@ def main():
 
     p = sub.add_parser("reap"); p.set_defaults(fn=v_reap)
     p.add_argument("--tag-prefix", default=TAG_PREFIX)
+    p.add_argument("--attribute", action="store_true",
+                   help="join the lifecycle log so a colleague's box lands in "
+                        "`attributed_to_others` instead of `unaccounted`")
     p.add_argument("--billing-only", action="store_true",
                    help="sweep only providers that can bill (skip owned hardware). For "
                         "the automatic conversation-start check, where the justification "
                         "for going to the network is money accruing right now.")
+
+    cl = sub.add_parser("claim", help="register what a machine is FOR (a claim, never "
+                                      "a verified fact); touches nothing on the box")
+    cl.set_defaults(fn=v_claim)
+    cl.add_argument("--provider", required=True)
+    cl.add_argument("--instance-id", required=True,
+                    help="the provider's id, never a name — names are reused")
+    cl.add_argument("--purpose", required=True,
+                    help="what it is for, in a sentence somebody else can act on")
+    cl.add_argument("--holder", help="who or what holds it: a person, or a session id")
+    cl.add_argument("--project"); cl.add_argument("--run"); cl.add_argument("--session")
+    cl.add_argument("--review-days", type=int, default=3,
+                    help="when to ask whether this is still true; 0 for never. A claim "
+                         "with no review date ages into furniture")
+    cl.add_argument("--supersede", action="store_true",
+                    help="replace an existing claim on this box; the old one is kept")
+    cl.add_argument("--note")
+
+    dc = sub.add_parser("disclaim", help="close a claim. Does NOT touch the machine")
+    dc.set_defaults(fn=v_disclaim)
+    dc.add_argument("claim_id"); dc.add_argument("--why")
+
+    us = sub.add_parser("use", help="record that a run used this lease; appended")
+    us.set_defaults(fn=v_use)
+    us.add_argument("lease_id")
+    us.add_argument("--run", required=True)
+    us.add_argument("--outcome", choices=("ok", "preempted", "crashed", "abandoned"))
+    us.add_argument("--session")
+    us.add_argument("--from-epoch", dest="from_epoch", type=int)
+    us.add_argument("--to-epoch", dest="to_epoch", type=int)
+
+    w = sub.add_parser("whose", help="which work used which machine, both directions. "
+                                     "Ledger only, no network")
+    w.set_defaults(fn=v_whose)
+    w.add_argument("--instance-id"); w.add_argument("--run")
+    w.add_argument("--project"); w.add_argument("--session")
 
     h = sub.add_parser("history"); h.set_defaults(fn=v_history)
     h.add_argument("--tag-prefix", default=TAG_PREFIX)

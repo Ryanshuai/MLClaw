@@ -7,7 +7,9 @@ description: >
   questions about held resources: "我现在租着什么", "有没有忘关的机器", "把那台关掉",
   "what am I paying for", "kill that box", "any orphaned instances". Acquisition is NOT an
   interactive flow here — a run skill performs it while talking to the user about its own run.
-  Not for discovering credentials or servers (use /resources).
+  Not for discovering credentials or servers (use /resources), and not for working out whose
+  machine something is or whether its holder still needs it (use /roll-call) — this layer
+  reports the four states, it does not ask anybody anything.
 ---
 
 # /lease — the lease layer
@@ -78,14 +80,66 @@ own backstop.
 
 ## The human's window
 
-Only three things the user asks directly. None is a flow.
+Five things the user asks directly. None is a flow — and the last two are reads that feed a
+dialogue this file does not host: **"whose is it and do they still need it" is `/roll-call`'s**,
+because a question put to a person is not bookkeeping.
 
 | Ask | Do |
 |---|---|
 | "what am I holding / paying for" | `lease.py status` — report per lease: provider, machine_type, age, `$/hr` (`0` for owned hardware), accrued, owning run (**or none — that's the interesting case**), TTL remaining. It also reconciles: a row with no instance and an instance with no row are both surfaced. **Report `compute_usd_per_hr` and `storage_usd_per_hr` separately**, and `residual_storage` alongside — see "Two meters" below. |
 | "any forgotten boxes" | `lease.py reap` — cloud-side truth by tag prefix, correct with `leases.json` missing or stale. **Read `complete` before quoting the count**: `orphans: []` off a sweep that reached nothing is byte-identical to "there are none", and `orphans_is_lower_bound` is the only thing separating them. `orphan_storage` is the second list and it is the one nobody asks for. **Wired into CLAUDE.md "On Conversation Start" as step 5**, gated on a rented provider being registered, and it calls `--billing-only` there: without that flag `provider_ssh` self-registers off `servers` and the automatic check ssh's every owned box before the user has said anything. A held ssh claim is still real — it is just not a *money* problem, and the unfiltered `reap` is what answers for it. `compute_without_adapter` names a `compute` key matching no adapter: a provider nothing will ever sweep, which that call site must report ahead of the count. |
 | "did I actually release that one" | `lease.py history [--instance-id ID]` — the **past tense**, and the only verb that can speak about a machine that no longer exists. A box missing from `status` is equally consistent with a scope nobody enumerated; only a lifecycle event proves release. A provider with no log reports `supported: false`, which is an honest unanswerable rather than a silence to read as "gone". |
+| "whose is this / what is it for" | `lease.py status --attribute`, then `whose --instance-id <id>`. **Four states, and only `held` is yours** — see below. The dialogue around this is `/roll-call`'s, not this file's |
+| "which machines did that search use" | `lease.py whose --run <id>` / `--project <n>` / `--session <s>`. **Ledger only, no network**, which is what keeps it answerable after every box is gone |
 | "kill that one" | `lease.py release <lease_id>` — it verifies `gone` before closing the row and refuses to close on an unverified teardown. If the owning run is still `running`, say so first: releasing kills the job. If the run `failed` and was kept for inspection, name what would be lost. |
+
+### Four states, and an orphan list may only hold the first
+
+`status` and `reap` stamp every swept row with which of `held` / `claimed` / `attributed` /
+`unaccounted` accounts for it, using one function so the two verbs cannot disagree.
+
+‼️ **The tag proves MLClaw made a box, not that THIS ledger did.** `TAG_PREFIX` belongs to the
+tool, so two people running MLClaw against one tenant produce boxes indistinguishable by prefix
+and each ledger sees the other's as untracked. The *default* sweep therefore listed a
+colleague's live training box as forgotten — the narrow scope produced that, not a wide one.
+
+**`--attribute` is what closes it**, and it is off by default because the lifecycle-log join is
+the slowest call in the layer. Without it every untracked row is `unaccounted`, which is **not
+unowned** — it has four causes (`not_attributed` = nobody asked · `attribution_unsupported` ·
+`no_create_event_in_window` = looked and did not find · `attribution_unreached` = the log did
+not answer), and only the report's `attribution` field says which. An adapter with no lifecycle
+log answers `supported: false` rather than guessing from a name or a clock.
+
+**Splitting the kill list did not shrink the money meter.** Everything swept bills the account,
+so `total_usd_per_hr` runs over all four buckets (`billing_rows` says how many) while only
+`orphans` is proposed for teardown.
+
+### `claim` registers a purpose; it is a claim and stays one
+
+`up --run` stamps the run at create and never writes it again — so a pooled box records the
+first of twelve trials forever, a box opened elsewhere records nothing, and neither notices
+when the box changes hands.
+
+```bash
+python $S/lease.py claim --provider <p> --instance-id <id> --purpose "..." \
+                         --holder <who> --review-days 3        # refuses if already claimed
+python $S/lease.py disclaim <claim_id>       # closes the claim; THE MACHINE IS UNTOUCHED
+python $S/lease.py use <lease_id> --run <run_id> --outcome ok  # pool.py calls this per trial
+python $S/lease.py whose --run <run_id>      # both directions, ledger only, no network
+```
+
+- **There is no `--status` flag, on purpose.** A registration can never be written as
+  `verified`: nothing other than a person said it. The only independent evidence is the
+  lifecycle log's `operator`, and that answers who **created** the box, not who needs it now.
+- **`claim` refuses a box under an open lease** — `held` is stronger evidence, and a claim on
+  top would give "what holds this box" two authors. It also refuses to overwrite an existing
+  claim without `--supersede`.
+- **`disclaim` is not `release`.** The box goes on running and goes on billing.
+- **`use` is what makes the register outlive the session.** `pool.json` knows which trials ran
+  where and dies with the search.
+
+**Asking whether a holder still needs it is `/roll-call`'s**, and it releases nothing — read
+that file before proposing any teardown on a shared account.
 
 ### Two meters, and only one of them stops on its own
 

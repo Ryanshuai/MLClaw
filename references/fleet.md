@@ -133,6 +133,72 @@ Where a provider has no lifecycle log, the adapter says so (`history` → `unsup
 and the question stays unanswerable — which is a fact worth printing, not a gap to fill
 with the list's silence.
 
+### An orphan list is a kill list, so it may hold only what is yours
+
+`reap` answers "what is burning money that nothing accounts for", and for a long time it
+answered it with **two** states: an open lease row in this ledger, or an orphan. Everything
+else went in the second bucket, and a bucket labelled *forgotten* is the one somebody
+tears down.
+
+‼️ **The tag proves MLClaw made a box, not that THIS ledger did.** `TAG_PREFIX` is a
+property of the tool. Two people running MLClaw against one tenant stamp boxes nothing can
+tell apart by prefix, and each ledger sees the other's as untracked — so the *default*
+sweep, the one wired into conversation start, listed a colleague's live training box as
+forgotten. Not a wide-scope hazard: the narrow scope produced it.
+
+So the reading is **four** states, ordered by what they entitle you to do, and only the
+first is yours:
+
+| | evidence | |
+|---|---|---|
+| `held` | an open lease row here | yours |
+| `claimed` | somebody registered what it is for | **a claim.** Nothing verified it |
+| `attributed` | the lifecycle log names who created it | not yours — and creation is not current use |
+| `unaccounted` | swept, nothing named a holder | **also not yours** |
+
+`unaccounted` has four causes and they are not interchangeable: **nobody asked** (the
+attribution join was not run), the provider **structurally cannot say**, the log was read
+and the box **predates the window**, or the log **did not answer**. Reporting any of them as
+"unowned" is the census's own error — a location that did not answer versus a directory that
+is genuinely empty — with a teardown on the end of it.
+
+**Splitting the kill list must never shrink the money meter.** Everything swept bills the
+account; a colleague's box costs exactly what a forgotten one costs. So the total runs over
+all four buckets while only `orphans` is proposed for teardown. Summing it over `orphans`
+alone printed `$0.00/hr` beside four running boxes — the one failure this verb exists not to
+have.
+
+### A machine's purpose is written once and then stops being true
+
+`up` stamps the run at create and never writes it again, which is wrong in three ordinary
+ways at once. A pooled box **drains many trials** under the first one's name. A box opened
+from a console or another tool carries **no** stamp. And a box **changes hands** — the
+search ends, somebody keeps it for inspection, somebody else borrows it — while the label
+goes on naming a trial that finished on Tuesday.
+
+Two records close that, and they are different kinds of statement:
+
+- a **claim** — somebody says what a box is for. It carries a holder, a purpose, and a
+  review date, and it can never become `verified`, because nothing other than a person said
+  it. A claim with no review date ages into furniture: it goes on reading "in use" for a box
+  abandoned in March.
+- a **usage record** — the loop reports each finished trial back down into the ledger. The
+  slot history knows which trials ran where and it dies with `pool.json`, so without this
+  "which machines did that search use" is answerable only from a live session, which is
+  precisely when nobody asks. The question arrives weeks later with every box gone.
+
+Both are read with **no network**, which is what keeps them answerable after the fleet is
+released. A registry that had to reach the provider would answer every finished search with
+silence.
+
+**Asking is a separate act from reclaiming, and nothing here reclaims.** A management pass
+that can also destroy is a pass nobody runs at a wide scope, which leaves the wide scope
+unswept — the opposite of the intent. Read what a machine can answer first (is the run still
+going, is anything computing, has anything been written), because a value you can read is
+never a question; ask a person only for the remainder; and remember that **idle is evidence,
+not a verdict** — a GPU at 0% is equally consistent with a dead job and someone at lunch
+mid-experiment. What comes back is a claim, and a release still needs an evacuation.
+
 ### Group by id, never by name
 
 Instance names are mutable and reusable; ids are neither. A failed box deleted and its

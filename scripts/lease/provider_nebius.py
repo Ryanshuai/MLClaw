@@ -39,8 +39,8 @@ import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from _common import (SSH_OPTS, TAG_PREFIX, add_shape_args, die, emit,  # noqa: E402
-                     fan_out, load_resources, parse_arch,
+from _common import (SSH_OPTS, TAG_PREFIX, add_attribute_args, add_shape_args,  # noqa: E402
+                     die, emit, fan_out, load_resources, parse_arch,
                      resources_from_workspace_root, sweep_result)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -857,6 +857,7 @@ def v_sweep(args):
         # its own count a lower bound when it is not.
         payload["attribution"] = {
             "window": window, "complete": not a_unreached,
+            "supported": True,
             "checked": a_checked, "unreached": a_unreached,
             "note": "operator is null for anything created before the window — that is "
                     "UNKNOWN, not unowned and not yours"}
@@ -1047,14 +1048,11 @@ def main():
 
     s = sub.add_parser("sweep"); s.set_defaults(fn=v_sweep)
     s.add_argument("--tag-prefix", default=TAG_PREFIX)
-    s.add_argument("--attribute", action="store_true",
-                   help="join each row against the audit log for who created it. Off by "
-                        "default because it is the slowest call in the layer; needed "
-                        "whenever the sweep is not scoped to this tool's own tag, since "
-                        "an untagged box on a shared account may be a colleague's")
-    s.add_argument("--attribute-window-s", type=int, default=5 * 86400,
-                   help="how far back to look for the CREATE. A box older than this gets "
-                        "operator null, which means unknown")
+    # Off by default because it is the slowest call in the layer; needed whenever the
+    # sweep is not scoped to this tool's own tag, since an untagged box on a shared
+    # account may be a colleague's. Flags from `_common` -- see `add_attribute_args`
+    # for why all three adapters must spell them identically.
+    add_attribute_args(s)
 
     h = sub.add_parser("history"); h.set_defaults(fn=v_history)
     h.add_argument("--tag-prefix", default=TAG_PREFIX)

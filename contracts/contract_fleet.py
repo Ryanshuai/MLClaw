@@ -13,6 +13,9 @@ Contracts enforced:
   fleet.md -> "Owned before rented"
   fleet.md -> "A preempted trial is not a failed trial"
   fleet.md -> "Cost is reported before it is spent, once, by the caller"
+  fleet.md -> "An orphan list is a kill list, so it may hold only what is yours"
+  fleet.md -> "A machine's purpose is written once and then stops being true"
+  `skills/lease/references/contract.md` -> "Ownership on a shared account"
   `skills/lease/references/contract.md` -> "Scope completeness"
   `skills/lease/references/contract.md` -> "Normalized enums"
 
@@ -61,7 +64,8 @@ class SweepScope(unittest.TestCase):
         self.ssh.remote_info = lambda entry, want_ram=False: (
             {"now": 0, "gpus": [], "claims": {}, "ram_gb": None}
             if entry["host"] in reachable else None)
-        args = types.SimpleNamespace(res="unused", tag_prefix="mlclaw-", billing_only=False)
+        args = types.SimpleNamespace(res="unused", tag_prefix="mlclaw-", billing_only=False,
+                                     attribute=False, attribute_window_s=0)
         return capture(self.ssh.v_sweep, args)
 
     def test_unreachable_host_is_not_zero_claims(self):
@@ -115,7 +119,7 @@ class LeaseMergesScope(TempDirCase):
                        "scope": {"complete": True, "checked": [], "unreached": [], **scope}})
 
     def test_failed_provider_makes_the_result_incomplete(self):
-        _, errors, scope, _ = self._collect(
+        _, errors, scope, _, _a = self._collect(
             {"boom": (False, {"error": "credential_expired", "detail": "token"})})
         self.assertIn("boom", errors)
         self.assertFalse(scope["complete"],
@@ -123,7 +127,7 @@ class LeaseMergesScope(TempDirCase):
                          "line in `errors` beside an empty orphan list")
 
     def test_bare_list_from_sweep_is_treated_as_unknown_scope(self):
-        rows, _, scope, _ = self._collect({"old": (True, [{"instance_id": "i", "tag": "t"}])})
+        rows, _, scope, _, _a = self._collect({"old": (True, [{"instance_id": "i", "tag": "t"}])})
         self.assertEqual(len(rows), 1)
         self.assertFalse(scope["complete"])
 
@@ -133,7 +137,7 @@ class LeaseMergesScope(TempDirCase):
         TypeError raised by L2 for a mistake in L1, which sends the reader to the wrong
         file. It is refused as an unread corner instead, which is also what makes the
         result honest: those rows were not merged, so the answer covers less than it looks."""
-        rows, errors, scope, _ = self._collect(
+        rows, errors, scope, _, _a = self._collect(
             {"odd": (True, {"options": [{"machine_type": "x"}]})}, verb="capacity")
         self.assertEqual(rows, [])
         self.assertIn("odd", errors)
@@ -142,11 +146,11 @@ class LeaseMergesScope(TempDirCase):
     def test_capacity_may_return_a_bare_list(self):
         """Only `sweep`/`history` carry the envelope; holding `capacity` to it would
         make every adapter incomplete for no reason."""
-        _, _, scope, _ = self._collect({"p": (True, [{"machine_type": "x"}])}, verb="capacity")
+        _, _, scope, _, _a = self._collect({"p": (True, [{"machine_type": "x"}])}, verb="capacity")
         self.assertTrue(scope["complete"])
 
     def test_envelope_is_unwrapped_and_merged(self):
-        rows, _, scope, _ = self._collect({"p": self._envelope(
+        rows, _, scope, _, _a = self._collect({"p": self._envelope(
             [{"instance_id": "i", "tag": "t"}], complete=False, checked=["one"],
             unreached=[{"scope": "two", "why": "timeout"}])})
         self.assertEqual(rows[0]["provider"], "p", "L2 injects provider identity, not L1")
@@ -173,8 +177,9 @@ class ReapSaysWhetherItLooked(TempDirCase):
         self.lease.collect = lambda names, res, verb, *extra: (
             [], {} if scope_complete else {"p": {"error": "transient"}},
             {"complete": scope_complete, "checked": [], "unreached":
-             [] if scope_complete else [{"provider": "p", "why": "timeout"}]}, [])
-        args = types.SimpleNamespace(res=self.res, tag_prefix="mlclaw-", billing_only=False)
+             [] if scope_complete else [{"provider": "p", "why": "timeout"}]}, [], {})
+        args = types.SimpleNamespace(res=self.res, tag_prefix="mlclaw-", billing_only=False,
+                                     attribute=False)
         return capture(self.lease.v_reap, args)
 
     def test_empty_orphans_off_a_partial_sweep_says_lower_bound(self):
@@ -398,6 +403,13 @@ class ClaimedRecoveryNeedsARecord(TempDirCase):
     def setUp(self):
         super().setUp()
         self.pool = load_script("shared/pool.py")
+        # `v_release` now pushes the finished trial down into the ledger, so these
+        # fixtures reach L2 where they used not to. Stubbed rather than bound: an
+        # unstubbed `bind_resources(None)` would let a check write into whichever
+        # `leases.json` the machine running the suite happens to resolve. The
+        # unbound-resources guard has its own class and keeps testing itself there.
+        self.l2 = []
+        self.pool.lease = lambda *a, **kw: self.l2.append(a) or (True, {})
         self.session = self.path("sess")
         self.write_json("sess/pool.json", {
             "session": self.session, "opened_at": 0, "closed_at": None,
@@ -467,6 +479,13 @@ class PreemptionIsNotEvidence(TempDirCase):
     def setUp(self):
         super().setUp()
         self.pool = load_script("shared/pool.py")
+        # `v_release` now pushes the finished trial down into the ledger, so these
+        # fixtures reach L2 where they used not to. Stubbed rather than bound: an
+        # unstubbed `bind_resources(None)` would let a check write into whichever
+        # `leases.json` the machine running the suite happens to resolve. The
+        # unbound-resources guard has its own class and keeps testing itself there.
+        self.l2 = []
+        self.pool.lease = lambda *a, **kw: self.l2.append(a) or (True, {})
         self.session = self.path("sess")
         self.write_json("sess/pool.json", {
             "session": self.session, "opened_at": 0, "closed_at": None,
@@ -504,12 +523,335 @@ class PreemptionIsNotEvidence(TempDirCase):
 
     def test_releasing_a_slot_does_not_release_its_lease(self):
         """The next trial wants that box, already provisioned and already staged. A pool
-        that tears down between trials pays for both, every time."""
-        called = []
-        self.pool.lease = lambda *a, **kw: called.append(a) or (True, {})
+        that tears down between trials pays for both, every time.
+
+        ‼️ The assertion is on the VERB, not on the call count. It used to be
+        `called == []` — "release issues no L2 call at all" — which was a proxy for the
+        contract and not the contract. `use` now writes the finished trial down into the
+        ledger (see `TheLedgerLearnsWhichTrialRanWhere`), and under the old proxy a
+        record improving read as a teardown regression. What must never appear here is
+        `release`."""
         self._release("ok")
-        self.assertEqual(called, [], "release is a pool-side state change only")
+        verbs = [a[0] for a in self.l2]
+        self.assertNotIn("release", verbs, "the slot is freed; the box is kept")
+        self.assertNotIn("down", verbs)
         self.assertEqual(self.read_json("sess/pool.json")["slots"][0]["state"], "free")
+
+    def test_the_finished_trial_is_written_down_where_it_outlives_the_session(self):
+        """`fleet.md` -> "Slot, not machine". A box drains many trials under one lease,
+        and `up --run` stamped only the first. The other eleven lived in `pool.json`,
+        which dies with the search — so "which machines did that search use" was
+        answerable only from a live session, which is exactly when nobody asks."""
+        out = self._release("ok")
+        use = next((a for a in self.l2 if a[0] == "use"), None)
+        self.assertIsNotNone(use, "the trial's provenance must reach the ledger")
+        self.assertIn("lease_a", use)
+        self.assertIn("run_007", use)
+        self.assertIs(out["usage_recorded"], True)
+
+    def test_a_failed_writeback_is_reported_and_never_blocks_the_release(self):
+        """CLAUDE.md "Script Integration": a record improving must not be a reason a
+        trial fails to be released — and a gap in provenance must not be inferred from
+        silence either."""
+        self.pool.lease = lambda *a, **kw: (False, {"error": "transient"})
+        out = self._release("ok")
+        self.assertEqual(self.read_json("sess/pool.json")["slots"][0]["state"], "free")
+        self.assertIsInstance(out["usage_recorded"], dict)
+        self.assertFalse(out["usage_recorded"]["recorded"])
+
+
+
+class AnOrphanListMayHoldOnlyWhatIsYours(TempDirCase):
+    """`fleet.md` -> "An orphan list is a kill list, so it may hold only what is yours".
+
+    `reap` had two states, and an orphan list is read as a kill list. ‼️ The tag proves
+    MLCLAW made a box, not that THIS ledger did: `TAG_PREFIX` belongs to the tool, so two
+    people running it against one tenant produce boxes indistinguishable by prefix and
+    each ledger sees the other's as untracked. The DEFAULT sweep — the one wired into
+    conversation start — therefore listed a colleague's live training box as forgotten.
+
+    There is no error anywhere in that output. It is a correct-looking list with a
+    stranger's running machine on it.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.lease = load_script("lease/lease.py")
+        self.res = self.write_json("resources.json", {"compute": {"p": {}}})
+        self.lease.providers = lambda _res: ["p"]
+
+    def _reap(self, rows, ledger=None, attribution=None, attribute=True):
+        self.write_json("leases.json", ledger or {"leases": [], "claims": []})
+        payloads = {"p": {"units": rows, "storage": [],
+                          **({"attribution": attribution} if attribution else {})}}
+        self.lease.collect = lambda names, res, verb, *extra: (
+            [{"provider": "p", **r} for r in rows], {},
+            {"complete": True, "checked": [], "unreached": []}, [], payloads)
+        return capture(self.lease.v_reap, types.SimpleNamespace(
+            res=self.res, tag_prefix="mlclaw-", billing_only=False, attribute=attribute))
+
+    def test_a_colleagues_box_is_not_an_orphan(self):
+        out = self._reap(
+            [{"instance_id": "i-hers", "tag": "mlclaw-x", "price_hr": 4.0,
+              "operator": "wei@example.com", "operator_status": "audit_create"}],
+            attribution={"supported": True, "complete": True})
+        self.assertEqual(out["orphans"], [], "a named creator is not a forgotten box")
+        self.assertEqual(len(out["attributed_to_others"]), 1)
+        self.assertEqual(out["attributed_to_others"][0]["holder"], "wei@example.com")
+
+    def test_splitting_the_kill_list_does_not_shrink_the_money_meter(self):
+        """The half of this that is easy to get wrong. Everything swept BILLS — a
+        colleague's box costs exactly what a forgotten one costs — so moving rows off the
+        orphan list must not move them out of the total. Summing over `orphans` alone
+        printed `$0.00/hr` beside four running boxes."""
+        out = self._reap([
+            {"instance_id": "i-hers", "tag": "mlclaw-x", "price_hr": 4.0,
+             "operator": "wei@example.com", "operator_status": "audit_create"},
+            {"instance_id": "i-nobody", "tag": "mlclaw-y", "price_hr": 3.0,
+             "operator": None, "operator_status": "no_create_event_in_window"},
+        ], attribution={"supported": True, "complete": True})
+        self.assertEqual(out["orphans"], [])
+        self.assertEqual(out["compute_usd_per_hr"], 7.0,
+                         "the meter runs over every swept row, whosever it is")
+        self.assertEqual(out["billing_rows"], 2)
+
+    def test_unaccounted_says_which_of_its_four_causes(self):
+        """They are not interchangeable, and only one of them means "looked".
+        `not_attributed` is nobody having asked — reporting it as unowned is the census's
+        own error with a teardown on the end of it."""
+        for att, rows, why in [
+            (None, [{"instance_id": "i", "tag": "mlclaw-x"}], "not_attributed"),
+            ({"supported": False, "why": "no log"},
+             [{"instance_id": "i", "tag": "mlclaw-x"}], "attribution_unsupported"),
+            ({"supported": True, "complete": True},
+             [{"instance_id": "i", "tag": "mlclaw-x", "operator": None,
+               "operator_status": "no_create_event_in_window"}],
+             "no_create_event_in_window"),
+            ({"supported": True, "complete": False},
+             [{"instance_id": "i", "tag": "mlclaw-x"}], "attribution_unreached"),
+        ]:
+            with self.subTest(why=why):
+                out = self._reap(rows, attribution=att, attribute=att is not None)
+                self.assertEqual(out["unaccounted"][0]["unaccounted_why"], why)
+
+    def test_not_asking_is_reported_rather_than_read_as_nothing_found(self):
+        """`attributed_to_others: null` off a run that never issued the join is
+        byte-identical to "everything here is ours". Same shape as `orphans: []` off a
+        sweep that reached nothing."""
+        out = self._reap([{"instance_id": "i", "tag": "mlclaw-x"}], attribute=False)
+        self.assertEqual(out["attribution"], {"asked": False})
+        self.assertIsNone(out["attributed_to_others"])
+
+    def test_a_claim_takes_a_box_off_the_orphan_list(self):
+        out = self._reap(
+            [{"instance_id": "i-bob", "tag": "mlclaw-x", "price_hr": 1.0}],
+            ledger={"leases": [], "claims": [
+                {"claim_id": "c1", "provider": "p", "instance_id": "i-bob",
+                 "holder": "bob", "purpose": "scene gen", "state": "open",
+                 "review_at": 1}]})
+        self.assertEqual(out["orphans"], [])
+        self.assertEqual(out["claimed"][0]["holder"], "bob")
+        self.assertTrue(out["claimed"][0]["review_due"],
+                        "a claim past its review date must say so; one with no review "
+                        "date ages into furniture")
+
+    def test_an_expired_lease_of_our_own_is_still_an_orphan(self):
+        """The narrowing must not go so far that the verb stops finding anything. Ours,
+        expired, still there — the case the dead-man switch was supposed to close."""
+        out = self._reap(
+            [{"instance_id": "i-mine", "tag": "mlclaw-lease_a", "expired": True,
+              "price_hr": 2.0}],
+            ledger={"leases": [{"lease_id": "lease_a", "provider": "p",
+                                "tag": "mlclaw-lease_a", "state": "held",
+                                "instance_ids": ["i-mine"], "requested_at": 0,
+                                "expires_at": 1, "released_at": None,
+                                "price_hr": 2.0, "ttl_s": 1, "error": None,
+                                "machine_type": "m", "project": None, "run": None}],
+                    "claims": []})
+        self.assertEqual(len(out["orphans"]), 1)
+        self.assertEqual(out["orphans"][0]["orphan_reason"], "expired")
+
+    def test_status_and_reap_cannot_disagree_about_whose_a_box_is(self):
+        """One author for the judgement. Two copies of a four-way classification drift in
+        the direction nobody tests — the verb a person runs by hand versus the verb that
+        runs unattended at conversation start."""
+        import inspect
+        for verb in (self.lease.v_status, self.lease.v_reap):
+            self.assertIn("classify(", inspect.getsource(verb),
+                          f"{verb.__name__} must read the shared classifier")
+
+
+class AClaimIsSomebodysWordAndStaysOne(TempDirCase):
+    """`fleet.md` -> "A machine's purpose is written once and then stops being true",
+    and CLAUDE.md "Never let somebody's word become a checked fact".
+
+    A registration says what a box is for. Nothing other than a person said it, so it can
+    never be written as verified — the only independent evidence is the provider's own
+    lifecycle log, and that answers who CREATED the box, which is a different question
+    from who needs it now.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.lease = load_script("lease/lease.py")
+        self.res = self.write_json("resources.json", {"compute": {"p": {}}})
+        self.write_json("leases.json", {"leases": [], "claims": []})
+
+    def _claim(self, **kw):
+        args = dict(res=self.res, provider="p", instance_id="i-1", purpose="a thing",
+                    holder="shuai", project=None, run=None, session=None,
+                    review_days=3, supersede=False, note=None)
+        args.update(kw)
+        return capture(self.lease.v_claim, types.SimpleNamespace(**args))
+
+    def test_a_claim_is_recorded_as_a_claim(self):
+        self.assertEqual(self._claim()["evidence"], "claim")
+
+    def test_no_call_site_can_write_a_stronger_status(self):
+        """Not a flag with a safe default — no flag at all. A `--status` argument is all
+        it takes for one obliging call site to launder hearsay into evidence."""
+        import inspect
+        src = inspect.getsource(self.lease.v_claim)
+        self.assertNotIn("args.evidence", src)
+        self.assertNotIn("args.status", src)
+
+    def test_claiming_a_held_box_is_refused(self):
+        """`held` is stronger evidence than a claim, and a claim on top gives "what holds
+        this box" two authors that nothing reconciles."""
+        self.write_json("leases.json", {"claims": [], "leases": [
+            {"lease_id": "lease_a", "provider": "p", "tag": "t", "state": "held",
+             "instance_ids": ["i-1"], "requested_at": 0, "expires_at": 9,
+             "released_at": None, "price_hr": None, "ttl_s": 1, "error": None,
+             "machine_type": "m", "project": None, "run": None}]})
+        out = self._claim()
+        self.assertIn("error", out)
+        self.assertIn("lease_a", out["detail"])
+
+    def test_an_existing_claim_is_not_silently_overwritten(self):
+        first = self._claim(holder="bob", purpose="scene gen")
+        clash = self._claim(holder="shuai")
+        self.assertIn("error", clash)
+        self.assertIn("bob", clash["detail"])
+        again = self._claim(holder="shuai", supersede=True, note="bob handed it over")
+        self.assertEqual(again["supersedes"], first["claim_id"])
+        rows = self.read_json("leases.json")["claims"]
+        self.assertEqual([c["state"] for c in rows], ["superseded", "open"],
+                         "the replaced claim is kept, not deleted")
+
+    def test_disclaim_does_not_touch_the_machine(self):
+        """Named `disclaim` and not `release` for a reason: the box goes on running and
+        goes on billing, and only the ledger changed."""
+        cid = self._claim()["claim_id"]
+        out = capture(self.lease.v_disclaim,
+                      types.SimpleNamespace(res=self.res, claim_id=cid, why="done"))
+        self.assertTrue(out["ok"])
+        self.assertIn("UNTOUCHED", out["note_to_caller"])
+        self.assertEqual(self.read_json("leases.json")["claims"][0]["state"], "closed")
+
+
+class TheLedgerLearnsWhichTrialRanWhere(TempDirCase):
+    """`fleet.md` -> "A machine's purpose is written once and then stops being true".
+
+    `up --run` stamps ONE run at create. A pooled box drains many, and the rest live in
+    `pool.json`, which dies with the search — so "which machines did that search use" was
+    answerable only from a live session, which is exactly when nobody asks it.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.lease = load_script("lease/lease.py")
+        self.res = self.write_json("resources.json", {"compute": {"p": {}}})
+        self.write_json("leases.json", {"claims": [], "leases": [
+            {"lease_id": "lease_a", "provider": "p", "tag": "t", "state": "released",
+             "instance_ids": ["i-1"], "requested_at": 0, "expires_at": 9,
+             "released_at": 10, "price_hr": None, "ttl_s": 1, "error": None,
+             "machine_type": "m", "project": "boxseg", "run": "trial_1"}]})
+
+    def _use(self, run, outcome="ok"):
+        return capture(self.lease.v_use, types.SimpleNamespace(
+            res=self.res, lease_id="lease_a", run=run, outcome=outcome,
+            session="sess", from_epoch=None, to_epoch=None))
+
+    def _whose(self, **kw):
+        args = dict(res=self.res, instance_id=None, run=None, project=None, session=None)
+        args.update(kw)
+        return capture(self.lease.v_whose, types.SimpleNamespace(**args))
+
+    def test_usage_accumulates_rather_than_replacing(self):
+        for i in range(1, 4):
+            self._use(f"trial_{i}")
+        self.assertEqual(
+            [u["run"] for u in self.read_json("leases.json")["leases"][0]["used_by"]],
+            ["trial_1", "trial_2", "trial_3"])
+
+    def test_a_later_trial_is_findable_and_not_only_the_one_stamped_at_create(self):
+        self._use("trial_9")
+        self.assertEqual(len(self._whose(run="trial_9")["leases"]), 1,
+                         "the eleventh trial must be as findable as the first")
+        self.assertEqual(len(self._whose(run="trial_1")["leases"]), 1)
+        self.assertEqual(len(self._whose(run="never_ran")["leases"]), 0)
+
+    def test_whose_never_reaches_the_network(self):
+        """What keeps the second direction answerable after every box is gone — which is
+        when somebody reconstructing a round actually asks."""
+        import inspect
+        src = inspect.getsource(self.lease.v_whose)
+        self.assertNotIn("call(", src)
+        self.assertNotIn("collect(", src)
+        self.assertFalse(self._whose(run="x")["scope"]["network"])
+
+    def test_its_silence_says_what_it_is_blind_to(self):
+        """Ledger-only means an empty answer is "this ledger was never told", never "that
+        machine was not used" — a box opened elsewhere produces exactly this."""
+        out = self._whose(instance_id="i-never-seen")
+        self.assertEqual(out["leases"], [])
+        self.assertIn("blind_to", out["scope"])
+
+
+class EveryAdapterAnswersTheOwnershipQuestion(unittest.TestCase):
+    """`skills/lease/references/contract.md` -> "Ownership on a shared account".
+
+    L2 fans one `sweep` out to every adapter, so a flag only some of them accept does not
+    degrade — it makes the WHOLE sweep fail for the others, and a provider that failed to
+    sweep reads as a provider with no machines. An adapter with no lifecycle log must
+    therefore accept the flag and answer `supported: false`, the same way `history` does,
+    rather than not accepting it at all.
+    """
+
+    def setUp(self):
+        self.common = load_script("lease/_common.py")
+
+    def test_the_flag_has_one_author(self):
+        import inspect
+        for name in ("provider_nebius.py", "provider_ssh.py", "provider_lambda.py"):
+            src = inspect.getsource(load_script(f"lease/{name}"))
+            with self.subTest(adapter=name):
+                self.assertIn("add_attribute_args", src,
+                              "spell the flag once, in _common; three spellings break "
+                              "the fan-out on whichever one they disagree about")
+
+    def test_an_adapter_with_no_log_says_so_instead_of_guessing(self):
+        env = self.common.attribution_unsupported("no log here")
+        self.assertIs(env["supported"], False)
+        self.assertFalse(env["complete"])
+        self.assertIn("no log here", json.dumps(env))
+
+    def test_unsupported_leaves_no_operator_key_at_all(self):
+        """The third state. `operator: null` means LOOKED AND DID NOT FIND; a provider
+        that structurally cannot answer must not produce it."""
+        env = self.common.attribution_unsupported("x")
+        self.assertNotIn("operator", env)
+
+    def test_l2_maps_the_envelopes_to_four_states_not_two(self):
+        lease = load_script("lease/lease.py")
+        self.assertEqual(
+            lease.attribution_state({
+                "a": {"attribution": {"supported": True, "complete": True}},
+                "b": {"attribution": {"supported": False}},
+                "c": {"attribution": {"supported": True, "complete": False}},
+                "d": {},
+            }),
+            {"a": True, "b": False, "c": "unreached", "d": None})
 
 
 class StorageIsTheSecondMeter(TempDirCase):
@@ -551,7 +893,7 @@ class StorageIsTheSecondMeter(TempDirCase):
         total for a category nobody enumerated."""
         self.lease.call = lambda name, res, verb, *extra: (True, {
             "units": [], "scope": {"complete": True, "checked": ["all"], "unreached": []}})
-        _, _, scope, _ = self.lease.collect(["blind"], self.res, "sweep")
+        _, _, scope, _, _a = self.lease.collect(["blind"], self.res, "sweep")
         self.assertFalse(scope["complete"])
         self.assertEqual([u["scope"] for u in scope["unreached"]], ["storage"])
 
@@ -563,7 +905,7 @@ class StorageIsTheSecondMeter(TempDirCase):
         self.lease.call = lambda name, res, verb, *extra: (True, {
             "units": [], "storage": [],
             "scope": {"complete": True, "checked": ["all"], "unreached": []}})
-        _, _, scope, storage = self.lease.collect(["ssh"], self.res, "sweep")
+        _, _, scope, storage, _a = self.lease.collect(["ssh"], self.res, "sweep")
         self.assertTrue(scope["complete"])
         self.assertEqual(storage, [])
 
@@ -571,7 +913,7 @@ class StorageIsTheSecondMeter(TempDirCase):
         self.lease.call = lambda name, res, verb, *extra: (True, {
             "units": [], "storage": [{"storage_id": "d1", "attached_to": None}],
             "scope": {"complete": True, "checked": [], "unreached": []}})
-        _, _, _, storage = self.lease.collect(["p"], self.res, "sweep")
+        _, _, _, storage, _a = self.lease.collect(["p"], self.res, "sweep")
         self.assertEqual(storage[0]["provider"], "p",
                          "adapter identity is L2's knowledge for storage as for units")
 
@@ -641,9 +983,10 @@ class StorageIsTheSecondMeter(TempDirCase):
         self.lease.collect = lambda names, res, verb, *extra: (
             [{"instance_id": "i-1", "tag": "mlclaw-x", "price_hr": 3.0}],
             {}, {"complete": True, "checked": [], "unreached": []},
-            [{"storage_id": "d1", "attached_to": None, "tag": "", "price_hr": None}])
+            [{"storage_id": "d1", "attached_to": None, "tag": "", "price_hr": None}], {})
         out = capture(self.lease.v_reap,
-                      types.SimpleNamespace(res=self.res, tag_prefix="mlclaw-", billing_only=False))
+                      types.SimpleNamespace(res=self.res, tag_prefix="mlclaw-",
+                                            billing_only=False, attribute=False))
         self.assertEqual(len(out["orphan_storage"]), 1,
                          "an unattached volume is a finding, not a footnote")
         self.assertEqual(out["compute_usd_per_hr"], 3.0)

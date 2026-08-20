@@ -127,6 +127,7 @@ skills/                             ← one dir per skill; a skill's own `refere
   refactor-report/SKILL.md          ← /refactor-report
   resources/SKILL.md                ← /resources
   lease/SKILL.md                    ← /lease
+  roll-call/SKILL.md                ← /roll-call (whose machine is this — the register above `lease`'s ledger)
   data-label/SKILL.md               ← /data-label
   ask-human/SKILL.md                ← /ask-human
   data/SKILL.md                     ← /data

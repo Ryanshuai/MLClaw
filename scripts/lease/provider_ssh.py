@@ -19,7 +19,7 @@ Usage
                      [--run RUN_ID] [--project NAME]
   provider_ssh.py addr|state|down INSTANCE_ID
   provider_ssh.py renew INSTANCE_ID --ttl-s N
-  provider_ssh.py sweep [--tag-prefix <prefix>]
+  provider_ssh.py sweep [--tag-prefix <prefix>] [--attribute]
 """
 
 import argparse
@@ -29,7 +29,8 @@ import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from _common import (SSH_UNREACHABLE, TAG_PREFIX, add_shape_args, die, emit,  # noqa: E402
+from _common import (SSH_UNREACHABLE, TAG_PREFIX, add_attribute_args,  # noqa: E402
+                     add_shape_args, attribution_unsupported, die, emit,
                      fan_out, load_resources, parse_arch, resources_from_workspace_root,
                      sweep_result)
 
@@ -392,7 +393,16 @@ def v_sweep(args):
     # Owned hardware has no second meter -- the disk was bought, so releasing a claim
     # leaves nothing accruing. Saying so is what stops L2 marking this adapter's scope
     # incomplete, which is the correct treatment for an adapter that simply never looked.
-    emit(sweep_result(units, checked, unreached, storage=[]))
+    payload = sweep_result(units, checked, unreached, storage=[])
+    if args.attribute:
+        # A claim marker names the LEASE that took it, and this adapter deletes the
+        # marker on release — so there is no log and no past tense to join against.
+        # `history` already answers `supported: false` for the same reason; saying it
+        # the same way here is what stops a caller reading the silence as "unowned".
+        payload["attribution"] = attribution_unsupported(
+            "owned hardware: the claim marker is deleted on release, so there is no "
+            "lifecycle log to join against — the same reason `history` is unsupported")
+    emit(payload)
 
 
 def v_history(args):
@@ -435,6 +445,7 @@ def main():
 
     s = sub.add_parser("sweep"); s.set_defaults(fn=v_sweep)
     s.add_argument("--tag-prefix", default=TAG_PREFIX)
+    add_attribute_args(s)
 
     h = sub.add_parser("history"); h.set_defaults(fn=v_history)
     h.add_argument("--tag-prefix", default=TAG_PREFIX)
