@@ -10,7 +10,7 @@
       "name": "mlclaw",
       "source": "./",
       "description": "The 34 lifecycle skills: training, evaluation, inference, refactor, exploration, the data line, fleet/lease, discovery, and the record layer that holds them together.",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "author": {
         "name": "Shuai Yan"
       },

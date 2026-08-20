@@ -1,7 +1,7 @@
 {
   "name": "mlclaw",
   "description": "Conversation-driven ML lifecycle management. Bring your own training/eval/inference code; MLClaw analyzes it, configures every stage through dialogue, executes locally or on rented GPUs, and keeps a record layer that refuses to lie about what was measured.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "author": { "name": "Shuai Yan", "email": "shuai.yan@anyware-robotics.com" },
   "homepage": "https://github.com/anyware-robotics/MLClaw",
   "license": "MIT"
