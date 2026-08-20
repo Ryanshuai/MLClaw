@@ -153,11 +153,27 @@ python <mlclaw_root>/scripts/explore/graph.py <verb> --project <PROJECT>
 | `close` | a verdict, or one of the four deaths |
 | ‼️ `land` | **give the trees back**: what may be merged, in what order, each with its re-verification, and which branches must not be deleted. Refuses while the round is still open. Plans; merges nothing |
 | `check` | ‼️ **every invariant in `references/experiment-graph.md` → §4. Reports, never repairs** |
-| `status` | a one-screen summary. ⬜🟨🟩 are **computed live** (the same function as `ready`), and a stored label lagging the derivation is reported separately as `state_drift` |
+| `status` | a one-screen summary. ⬜🟨🟩 are **computed live** (the same function as `ready`), and a stored label lagging the derivation is reported separately as `state_drift`. ‼️ **`arms` expands every open arm**: `run_id` → `varies` (what it changes), `serves` (which question), `since` (from `history`) |
 
 **`check`'s exit code follows CLAUDE.md "Script Integration": a critical finding exits 1 — the
 script worked and the answer is no. That is not a failure, so do not fall back and work around
 it by hand.**
+
+### ‼️ "Where are we" is answered from `status`, never from memory
+
+**An arm's name never appears in a sentence without its expansion** — `sm` is not an answer,
+`sm (--sku_embed, lr 3e-5, serves N04)` is. The name is a handle coined mid-round; its meaning
+is on the card as `varies`, and **only there** once the session that coined it has compacted.
+
+Measured, in the round this rule came from: of the user's turns during a 24-hour eight-arm grid,
+about a third were *"现在过了一个 epoch 吗" · "还要大概多久" · "sm sl sm1 sl1 sb 都是什么配置" ·
+"B 和 C 分别是什么" · "现在在干什么"*. **Every one of those answers was already on disk** — in the
+run directories, in `graph.json`, in the history — and none of them was on one screen. That is not
+the user being repetitive; it is the record having no person-facing face.
+
+➜ Re-render `status` — the whole `arms` table, not a sentence about one arm — **on every state
+change and on every question about progress**. It is one call and it cannot be wrong; a sentence
+composed from memory can be, and after a compaction usually is.
 
 ‼️ **No count anywhere on this page, deliberately.** The one that used to be here said *seven
 plus two* while `check` emitted more than twenty, and it had already been wrong for several
@@ -863,6 +879,15 @@ disagree are what to watch.**
   fed a random sample with 81% fewer occupied cells — silent, no exception, just worse. The
   countermeasure: write a test that **walks every call site** (AST over every construction call,
   asserting the parameter is explicitly passed), rather than testing the function alone.
+- ‼️ **The mirror of that bug is the expensive one: a flag that reaches MORE than its name says,
+  and it does not raise either.** "Was it passed down" is asked routinely; "did it apply anywhere
+  it should not" is not — and the second is the one that survives the unit tests, because every
+  assertion about the intended branch passes. A real case this round: the SKU classification loss
+  was meant for the decoder's matching branch and also landed on `intermediate[0]` and on the
+  denoising queries, so every arm in the grid trained a different objective from the one on its
+  card. **Assert the effect is EMPTY where the flag has no business** — count the contributing
+  terms per branch (aux heads, intermediate layers, denoising queries, EMA copies) with the flag
+  on and off; a loss VALUE that changes tells you nothing about which branches moved.
 - **Verify a port by counting, not by shapes.** A matching shape does not mean a matching object set
   (did the denoising queries actually enter the attention mask? did the positive count change?).
   Enumerate independently; do not read `.shape`.
@@ -877,6 +902,25 @@ disagree are what to watch.**
 - **The single most useful cheap check: overfit a single batch.** With the mechanism wired up, one
   batch should reach near-zero loss; failing to means the gradient does not flow or the targets are
   constructed wrongly — a few minutes to ask, instead of waiting for a large run.
+
+## Stage 5.5 — the fan-out gate: one cell before the grid
+
+‼️ **A grid multiplies a wiring bug by N, and pays for the multiplication in wall-clock before
+anything reports.** The two cheap checks in Stage 5 — overfit one batch, count the contributing
+terms per branch — cost minutes; a full cell of an eight-arm grid costs hours and a machine.
+So they are not "part of the port", they are **the gate the grid opens behind**:
+
+1. open **one** cell — the cheapest, and the one whose flag is most likely to be mis-scoped;
+2. run the scope assertion (Stage 5) and the single-batch overfit **on that cell**;
+3. only then hand out the rest of the ready set.
+
+The cost of skipping it, measured: eight arms launched together, the mis-scoped loss found at the
+first eval block roughly five hours in, four cells re-run — about $70 and half a day, on a
+machine billing $30.8/h. **The bug was not subtle and not expensive to find; it was expensive to
+find LATE**, and the only thing standing between those two is this gate.
+
+⚠ This does not serialise the round. The gate is one cell, once, per port — not per arm, and it
+is exactly the wait `ready`'s parallel hand-out is otherwise designed to avoid.
 
 ## Stage 6 — verification and ablation
 
@@ -1231,6 +1275,12 @@ the prompt must carry the raw material itself).
   switch.**
 - Verified a restore with `diff -q` against the backup — trivially true, i.e. no verification at all.
   **After restoring, run that file's tests.**
+- Launched an eight-arm SKU grid whose classification loss also landed on `intermediate[0]` and the
+  denoising queries — every arm optimising something other than what its card said. Found at the
+  first eval block, ~5 h and ~$70 in. **A flag reaching too far raises nothing; assert its effect is
+  empty where it does not belong, on one cell, before the grid opens** (Stage 5.5).
+- Ran the eight arms while answering "what is arm `sm`" from context. Post-compaction the expansion
+  was gone from every side of the record. **`varies` on the card, and re-render `status`.**
 
 ## ‼️ Every number in this document expires
 

@@ -2104,5 +2104,58 @@ class ARoundLandsAtCloseOutOrNotAtAll(GraphCase):
         self.assertIn("brings in whatever else moved", json.dumps(out["blocked"]))
 
 
+class AnArmsNameHasAnExpansionOnTheRecord(GraphCase):
+    """references/experiment-graph.md -> §1 `varies` and §4 `arm_without_legend`.
+
+    `run_id` names an arm; nothing used to say what the name MEANS. The gap is
+    invisible for as long as the session that coined the names is open, and the
+    recorded round paid for it in the user's turns: eight arms called sm / sl /
+    sm1 / sl1 / sb, and "what configuration is each of these" had to be asked
+    after the answer had already scrolled out of context. The same screen is
+    where an arm running for no registered question becomes visible -- `serves`
+    is null exactly then.
+    """
+
+    def test_an_open_arm_without_its_expansion_is_flagged(self):
+        nid = self.add_complete()
+        self.run_it(nid)
+        rc, out, _ = self.g("check")
+        self.assertIn("arm_without_legend", [f["invariant"] for f in out["findings"]])
+
+    def test_writing_the_expansion_clears_it(self):
+        nid = self.add_complete()
+        self.run_it(nid)
+        self.g("set", "--id", nid, "--set",
+               "varies=--sku_ce (decoder matching branch only)")
+        rc, out, _ = self.g("check")
+        self.assertNotIn("arm_without_legend", [f["invariant"] for f in out["findings"]])
+
+    def test_status_prints_every_open_arm_expanded(self):
+        nid = self.add_complete()
+        self.run_it(nid, run_id="sm")
+        self.g("set", "--id", nid, "--set", "varies=--sku_embed, lr 3e-5")
+        rc, out, _ = self.g("status")
+        arms = {a["run_id"]: a for a in out["arms"]}
+        self.assertIn("sm", arms, "an open arm missing from `status` is the whole defect")
+        self.assertEqual(arms["sm"]["varies"], "--sku_embed, lr 3e-5")
+        self.assertEqual(arms["sm"]["serves"], "run_A")
+        self.assertTrue(arms["sm"]["since"],
+                        "how long it has been running is derived from history, "
+                        "not stored twice")
+
+    def test_an_arm_serving_no_registered_question_says_so(self):
+        """Drift's shape: the arm is fine, the queue never asked for it."""
+        rc, out, _ = self.g("add", "--title", "lr sweep", "--kind", "measurement",
+                            "--criterion", "AP up", "--guardrail", "AP50",
+                            "--kill-condition", "flat")
+        nid = out["id"]
+        self.g("set", "--id", nid, "--set", "oracle_ceiling=1.0",
+               "--set", "varies=lr 1e-4")
+        self.run_it(nid)
+        rc, out, _ = self.g("status")
+        arm = [a for a in out["arms"] if a["id"] == nid][0]
+        self.assertIsNone(arm["serves"])
+
+
 if __name__ == "__main__":
     unittest.main()

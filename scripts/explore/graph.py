@@ -56,6 +56,12 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__))), "shared"))
+# ‼️ Imported, not re-derived. Where a round's artifact lives is `/ara`'s to say
+# and only its; a second `os.path.join(project, "ara")` here is the copy that
+# stops matching the day a topic gets one, with nothing raising on either side.
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(
+    os.path.abspath(__file__))), "ara"))
+from ara import artifacts_dir  # noqa: E402
 from _records import (atomic_write_json, broke, digits as _digits,  # noqa: E402
                       emit, now_utc, read_json, refuse)
 from _vocab import PROVENANCE, TIERS  # noqa: E402
@@ -797,6 +803,22 @@ def _derive_state(node, by_id, corpus):
     return "ready", {}
 
 
+def _opened_at(node):
+    """When this arm opened, off the history -- not a field anyone maintains.
+
+    `history` already records every transition, so a second stored timestamp
+    would be a value with two authors (CLAUDE.md). Falls back to the last entry
+    for a card whose `running` transition was never written: the arm is open by
+    derivation (run_id and no result) whatever the label says, and reporting
+    `since: null` for it would hide exactly the card that most needs reading.
+    """
+    hist = node.get("history") or []
+    for h in reversed(hist):
+        if h.get("to") == "running":
+            return h.get("at")
+    return hist[-1].get("at") if hist else None
+
+
 def _missing_fields(node):
     req = list(REQUIRED_COMMON) + list(REQUIRED_BY_KIND.get(node.get("kind"), ()))
     out = []
@@ -972,6 +994,13 @@ def cmd_add(a):
     node = {
         "id": nid,
         "title": a.title,
+        # ‼️ The arm's name is `run_id`; this is what the name MEANS. Nothing in
+        # this record used to hold it, and the omission is invisible while the
+        # session that coined the names is still open. The recorded round ran
+        # eight arms called sm / sl / sm1 / sl1 / sb and the person driving it
+        # had to ask what configuration each one was -- then, separately, which
+        # question they served. Both answers existed only in a context window.
+        "varies": a.varies,
         "kind": a.kind,
         "state": "draft",
         "provenance": a.provenance,
@@ -1839,6 +1868,20 @@ def cmd_check(a):
                      f"verdict holds only if {still} lands as assumed. Quote it "
                      f"with that clause or not at all")
 
+        # 2d. MLClaw add -- an open arm whose name nobody can expand. `run_id` is
+        # a name (`sm`, `sl1`, `e13qh`); `varies` is what it means. Major rather
+        # than critical because the arm is running correctly -- what is broken is
+        # the record, and it breaks silently: while the session that coined the
+        # name is open, the expansion is in somebody's context and the gap is
+        # invisible. It becomes visible one compaction later, when the run is
+        # still going and the only remaining answer is a guess. Reported, never
+        # repaired -- nothing here can reconstruct what an arm varies.
+        if dst in ("running", "filled") and not n.get("varies"):
+            flag("major", "arm_without_legend", nid,
+                 f"run_id {n.get('run_id')!r} has no `varies` -- the arm's name has "
+                 f"no expansion on the record. Write it with "
+                 f"`set --id {nid} --set varies=…`, in the form it is switched")
+
         # 3. every kill has a typed cause and a revival condition
         if st == "killed":
             if n.get("killed_by") not in KILLED_BY:
@@ -2124,10 +2167,16 @@ def cmd_check(a):
     open_cards = [n["id"] for n in nodes
                   if _derive_state(n, by_id, corpus)[0] not in SETTLED]
     if settled_at:
-        adir = os.path.join(a.project, "ara")
+        # ‼️ The artifact for THIS topic, not merely the newest one in the project.
+        # Keyed on `built_at` alone, an artifact built for topic B satisfies topic
+        # A's check as well -- the two rounds share nothing but a clock, and the
+        # check reads as green over a round nobody ever wrote up.
+        adir = artifacts_dir(a.project, a.session)
         built = None
         for d in sorted(os.listdir(adir)) if os.path.isdir(adir) else []:
             rec = read_json(os.path.join(adir, d, "ara.json"), required=False) or {}
+            if rec.get("session") != a.session:
+                continue
             if rec.get("built_at") and (built is None or rec["built_at"] > built):
                 built = rec["built_at"]
         if built is None:
@@ -2286,6 +2335,26 @@ def cmd_status(a):
                            "disputed": d["disputed"], "detail": d.get("detail")}
                           for d in graph.get("disputes", []) if d.get("state") == "open"],
         "awaiting_verdict": [i for i, st in derived.items() if st == "filled"],
+        # ‼️ The open arms, EXPANDED. Everything else on this screen is about the
+        # graph's health; this row is the one a person actually asks for, and it
+        # was the one thing `status` could not answer. The recorded round spent
+        # roughly a third of the user's turns on "what configuration is this
+        # arm", "which question is it serving" and "how long has it been going" --
+        # three questions whose answers were all already on disk, in three
+        # different places, none of them here. `serves` reads null exactly when
+        # an arm is running for no registered question, which is the shape drift
+        # takes: in that round an lr sweep and a depth line opened while the
+        # registered question was where SKU gets injected, and the user cut both
+        # by hand.
+        "arms": [{"id": n["id"],
+                  "run_id": n.get("run_id"),
+                  "varies": n.get("varies"),
+                  "serves": (n.get("parent") or None),
+                  "title": n.get("title"),
+                  "state": derived[n["id"]],
+                  "tier": n.get("tier"),
+                  "since": _opened_at(n)}
+                 for n in nodes if derived[n["id"]] in ("running", "filled")],
         "updated_at": graph.get("updated_at"),
     })
 
@@ -2302,6 +2371,13 @@ def main():
     common(a)
     a.add_argument("--title", required=True)
     a.add_argument("--kind", required=True, choices=KINDS)
+    a.add_argument("--varies",
+                   help="what this arm CHANGES against its parent, written the "
+                        "way it is switched: `--sku_ce (decoder matching branch "
+                        "only)`. This is the expansion of the arm's name, and it "
+                        "is what `status` prints beside `run_id` -- a name whose "
+                        "expansion lives only in the session that coined it "
+                        "cannot be read a week later, or by the next agent")
     a.add_argument("--premise")
     a.add_argument("--criterion")
     a.add_argument("--guardrail", action="append")
