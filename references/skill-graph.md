@@ -191,7 +191,7 @@ around, and nothing in the record says so afterwards.
 | Unit | one point in `runtime_params` | one **proposal**: a hypothesis, a pre-registered criterion, a guardrail, a kill condition |
 | What holds still | code SHA + dataset + split + mode + scope — the comparability contract that makes trials one *series* | nothing by construction: each arm is judged against its own control and a measured noise floor |
 | Output | a config | a decision about what the model is — and a `/conclude` belief, because a winning arm is a result, not yet a conclusion |
-| Record | `tune_sessions/<id>/state.json` + `chain.md` | `stages/exploration/graph.json` |
+| Record | `tune_sessions/<id>/state.json` + `chain.md` | `stages/exploration/graph.json`, or `sessions/<topic>/graph.json` once there is more than one topic — `layout.md` is its author |
 
 **They leave behind the same artifact.** Both records are `trace/` in `/ara`'s five layers, and
 an exploration simply fills that layer more heavily because it has more process to record —

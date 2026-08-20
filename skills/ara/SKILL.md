@@ -42,12 +42,24 @@ exactly how the file nobody thought of gets lost, and it reports success while d
 ## Two verbs
 
 ```
-<mlclaw_root>/scripts/ara/ara.py build --project <P> [--root <R>] [--out <D>]
-<mlclaw_root>/scripts/ara/ara.py check --project <P>
+<mlclaw_root>/scripts/ara/ara.py build --project <P> [--session <T>] [--root <R>] [--out <D>]
+<mlclaw_root>/scripts/ara/ara.py check --project <P> [--session <T>]
 ```
 
 `build` layers a **project** by default; `--root` points it at a different tree (`/evacuate`
 passes the path on the machine that is about to disappear).
+
+`--session <T>` says **which round this is** — an exploration topic. The artifact then lands at
+`stages/exploration/sessions/<T>/ara/ara_{ts}/`, beside the `graph.json` it was built out of,
+and `ara.json` records the topic. Omit it for a tune round, a repro round, or an evacuation
+building one against a deadline: those keep `<project>/ara/`, because a tune round's artifact
+and an exploration round's are the same object and only one of them has a topic to be filed
+under. ‼️ The topic owns its cards and its artifact, **never the ruler** — `config.json`,
+`baseline.json` and `state.json` stay at `stages/exploration/`.
+
+Without it, `graph.py check` can only ask *"is there a newer artifact"*; with it, it can ask
+*"is there one for THIS topic"* — and in a project running two topics those are different
+questions, the first of which is answered green by a write-up of the other round.
 
 ‼️ **Every `build` produces a new dated artifact and never overwrites the last one.** An
 artifact is a **dated reading**, the same kind of thing as a census or an evacuation record.

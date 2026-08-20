@@ -441,12 +441,27 @@ stages/
                                       Re-measured with the SAME ruler each round and diffed
     baseline.json                   ← the noise floor + the two /eval-run ids it came from
     audit.json                      ← the four-state audit of this repo, + the cost profile
-    graph.json                      ← the experiment graph: cards, seven states, dependency
-                                      edges. The only order-of-work truth. `graph.py` owns it
     state.json                      ← what expires: constants, tier assignments, the kill list
                                       with revival conditions. Voided by a change of weights,
                                       frame selection, metric or corpus snapshot
+    graph.json                      ← the experiment graph: cards, seven states, dependency
+                                      edges. The only order-of-work truth. `graph.py` owns it.
+                                      Flat while the project runs ONE topic
+    sessions/<topic>/               ← one exploration topic, once there is more than one
+      graph.json                      that topic's cards — `--session <topic>` on any `graph.py`
+      ara/ara_{ts}/                   verb routes here — and the artifact built out of them
 ```
+
+‼️ **A topic owns its cards and its artifact. It does not own the ruler.** `--session <topic>`
+routes `graph.json` to `stages/exploration/sessions/<topic>/`, and `ara.py build --session
+<topic>` lands that round's artifact beside it. The five files **above** `sessions/` do not move
+and are read from `stages/exploration/` **even when a session is given** (`graph.py -> _paths`,
+`config` / `baseline` / `state` pinned there by construction). The reason is the comparability
+rule one level down: two topics scored against different corpora, metrics or noise floors are
+not comparable, and a per-topic copy of a ruler is exactly how one ruler becomes two — each
+internally consistent, neither able to notice. A project with a single topic omits `sessions/`
+and keeps `graph.json` flat; nothing has to be migrated when the second topic appears, because
+the flat graph is `--session`-less and stays where it is.
 
 ‼️ **`exploration/` has no `runs/`, and the absence is the design.** An arm is an ordinary run
 under `stages/training/runs/` (or `evaluation/` for a measurement-only card), cited from a card
@@ -466,7 +481,7 @@ one.
 | a remote run's outputs | `stages/{stage}/runs/{run_id}/` | the path-mapping rule: project-relative path is identical on both machines, only the root prefix changes (`run-mechanics.md` → "Path Mapping") |
 | a dataset | the dataset's `via: local` location — `working`, else `authority`. None declared → `datasets/{id}/bytes/`, **declared into `locations[]` as it is created** | `datasets/{id}/dataset.json → locations[]` |
 | a machine being evacuated | `evacuations/{evac_id}/recovered/`, and offsite to `s3://{aws.s3_bucket}/{project}/{evac_id}/` | `resources.json → aws.s3_bucket` + the evacuation id |
-| a round's artifact | `ara/ara_{ts}/` | the project and the clock |
+| a round's artifact | `ara/ara_{ts}/` — or `stages/exploration/sessions/<topic>/ara/ara_{ts}/` when the round **is** a topic | the project, the topic if it has one, and the clock |
 
 ‼️ **A destination the caller invents is the defect this closes, and its cost is not
 untidiness.** A census reads `dataset.json → locations[]` and nothing else, so data pulled to

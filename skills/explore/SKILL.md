@@ -128,8 +128,17 @@ stages/exploration/
   audit.json       the four-state audit table + the cost profile (Stage 1 / 1.5)
   graph.json       ‼️ the experiment graph. Node cards · seven states · dependency edges — the single source of truth about order
   state.json       the things that expire: the constants table · the tiering table · the killed list with revival conditions
+  sessions/<topic>/            ← once the project runs more than one topic
+    graph.json                   that topic's cards (`--session <topic>` on any graph.py verb)
+    ara/ara_{ts}/                the artifact built out of them (`ara.py build --session <topic>`)
 stages/<target_stage>/runs/   ← arms live here, not under exploration
 ```
+
+‼️ **The five files above `sessions/` are the RULER and do not move** — `graph.py -> _paths`
+reads `config` / `baseline` / `state` from `stages/exploration/` even when `--session` is given.
+Two topics scored against different corpora or noise floors are not comparable, and a per-topic
+copy of a ruler is how one ruler becomes two with nothing raising. Authority for this tree is
+`<mlclaw_root>/references/layout.md`.
 
 **`graph.json` is the half a machine reads; `config.json -> design_doc` points at the half a
 person reads.** They are not copies of each other: `graph.py check` reads the first, a person

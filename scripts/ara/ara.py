@@ -318,11 +318,46 @@ def render(project, root, counts, byte_totals, repro, concs, title, extra=None,
     return L
 
 
-def artifacts_dir(project):
+def artifacts_dir(project, session=None):
+    """Where a round's artifacts live: the project, or the TOPIC if it has one.
+
+    ‼️ The same split `graph.py -> _paths` already draws, and for its reason. An
+    exploration topic owns its cards, so it owns the artifact built out of them.
+    The RULER those cards were measured against -- `config.json`,
+    `baseline.json`, `state.json` -- stays at `stages/exploration/` and is
+    deliberately NOT copied down, because two topics scored against different
+    corpora or noise floors are not comparable, and a per-topic copy of a ruler
+    is how they stop being one ruler without anything raising.
+
+    A round that is not a topic keeps `<project>/ara/`: a tune round's artifact
+    and an exploration round's are the same object, and `evacuate.py clearance`
+    builds one against a deadline with no topic in hand.
+    """
+    if session:
+        return os.path.join(project, "stages", "exploration", "sessions",
+                            session, "ara")
     return os.path.join(project, "ara")
 
 
-def resolve_out(project, aid=None, out=None, *, create=False):
+def all_artifacts_dirs(project):
+    """EVERY artifact store in the project -- the flat one and every topic's.
+
+    ‼️ A build excludes all of them, not merely its own. `_excluded_under`'s
+    reason -- a second build sweeping the first one's copies back in -- stopped
+    being satisfied by "my own directory" the moment topics existed: topic B's
+    build swallowed topic A's finished artifact and reported it as B's own `src`
+    layer, which is a build that describes a round it never read.
+    """
+    dirs = [artifacts_dir(project)]
+    sess = os.path.join(project, "stages", "exploration", "sessions")
+    for d in sorted(os.listdir(sess)) if os.path.isdir(sess) else []:
+        cand = os.path.join(sess, d, "ara")
+        if os.path.isdir(cand):
+            dirs.append(cand)
+    return dirs
+
+
+def resolve_out(project, aid=None, out=None, *, create=False, session=None):
     """Where one artifact lives. Dated, and NEVER overwritten by default.
 
     ‼️ An artifact is a dated reading, like a census or an evacuation -- not a
@@ -336,7 +371,7 @@ def resolve_out(project, aid=None, out=None, *, create=False):
     """
     if out:
         return os.path.expanduser(out)
-    base = artifacts_dir(project)
+    base = artifacts_dir(project, session)
     if aid:
         return os.path.join(base, aid)
     if create:
@@ -355,7 +390,8 @@ def resolve_out(project, aid=None, out=None, *, create=False):
                  if os.path.isdir(os.path.join(base, d)))
     if not ids:
         refuse(f"no artifact under {base}",
-               fix="`ara.py build --project <p>` first")
+               fix="`ara.py build --project <p>"
+                   + (f" --session {session}" if session else "") + "` first")
     return os.path.join(base, ids[-1])
 
 
@@ -366,11 +402,12 @@ def cmd_build(a):
         refuse(f"cannot read {root}",
                why="nothing answered, which is `unverifiable` -- never record it "
                    "as 'there was nothing there'")
-    out = resolve_out(project, a.id, a.out, create=True)
+    out = resolve_out(project, a.id, a.out, create=True, session=a.session)
     os.makedirs(out, exist_ok=True)
 
     counts, byte_totals, members = layer_index(
-        root, exclude=_excluded_under(root, artifacts_dir(project), out))
+        root, exclude=_excluded_under(
+            root, *all_artifacts_dirs(project), out))
     repro = reproducibility(root)
     concs = _conclusions(project)
 
@@ -386,7 +423,8 @@ def cmd_build(a):
     # holds a `config.json` from every stage, and flattening to a basename
     # would have one silently overwrite another.
     copied, copied_from = [], []
-    for rel in record_files(project, skip=(artifacts_dir(project), out)):
+    for rel in record_files(project,
+                            skip=tuple(all_artifacts_dirs(project)) + (out,)):
         layer = classify(rel)
         origin = os.path.join(project, rel.replace("/", os.sep))
         dst = os.path.join(out, layer, rel.replace("/", os.sep))
@@ -424,7 +462,11 @@ def cmd_build(a):
         fh.write("\n".join(lines) + "\n")
 
     rec = {"built_at": now_utc(), "project": os.path.basename(os.path.abspath(project)),
-           "root": root, "layers": counts, "bytes": byte_totals,
+           # ‼️ Which round this is, not merely when it was built. Without it the
+           # only association between an artifact and the cards it covers is
+           # `built_at` vs a settlement timestamp -- a comparison that answers
+           # "is there a NEWER artifact", never "is there one for THIS topic".
+           "session": a.session, "root": root, "layers": counts, "bytes": byte_totals,
            "reproducible": repro, "conclusions": _snapshot_of(concs),
            "copied": copied}
     atomic_write_json(os.path.join(out, "ara.json"), rec)
@@ -459,7 +501,7 @@ def cmd_check(a):
     changes when its evidence rots.
     """
     project = os.path.expanduser(a.project)
-    out = resolve_out(project, a.id, a.out)
+    out = resolve_out(project, a.id, a.out, session=a.session)
     rec = read_json(os.path.join(out, "ara.json"), required=False)
     if rec is None:
         refuse(f"no artifact at {out}", fix="`ara.py build --project <p>` first")
@@ -522,6 +564,11 @@ def main():
 
     s = sub.add_parser("build")
     s.add_argument("--project", required=True)
+    s.add_argument("--session", default=None,
+                   help="the exploration topic this round belongs to. Lands the "
+                        "artifact under `stages/exploration/sessions/<s>/ara/` "
+                        "beside the graph it was built from; omit for a tune or "
+                        "repro round, which keeps `<project>/ara/`")
     s.add_argument("--root", default=None,
                    help="what to classify. Defaults to the project; `/evacuate` "
                         "passes the doomed machine's path instead")
@@ -535,6 +582,7 @@ def main():
 
     s = sub.add_parser("check")
     s.add_argument("--project", required=True)
+    s.add_argument("--session", default=None)
     s.add_argument("--out", default=None)
     s.add_argument("--id", default=None, help="default: the newest")
     s.add_argument("--no-fail", action="store_true")
