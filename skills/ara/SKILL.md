@@ -4,10 +4,11 @@ description: >
   Assemble a round's scattered output into one Agent-Native Research Artifact — five layers,
   an ARTIFACT.md a person can still read a year later, and a freshness check that says whether
   the frozen copy still agrees with the live record. This is the packaging step, not the
-  thinking step: it moves and freezes what already exists. Trigger for "把这轮的东西整理成一份",
-  "出一份工件", "交接给别人", "这轮的产出在哪", "ARA", "整理成可复现的一份", "归档这一轮",
-  and before citing an old artifact, whose statuses and tiers were frozen at build time and do
-  not update themselves.
+  thinking step: it moves and freezes what already exists. Trigger at the end of an
+  exploration or a tune session, after /conclude, and whenever somebody says
+  "把这轮的东西整理成一份", "出一份工件", "交接给别人", "这轮的产出在哪", "ARA",
+  "整理成可复现的一份", "归档这一轮". Also trigger before citing an old artifact, because its
+  statuses and tiers were frozen at build time and do not update themselves.
 ---
 
 # /ara — a round's work, made into an artifact somebody can read
