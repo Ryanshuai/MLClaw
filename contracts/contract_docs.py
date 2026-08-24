@@ -718,6 +718,26 @@ class TemplateMetaIsTheOneAuthorOfTemplateRelationships(unittest.TestCase):
                              "meta.json restates ordering via `%s`; that is "
                              "skill-graph.md's" % key)
 
+    def test_an_output_shape_pointer_resolves(self):
+        """A pointer to a template that is not there is worse than no pointer: it
+        reads as an answer. Same rule as the citation checks above."""
+        for g, spec in self.meta["groups"].items():
+            ptr = spec.get("output_shape")
+            if ptr is None:
+                continue
+            self.assertIn(ptr, self.meta["templates"],
+                          "%s -> output_shape %r names no template" % (g, ptr))
+
+    def test_a_folder_with_its_own_output_does_not_point_elsewhere(self):
+        """Two authors of one fact. A folder holding `output.json` already declares
+        its output shape; a pointer beside it can only disagree, and nothing would
+        raise when it did."""
+        for g, spec in self.meta["groups"].items():
+            own = "%s/output.json" % g in self.meta["templates"]
+            if own:
+                self.assertIsNone(spec.get("output_shape"),
+                                  "%s declares output.json AND an output_shape pointer" % g)
+
     def test_the_stage_fallback_names_a_real_group(self):
         fb = self.meta.get("stage_fallback")
         self.assertIn(fb, self.meta["groups"],
