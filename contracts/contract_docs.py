@@ -265,7 +265,7 @@ class LayoutTreeMatchesDisk(unittest.TestCase):
     running `ls`, which is why a stale branch does not self-correct — whoever
     trusts it never looks. Three drifts were sitting in it at once: the six
     scripts under `scripts/infer-run/` had moved wholesale into `shared/` and
-    the old path was still the one written down, the entire `lifecycle/training/`
+    the old path was still the one written down, the entire `template/training/`
     template dir was absent, and the root entry called CLAUDE.md "this file".
 
     Directory granularity, deliberately. Per-file alignment would turn every new
@@ -324,7 +324,7 @@ class CitationsResolve(unittest.TestCase):
 
         Scoped to the whole repo, not just `.claude/`: when this check only
         walked the skill tree, nine dangling citations were sitting in
-        `lifecycle/` — five of them in files added by the very change that moved
+        `template/` — five of them in files added by the very change that moved
         the sections.
         """
         dangling = []
@@ -631,6 +631,98 @@ class AProjectCarriesAPointerBackToTheRules(unittest.TestCase):
             with open(os.path.join(root, "CLAUDE.md"), encoding="utf-8") as fh:
                 self.assertEqual(fh.read(), "mine\n")
             self.assertIn("already exists", out.stderr)
+
+
+TEMPLATE_ROOT = os.path.join(REPO_ROOT, "template")
+TEMPLATE_KINDS = {"stage-config", "record", "project", "workspace", "reference"}
+
+
+class TemplateMetaIsTheOneAuthorOfTemplateRelationships(unittest.TestCase):
+    """CLAUDE.md -> "Key design principles": one folder per link, the
+    folders flat, and `template/meta.json` carrying the relationships the tree cannot
+    state. Enforces the manifest against the directory in both directions, because a
+    manifest that silently misses a file is worse than none -- `init_project.py` now
+    derives its copy set from it, so an unlisted template is one that never reaches a
+    project and nothing raises.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        with open(os.path.join(TEMPLATE_ROOT, "meta.json"), encoding="utf-8") as f:
+            cls.meta = json.load(f)
+        cls.disk = set()
+        for dirpath, _, files in os.walk(TEMPLATE_ROOT):
+            for fn in files:
+                if not fn.endswith(".json"):
+                    continue
+                rel = os.path.relpath(os.path.join(dirpath, fn), TEMPLATE_ROOT)
+                if rel != "meta.json":
+                    cls.disk.add(rel.replace(os.sep, "/"))
+
+    def test_every_template_on_disk_is_declared(self):
+        missing = sorted(self.disk - set(self.meta["templates"]))
+        self.assertFalse(missing, "in template/ but not in meta.json, so /project-init "
+                                  "cannot see them: %s" % missing)
+
+    def test_every_declared_template_exists(self):
+        gone = sorted(set(self.meta["templates"]) - self.disk)
+        self.assertFalse(gone, "declared in meta.json and not on disk: %s" % gone)
+
+    def test_the_folders_are_flat(self):
+        """A sub-folder used to be dropped SILENTLY: `copy_stage_templates` globbed
+        `*.json` and `continue`d on everything else. Flat is the contract, so it is
+        checked here rather than left to be discovered as an empty stage directory."""
+        nested = sorted(
+            os.path.relpath(os.path.join(d, sub), TEMPLATE_ROOT).replace(os.sep, "/")
+            for d, subs, _ in os.walk(TEMPLATE_ROOT) for sub in subs
+            if os.path.relpath(d, TEMPLATE_ROOT) != ".")
+        self.assertFalse(nested, "template/ nests, which nothing copies: %s" % nested)
+
+    def test_every_kind_is_one_of_the_five(self):
+        bad = {rel: spec.get("kind") for rel, spec in self.meta["templates"].items()
+               if spec.get("kind") not in TEMPLATE_KINDS}
+        self.assertFalse(bad, "unknown kind (init would copy nothing for it): %s" % bad)
+
+    def test_group_matches_the_folder_it_sits_in(self):
+        for rel, spec in self.meta["templates"].items():
+            want = rel.split("/")[0] if "/" in rel else None
+            self.assertEqual(spec.get("group"), want,
+                             "%s: meta says group %r, the tree says %r"
+                             % (rel, spec.get("group"), want))
+
+    def test_every_group_is_declared(self):
+        used = {spec["group"] for spec in self.meta["templates"].values()
+                if spec.get("group")}
+        undeclared = sorted(used - set(self.meta["groups"]))
+        self.assertFalse(undeclared, "folders with no `groups` entry: %s" % undeclared)
+
+    def test_a_stage_group_names_a_declared_stage(self):
+        """`stage: true` is a claim about `project.json -> stages`. Wrong, and init
+        copies a folder for a stage that cannot be enabled -- or skips one that can."""
+        with open(os.path.join(TEMPLATE_ROOT, "project.json"), encoding="utf-8") as f:
+            stages = set((json.load(f).get("stages") or {}))
+        for g, spec in self.meta["groups"].items():
+            if spec.get("stage"):
+                self.assertIn(g, stages, "meta calls `%s` a stage; project.json does not" % g)
+
+    def test_meta_declares_no_order(self):
+        """‼️ Order is `references/skill-graph.md`'s. A second author of the dependency
+        graph is the defect this refactor removed, so the fields that would reintroduce
+        it are refused here rather than in review."""
+        forbidden = ("after", "before", "depends_on", "requires", "phase", "order",
+                     "next", "step")
+        blob = json.dumps({"groups": self.meta["groups"],
+                           "templates": self.meta["templates"]})
+        for key in forbidden:
+            self.assertNotIn('"%s"' % key, blob,
+                             "meta.json restates ordering via `%s`; that is "
+                             "skill-graph.md's" % key)
+
+    def test_the_stage_fallback_names_a_real_group(self):
+        fb = self.meta.get("stage_fallback")
+        self.assertIn(fb, self.meta["groups"],
+                      "stage_fallback %r is not a folder, so a stage with no templates "
+                      "of its own gets none" % fb)
 
 
 if __name__ == "__main__":

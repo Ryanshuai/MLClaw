@@ -1,0 +1,227 @@
+{
+  "_comment": "What is in `template/`, and how each file reaches a project. ONE FOLDER PER LINK, THE FOLDERS FLAT — no folder contains another — and this file carries the relationships the directory tree cannot state on its own.\n\nThe old name was `lifecycle/`, and it was wrong in a way that cost real errors: this project uses `lifecycle` for something real — the ML lifecycle, the data lifecycle, `/data-report`'s rendered board — so a directory of shapes had borrowed the domain's word. Read as an ordered process it invited the two questions it cannot answer: is `exploration` a phase after `evaluation`, and does a sub-step nest under a stage? Neither is here. ‼️ ORDER IS `references/skill-graph.md`'s (requires / suggests) and NOTHING in this file may restate it — a second author of the dependency graph is the defect this refactor removed, not one to reintroduce. So there is no `after`, no `depends_on`, and no phase number.\n\n‼️ Nesting below a folder is not expressible and never was: `copy_stage_templates` globbed `*.json` and `continue`d on everything else, so a subdirectory was dropped SILENTLY — not warned, not failed. A sub-step therefore is not a sub-folder. Its options are the three `kind`s below, and which one it is depends on how many instances it has, never on what it sits under.",
+  "_comment_groups": "One entry per folder. `stage: true` means the folder's name is also a key in `project.json -> stages`, so `/project-init` copies its `stage-config` templates into `stages/<group>/` when that stage is enabled. `stage: false` folders were never copied by init at all — they hold record shapes their own skill instantiates, and the folder only ever meant WHO OWNS THIS.\n\nThat distinction is the one the tree could not state, and the reason this file exists: `training/` and `knowledge/` look identical on disk and reach a project by two different mechanisms.",
+  "groups": {
+    "adaptation": {
+      "stage": false,
+      "kind": "record"
+    },
+    "ara": {
+      "stage": false,
+      "kind": "record"
+    },
+    "ask-human": {
+      "stage": false,
+      "kind": "record"
+    },
+    "data": {
+      "stage": true,
+      "kind": "stage-config"
+    },
+    "data-label": {
+      "stage": false,
+      "kind": "record"
+    },
+    "evacuate": {
+      "stage": false,
+      "kind": "record"
+    },
+    "eval-triage": {
+      "stage": false,
+      "kind": "record"
+    },
+    "evaluation": {
+      "stage": true,
+      "kind": "stage-config"
+    },
+    "exploration": {
+      "stage": true,
+      "kind": "stage-config"
+    },
+    "inference": {
+      "stage": true,
+      "kind": "stage-config"
+    },
+    "knowledge": {
+      "stage": false,
+      "kind": "record"
+    },
+    "refactor": {
+      "stage": true,
+      "kind": "stage-config"
+    },
+    "repro": {
+      "stage": false,
+      "kind": "record"
+    },
+    "training": {
+      "stage": true,
+      "kind": "stage-config"
+    }
+  },
+  "_comment_templates": "One entry per file, keyed by its path under `template/`. `kind` is how it gets to a project — and it used to be FOUR UNRELATED MECHANISMS: two hand-written lists in `init_project.py` (`PROJECT_TEMPLATES`, `RUN_RECORD_TEMPLATES`) plus, for the other two, POSITION. Nothing outside that module could read any of them.\n\n  stage-config  copied into `stages/<group>/<name>` at init, once per enabled stage\n  record        instantiated per run / per session / per round by the script or skill\n                that writes it. Init never copies one\n  project       copied into the project root at init\n  workspace     copied into the WORKSPACE root, not the project\n  reference     nothing reads it; `/project-init` fills its shape and passes the result in as an argument\n\n‼️ `kind` travels with the FILE, not with the folder, and `refactor/refactor_run.json` is why: a record template sitting among a stage's configs. That was `RUN_RECORD_TEMPLATES`, a set in `init_project.py` — so `/refactor-run` had no way to ask, and a reader of the folder had no way to tell.\n\n‼️ `data/*` is recorded `stage-config` because `data` is a declared stage and init copies it TODAY — the observable fact, and this refactor changed no behaviour. Whether a dataset contract belongs in `stages/data/` at all, when its instances live at `datasets/<id>/dataset.json`, is an OPEN QUESTION this entry does not settle.",
+  "templates": {
+    "history.json": {
+      "group": null,
+      "kind": "project"
+    },
+    "project.json": {
+      "group": null,
+      "kind": "reference"
+    },
+    "resources.json": {
+      "group": null,
+      "kind": "workspace"
+    },
+    "run.json": {
+      "group": null,
+      "kind": "record"
+    },
+    "adaptation/session.json": {
+      "group": "adaptation",
+      "kind": "record"
+    },
+    "ara/ara.json": {
+      "group": "ara",
+      "kind": "record"
+    },
+    "ask-human/ask.json": {
+      "group": "ask-human",
+      "kind": "record"
+    },
+    "data/dataset.json": {
+      "group": "data",
+      "kind": "stage-config"
+    },
+    "data/online_window.json": {
+      "group": "data",
+      "kind": "stage-config"
+    },
+    "data/rig.json": {
+      "group": "data",
+      "kind": "stage-config"
+    },
+    "data-label/handoff.json": {
+      "group": "data-label",
+      "kind": "record"
+    },
+    "evacuate/evacuation.json": {
+      "group": "evacuate",
+      "kind": "record"
+    },
+    "eval-triage/session.json": {
+      "group": "eval-triage",
+      "kind": "record"
+    },
+    "evaluation/artifacts.json": {
+      "group": "evaluation",
+      "kind": "stage-config"
+    },
+    "evaluation/config.json": {
+      "group": "evaluation",
+      "kind": "stage-config"
+    },
+    "evaluation/input.json": {
+      "group": "evaluation",
+      "kind": "stage-config"
+    },
+    "evaluation/output.json": {
+      "group": "evaluation",
+      "kind": "stage-config"
+    },
+    "exploration/audit.json": {
+      "group": "exploration",
+      "kind": "stage-config"
+    },
+    "exploration/baseline.json": {
+      "group": "exploration",
+      "kind": "stage-config"
+    },
+    "exploration/config.json": {
+      "group": "exploration",
+      "kind": "stage-config"
+    },
+    "exploration/findings.json": {
+      "group": "exploration",
+      "kind": "stage-config"
+    },
+    "exploration/graph.json": {
+      "group": "exploration",
+      "kind": "stage-config"
+    },
+    "exploration/state.json": {
+      "group": "exploration",
+      "kind": "stage-config"
+    },
+    "inference/artifacts.json": {
+      "group": "inference",
+      "kind": "stage-config"
+    },
+    "inference/config.json": {
+      "group": "inference",
+      "kind": "stage-config"
+    },
+    "inference/input.json": {
+      "group": "inference",
+      "kind": "stage-config"
+    },
+    "inference/output.json": {
+      "group": "inference",
+      "kind": "stage-config"
+    },
+    "knowledge/conclusions.json": {
+      "group": "knowledge",
+      "kind": "record"
+    },
+    "refactor/artifacts.json": {
+      "group": "refactor",
+      "kind": "stage-config"
+    },
+    "refactor/config.json": {
+      "group": "refactor",
+      "kind": "stage-config"
+    },
+    "refactor/input.json": {
+      "group": "refactor",
+      "kind": "stage-config"
+    },
+    "refactor/output.json": {
+      "group": "refactor",
+      "kind": "stage-config"
+    },
+    "refactor/plan.json": {
+      "group": "refactor",
+      "kind": "stage-config"
+    },
+    "refactor/refactor_run.json": {
+      "group": "refactor",
+      "kind": "record"
+    },
+    "repro/session.json": {
+      "group": "repro",
+      "kind": "record"
+    },
+    "training/artifacts.json": {
+      "group": "training",
+      "kind": "stage-config"
+    },
+    "training/config.json": {
+      "group": "training",
+      "kind": "stage-config"
+    },
+    "training/input.json": {
+      "group": "training",
+      "kind": "stage-config"
+    },
+    "training/output.json": {
+      "group": "training",
+      "kind": "stage-config"
+    },
+    "training/provenance.json": {
+      "group": "training",
+      "kind": "stage-config"
+    }
+  },
+  "_comment_stage_fallback": "A declared stage with no folder of its own gets this folder's `stage-config` templates. `deployment` is the live case: a key in `project.json -> stages` with no templates, so it lands with inference's four. Preserved from `stage_template_dir`, which fell back the same way — named here rather than buried in a function, since a stage silently receiving another stage's shapes is worth being able to look up.",
+  "stage_fallback": "inference"
+}

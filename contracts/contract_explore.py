@@ -25,7 +25,7 @@ BASE_SHA = "a" * 40
 BASE = {"commit": BASE_SHA, "repo_subdir": None,
         "declared_at": "2026-08-01T00:00:00+00:00"}
 HERE = os.path.dirname(os.path.abspath(__file__))
-TEMPLATES = os.path.join(os.path.dirname(HERE), "lifecycle", "exploration")
+TEMPLATES = os.path.join(os.path.dirname(HERE), "template", "exploration")
 
 
 def _template(name):
@@ -1040,7 +1040,7 @@ class ASettledRoundLeavesSomethingToHandOver(GraphCase):
             self.assertEqual(f["severity"], "minor")
 
 class AnHonestNoiseFloorMustBeWritable(GraphCase):
-    """lifecycle/exploration/baseline.json -> `_comment_value`, and CLAUDE.md ->
+    """template/exploration/baseline.json -> `_comment_value`, and CLAUDE.md ->
     "Never record a metric you did not read" through `graph.py -> _grounding`.
 
     The floor is a SPREAD between two repeat measurements, so no log anywhere

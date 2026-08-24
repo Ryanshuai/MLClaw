@@ -108,7 +108,7 @@ Follow `<mlclaw_root>/references/run-mechanics.md` "Run Skill Internal Dependenc
 2. **Create Run** (step `create_run`) — **use the scripts; do not create the run dir by hand.**
 
    ```bash
-   python <mlclaw_root>/scripts/shared/create_run.py <stage_dir> <mlclaw_root>/lifecycle/run.json
+   python <mlclaw_root>/scripts/shared/create_run.py <stage_dir> <mlclaw_root>/template/run.json
    python <mlclaw_root>/scripts/shared/code_snapshot.py <code_dir> <RUN_DIR>   # merge into run.json -> code
    python <mlclaw_root>/scripts/shared/capture_env.py                       # → stdout; merge into run.json -> env
    python <mlclaw_root>/scripts/shared/check_deps.py  <config.json> <RUN_DIR>

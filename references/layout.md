@@ -252,11 +252,13 @@ docs/                               ← decision records + README assets. NOT `r
   roadmap.md                        ← designed, not built; nothing here has a script to call
   identity.md                       ← how many kinds of id, and who maintains them; a settled debate, not yet a contract
   mlclaw.png                        ← README asset
-lifecycle/                          ← the template set, and now ONLY that: what /project-init copies into a project
+template/                          ← record + config shapes. One folder per link, folders FLAT (no nesting). meta.json declares each file's kind; order is skill-graph.md's, never this tree's
   project.json                      ← project config template
   resources.json                    ← access credentials and resource definitions template
   history.json                      ← workflow state template
   run.json                          ← run record template
+  meta.json                         ← which folder is a stage, and how each file reaches a project. The one author of that
+  ara/                              ← ara.json: one built artifact's machine half. `kind: record` — never copied by init
   inference/                        ← inference stage JSON templates
     artifacts.json
     config.json

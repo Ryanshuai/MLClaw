@@ -27,9 +27,9 @@ from helpers import REPO_ROOT
 # failing to include it is the drift — grep for `match`: before adding one.
 DECLARES = [
     "skills/train-init/references/schemas.md",
-    "lifecycle/training/input.json",
-    "lifecycle/evaluation/input.json",
-    "lifecycle/evaluation/artifacts.json",
+    "template/training/input.json",
+    "template/evaluation/input.json",
+    "template/evaluation/artifacts.json",
 ]
 
 # The one that must never silently leave, and why it is named here rather than

@@ -1,0 +1,39 @@
+{
+  "_comment": "One built artifact — the machine half of an ARA. Written to `<project>/ara/ara_{ts}/ara.json`, or under the exploration topic that owns the round (`stages/exploration/sessions/<topic>/ara/`). Its human half is `ARTIFACT.md` beside it, and the two are NOT duplicates: this one is what `ara.py check` reads, that one is what a person reads.\n\n‼️ EVERY FIELD IS COMPUTED. Nothing here is filled by dialogue, which is what makes this template a shape and a piece of documentation rather than a form — the opposite of a stage's `config.json`. It is here anyway because it was the ONE record type in MLClaw assembled as an inline dict with nowhere to write down what its fields mean; `run.json`, `evacuate/evacuation.json`, `data-label/handoff.json` and `knowledge/conclusions.json` all had one.\n\n`kind: record` in `meta.json`, so `/project-init` never copies it: an artifact is a DATED READING and a pre-placed empty copy would be a lie about a round that has not happened. It would also break two live checks — `resolve_out` uses this file's existence for collision-free naming, and `check` uses it to decide whether an artifact is there at all.\n\n‼️ The folder is `ara/` and NOT a sub-folder of `exploration/`, because three lines build one: `/explore` at close (`graph.py check` flags a settled round with no artifact), `/train-tune-report` (a tune session ends in a belief as surely as an arm does), and `/evacuate` (a dying box is the last moment its source can be read). Filed under any one of them, the other two would have nowhere to point. The LAYER vocabulary is not here either: `SRC_NAMES` / `TRACE_NAMES` / `classify()` stay in `ara.py`, because `/evacuate` runs them against a machine's directory tree rather than a project's.",
+  "_comment_built_at": "When this reading was taken. `check` compares it against the newest card settlement: an artifact built before the last arm settled describes a different round, and says so as a finding rather than being refreshed in place.",
+  "built_at": null,
+  "_comment_project": "Basename of the project this was built from.",
+  "project": null,
+  "_comment_session": "WHICH ROUND, not merely when. Null for a project-level round; an exploration topic otherwise. ‼️ Without it the only association between an artifact and the cards it covers is `built_at` versus a settlement timestamp — a comparison that answers \"is there a NEWER artifact\" and never \"is there one for THIS topic\", so an artifact built for topic B would satisfy topic A's check.",
+  "session": null,
+  "_comment_root": "What was walked. The project on an ordinary build, and the DOOMED MACHINE'S path under `/evacuate` — which is exactly when it differs from `project`, and why both are recorded.",
+  "root": null,
+  "_comment_layers": "File counts per layer: `src` `evidence` `logic` `trace` `weights`, plus `unclassified`. Four layers are ARA's (arXiv:2604.24658); `weights` is MLClaw's addition, because a paper's knowledge regenerates from src+evidence and a 4GB checkpoint does not.\n\n‼️ `unclassified` is deliberately NOT a layer and is kept anyway, and named. A sweep that keeps only what it recognises is how the file nobody thought of gets lost, and it reports success while doing it.",
+  "layers": {
+    "src": 0,
+    "evidence": 0,
+    "logic": 0,
+    "trace": 0,
+    "weights": 0,
+    "unclassified": 0
+  },
+  "_comment_bytes": "Byte totals per layer, same keys as `layers`.",
+  "bytes": {
+    "src": 0,
+    "evidence": 0,
+    "logic": 0,
+    "trace": 0,
+    "weights": 0,
+    "unclassified": 0
+  },
+  "_comment_reproducible": "{verdict, reason, runs} — `yes` | `no` | `unknown`, THREE VALUES AND NEVER TWO. READ from each run's `code.reproducible`, never re-derived: `code_snapshot.py` computed it at launch and refused a non-git tree outright. `no` means a differing file was too large to embed, so `git checkout && git apply` rebuilds a DIFFERENT tree — which in an architecture search, where the code IS the variable, voids the comparison rather than annoying somebody.\n\nThis never blocks a build. Losing the bytes is strictly worse than saving them under an honest label.",
+  "reproducible": {
+    "verdict": null,
+    "reason": null,
+    "runs": []
+  },
+  "_comment_conclusions": "[{id, status, tier}] frozen at build time — the thing `check` diffs `knowledge/conclusions.json` against later. ‼️ STATUSES AND TIERS, not just ids, and that is the whole point: an artifact whose `logic/` still reads `supported` while the record has since gone `unverifiable` is the failure `/conclude` exists to prevent, recurring one level up in the frozen copy — and the frozen copy is the one handed to whoever takes over. Reported as drift, never repaired.",
+  "conclusions": [],
+  "_comment_copied": "`<layer>/<path>` for every project record physically copied in. Copied rather than referenced because they must stay readable without pulling the weights back down, and they are the part that survives when the weights do not. Paths are kept WHOLE — flattening to a basename would have one stage's `config.json` silently overwrite another's.",
+  "copied": []
+}

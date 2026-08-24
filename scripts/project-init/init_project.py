@@ -107,16 +107,63 @@ python <any MLClaw checkout>/scripts/shared/workspaces.py tool
 """
 
 
-# Project-level templates copied from lifecycle/ into a new project root.
-# resources.json is deliberately absent: it is workspace-level, not
-# project-level (see bootstrap_workspace_resources).
-PROJECT_TEMPLATES = ["history.json"]
+# ---------------------------------------------------------------------------
+# template/meta.json — the one author of what a template is and where it lands
+# ---------------------------------------------------------------------------
+#
+# ‼️ DERIVED, NEVER HAND-LISTED. This file used to hold two of these lists and
+# express the other two by POSITION — a template's kind was a `.json` in a stage
+# directory, or a name in a set here, and nothing outside this file could read
+# either. `template/meta.json` declares it once; `create_run.py`, `evacuate.py`
+# and every contract read the same declaration. A hand-copy here would be the
+# second author the manifest exists to remove.
+#
+# A missing or unreadable meta.json is a WARNING and not a crash, per CLAUDE.md's
+# fallback rule: init still creates the tree, and the caller is told the copy set
+# could not be resolved. Silent success with zero templates copied is the one
+# outcome this must not produce.
 
-# Run-record templates live in a stage's template dir but are instantiated
-# per run by the run skill, not per stage — never copy them as stage config.
-RUN_RECORD_TEMPLATES = {"refactor_run.json"}
-
+META = "meta.json"
 WORKSPACE_RESOURCES = "resources.json"
+
+
+def load_meta(template_root, warnings=None):
+    """-> the meta.json record, or {} with a warning appended."""
+    path = os.path.join(template_root, META)
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError) as e:
+        if warnings is not None:
+            warnings.append("could not read %s: %s — template copy set is unresolved" % (path, e))
+        return {}
+
+
+def templates_of_kind(meta, kind, group=None):
+    """[(relpath, basename)] for one kind, in declaration order.
+
+    `relpath` is the path under `template/` — `run.json` at the root,
+    `training/config.json` inside a folder — and the basename is the name it
+    lands under, which is why a folder's prefix never reaches a project.
+    """
+    return [(rel, os.path.basename(rel))
+            for rel, spec in (meta.get("templates") or {}).items()
+            if spec.get("kind") == kind
+            and (group is None or spec.get("group") == group)]
+
+
+def stage_group(meta, stage):
+    """Which group's stage-config templates a stage gets, or None.
+
+    The fallback is `meta -> stage_fallback` (today `inference`), preserved from
+    the old `stage_template_dir`: a declared stage with no templates of its own
+    lands with another stage's. `deployment` is the live case.
+    """
+    groups = meta.get("groups") or {}
+    if stage in groups:
+        return stage
+    fallback = meta.get("stage_fallback")
+    return fallback if fallback in groups else None
 
 
 class SourceLinkConflict(Exception):
@@ -257,12 +304,18 @@ def copy_if_absent(src, dst):
     return "copied"
 
 
-def copy_project_templates(lifecycle, root, warnings):
-    """Copy project-level templates. A missing template is a warning, not a crash."""
+def copy_project_templates(template_root, root, warnings, meta=None):
+    """Copy every `kind: project` template into the project root.
+
+    resources.json is deliberately not among them: it is `kind: workspace`, and
+    `bootstrap_workspace_resources` places it. That split used to be a comment
+    above a hand-written list; it is now the manifest's `kind`.
+    """
+    meta = load_meta(template_root, warnings) if meta is None else meta
     report = {"copied": [], "exists": [], "missing": []}
-    for fname in PROJECT_TEMPLATES:
-        src = os.path.join(lifecycle, fname)
-        dst = os.path.join(root, fname)
+    for fname, target in templates_of_kind(meta, "project"):
+        src = os.path.join(template_root, fname)
+        dst = os.path.join(root, target)
         try:
             result = copy_if_absent(src, dst)
         except OSError as e:
@@ -274,43 +327,49 @@ def copy_project_templates(lifecycle, root, warnings):
     return report
 
 
-def stage_template_dir(lifecycle, stage):
-    """Stage-specific template dir, else inference's, else None."""
-    specific = os.path.join(lifecycle, stage)
-    if os.path.isdir(specific):
-        return specific
-    fallback = os.path.join(lifecycle, "inference")
-    if os.path.isdir(fallback):
-        return fallback
-    return None
+def stage_config_templates(meta, stage):
+    """[(filename, target)] a stage's `stage-config` templates, fallback applied.
 
-
-def copy_stage_templates(lifecycle, stage, stage_dir, warnings):
-    """Copy a stage's JSON config templates. Returns the stage's json filenames.
-
-    Globbed rather than hardcoded so a new template file lands in projects
-    without also editing this script — provenance.json was added to training
-    and silently never copied.
+    Replaces the old `stage_template_dir` + glob. The glob was deliberate — its
+    comment recorded that `provenance.json` was added to training and silently
+    never copied, so a new file was made to land without editing this script.
+    The manifest keeps that property and adds the one the glob could not have:
+    `kind` travels WITH the file, so a record template sitting beside a stage's
+    configs is no longer distinguished by a set in this module. A subdirectory,
+    which the glob dropped in silence, cannot occur — `template/` is flat.
     """
-    template_dir = stage_template_dir(lifecycle, stage)
-    if template_dir is None:
-        warnings.append("no templates found for stage '%s', skipped template copy" % stage)
+    group = stage_group(meta, stage)
+    if group is None:
         return []
-    for jf in sorted(os.listdir(template_dir)):
-        if not jf.endswith(".json") or jf in RUN_RECORD_TEMPLATES:
-            continue
+    return templates_of_kind(meta, "stage-config", group=group)
+
+
+def copy_stage_templates(template_root, stage, stage_dir, warnings, meta=None):
+    """Copy one stage's config templates. Returns the stage's json filenames.
+
+    A `kind: record` template is never copied here — that is what
+    `RUN_RECORD_TEMPLATES` used to say, and the manifest now says it at the file.
+    """
+    meta = load_meta(template_root, warnings) if meta is None else meta
+    pairs = stage_config_templates(meta, stage)
+    if not pairs:
+        warnings.append("no templates declared for stage '%s', skipped template copy" % stage)
+        return []
+    for fname, target in pairs:
         try:
-            copy_if_absent(os.path.join(template_dir, jf), os.path.join(stage_dir, jf))
+            copy_if_absent(os.path.join(template_root, fname),
+                           os.path.join(stage_dir, target))
         except OSError as e:
-            warnings.append("could not copy %s template %s: %s" % (stage, jf, e))
+            warnings.append("could not copy %s template %s: %s" % (stage, fname, e))
+    targets = {t for _, t in pairs}
     return sorted(
         jf for jf in os.listdir(stage_dir)
-        if jf.endswith(".json") and jf not in RUN_RECORD_TEMPLATES
+        if jf.endswith(".json") and jf in targets
         and os.path.isfile(os.path.join(stage_dir, jf))
     )
 
 
-def create_stage(lifecycle, root, stage, cfg, warnings):
+def create_stage(template_root, root, stage, cfg, warnings, meta=None):
     """Create one stage's directories, copy templates, link local code source.
 
     Returns the stage's config filenames (project-relative) for git add.
@@ -320,7 +379,8 @@ def create_stage(lifecycle, root, stage, cfg, warnings):
         os.makedirs(os.path.join(stage_dir, sub), exist_ok=True)
 
     files = [os.path.join("stages", stage, jf)
-             for jf in copy_stage_templates(lifecycle, stage, stage_dir, warnings)]
+             for jf in copy_stage_templates(template_root, stage, stage_dir,
+                                            warnings, meta)]
 
     # source=local: stages/<stage>/code/_source -> expanded absolute path.
     # Filesystems don't expand ~ at read time, so the target is stored
@@ -337,7 +397,7 @@ def create_stage(lifecycle, root, stage, cfg, warnings):
 # workspace-level resources.json
 # ---------------------------------------------------------------------------
 
-def bootstrap_workspace_resources(project, lifecycle, warnings):
+def bootstrap_workspace_resources(project, template_root, warnings):
     """Seed {workspace}/resources.json from the template if it is missing.
 
     resources.json is workspace-level and shared by every project in it; it
@@ -353,7 +413,7 @@ def bootstrap_workspace_resources(project, lifecycle, warnings):
     if os.path.exists(dst):
         return {"created": False, "reason": "already exists", "path": dst}
 
-    src = os.path.join(lifecycle, WORKSPACE_RESOURCES)
+    src = os.path.join(template_root, WORKSPACE_RESOURCES)
     if not os.path.isfile(src):
         warnings.append("resources.json template not found at %s" % src)
         return {"created": False, "reason": "template missing", "path": dst}
@@ -453,7 +513,7 @@ def main():
     except ValueError as e:
         fail("project_json_str is not valid JSON: %s" % e)
     mlclaw_root = os.path.abspath(os.path.expanduser(sys.argv[2]))
-    lifecycle = os.path.join(mlclaw_root, "lifecycle")
+    template_root = os.path.join(mlclaw_root, "template")
 
     if not project.get("root"):
         fail("project config has no 'root' path")
@@ -479,19 +539,21 @@ def main():
 
     os.makedirs(root, exist_ok=True)
 
-    templates = copy_project_templates(lifecycle, root, warnings)
-    resources = bootstrap_workspace_resources(project, lifecycle, warnings)
+    meta = load_meta(template_root, warnings)
+    templates = copy_project_templates(template_root, root, warnings, meta)
+    resources = bootstrap_workspace_resources(project, template_root, warnings)
 
     portableize_project(project)
     project["created"] = datetime.now().isoformat()
     with open(os.path.join(root, "project.json"), "w", encoding="utf-8") as f:
         json.dump(project, f, indent=2)
 
-    tracked = ["project.json", ".gitignore"] + list(PROJECT_TEMPLATES)
+    tracked = ["project.json", ".gitignore"] + \
+        [t for _, t in templates_of_kind(meta, "project")]
     created_stages = []
     for stage, cfg in enabled_stages(project):
         try:
-            tracked += create_stage(lifecycle, root, stage, cfg, warnings)
+            tracked += create_stage(template_root, root, stage, cfg, warnings, meta)
         except SourceLinkConflict as e:
             # Lost a race with something that created a real _source after the
             # pre-flight check. Whatever exists on disk is left in place and

@@ -1256,7 +1256,7 @@ class TableProvenance(unittest.TestCase):
                        os.path.join(REPO_ROOT, "scripts", "lease")))
                    if f.endswith((".py", ".json"))]
         targets += [os.path.join(REPO_ROOT, "scripts", "shared", "pool.py"),
-                    os.path.join(REPO_ROOT, "lifecycle", "resources.json"),
+                    os.path.join(REPO_ROOT, "template", "resources.json"),
                     os.path.join(REPO_ROOT, "references", "fleet.md")]
         for path in targets:
             rel = os.path.relpath(path, REPO_ROOT)

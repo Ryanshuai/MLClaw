@@ -192,8 +192,8 @@ below the oracle has changed, so that ends the session and opens a successor rat
 
 ### Its record is two-way, which is what makes it new
 
-`lifecycle/adaptation/session.json`. It borrows the multi-round frame from
-`lifecycle/repro/session.json` and the per-item thread from `lifecycle/eval-triage/session.json`, and
+`template/adaptation/session.json`. It borrows the multi-round frame from
+`template/repro/session.json` and the per-item thread from `template/eval-triage/session.json`, and
 it is the first record that needs both — here the rounds and the disagreements are the same object.
 
 - **The unit is a finding, not a round.** A round raises findings; a finding outlives the round,

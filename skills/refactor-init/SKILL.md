@@ -97,7 +97,7 @@ Identify module boundaries for snapshot comparison (backbone, head, postprocessi
 Count total files and lines. Record in `plan.json -> analysis`.
 
 ### 4g. Benchmark config
-Fill 4 JSON configs (config.json, artifacts.json, input.json, output.json) for benchmark verification, same schema as `/eval-init`. Templates in `lifecycle/refactor/`.
+Fill 4 JSON configs (config.json, artifacts.json, input.json, output.json) for benchmark verification, same schema as `/eval-init`. Templates in `template/refactor/`.
 
 ## Step 5: Present Plan
 

@@ -18,7 +18,7 @@ from datetime import datetime, timedelta, timezone
 from helpers import REPO_ROOT, TempDirCase, run_script
 
 
-TEMPLATE = os.path.join(REPO_ROOT, "lifecycle", "run.json")
+TEMPLATE = os.path.join(REPO_ROOT, "template", "run.json")
 
 
 class Timestamps(TempDirCase):

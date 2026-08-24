@@ -19,7 +19,7 @@ from helpers import TempDirCase, requires_symlinks, run_script
 
 SCRIPT = "data-curate/curate.py"
 TEMPLATE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                        "lifecycle", "data", "dataset.json")
+                        "template", "data", "dataset.json")
 
 
 class CurateCase(TempDirCase):

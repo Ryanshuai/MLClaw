@@ -231,7 +231,7 @@ class ARefutedPremiseContestsItsDependentsRatherThanErasingThem(ConcludeCase):
 
 class AConclusionWithNoFalsifierIsNotAdmitted(ConcludeCase):
     """ARA (arXiv:2604.24658) `logic/claims.md` — `Falsification criteria` is a
-    mandatory field — and its MLClaw precedent, `lifecycle/run.json ->
+    mandatory field — and its MLClaw precedent, `template/run.json ->
     verifies.falsified_if`, whose rule `graph.py` already enforces: 「a
     hypothesis nothing can refute is a wish」.
 

@@ -320,7 +320,7 @@ class TemplateMatchesWhatIsWritten(unittest.TestCase):
     """
 
     def test_template_parses_and_covers_the_written_fields(self):
-        path = os.path.join(REPO_ROOT, "lifecycle", "data-label", "handoff.json")
+        path = os.path.join(REPO_ROOT, "template", "data-label", "handoff.json")
         with open(path, encoding="utf-8") as f:
             tmpl = json.load(f)
         keys = {k for k in tmpl if not k.startswith("_comment")}

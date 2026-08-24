@@ -58,7 +58,7 @@ This file answers "should we, is it worth it, do we believe it"; the seven below
 | `references/debate-roles.md` | when convening a debate | the **role prompts and rebuttal checklists** for each of the six (copy them directly) · the blind-input protocol · the six-line adjudication record format |
 | `references/run-card.md` | before opening an arm | which parts MLClaw's `run.json` already covers, **and which three it does not** · the full argument for the four hard rules · ‼️ **the four shapes in which the record layer breaks** (none of which raises) |
 | `references/human-review.md` | Stage 6.5, when a person must look | choose frames in advance with a control group · **two independent visual channels for blind review** (one channel cannot detect its own errors) · the discard rate as a metric · how a person's judgement is written back to `findings.json` |
-| `stages/exploration/state.json` | **check it first, every round** | the currently measured constants, the tiering table, the killed list. ‼️ Change the weights, the frame sampling or the metric and **the whole file is void** — the template is `lifecycle/exploration/state.json`. **It is a project record, not a skill file**, so there is no global copy to keep in sync |
+| `stages/exploration/state.json` | **check it first, every round** | the currently measured constants, the tiering table, the killed list. ‼️ Change the weights, the frame sampling or the metric and **the whole file is void** — the template is `template/exploration/state.json`. **It is a project record, not a skill file**, so there is no global copy to keep in sync |
 
 ## What this stage is, inside MLClaw
 
@@ -307,7 +307,7 @@ Permitted sources: **a person's eye** (a screenshot, "these boxes feel wrong"), 
 complaints, grasp failure rates), **training logs / metrics** (loss curves, AP, tfevents).
 
 **Every source lands first in the same `stages/exploration/findings.json`** (template at
-`lifecycle/exploration/findings.json`). JSON rather than a table, so that **after a weight change
+`template/exploration/findings.json`). JSON rather than a table, so that **after a weight change
 one command re-measures with the same ruler**, and the two can be diffed:
 
 ```json
@@ -808,7 +808,7 @@ decides the meaning of every number afterwards); **② is mandatory whenever a n
 **③ only when the tiering itself is disputed**.
 
 ➜ **The tiering table lands in `stages/exploration/state.json -> tiers`**; the format is in
-`lifecycle/exploration/state.json`'s `_comment_tiers`.
+`template/exploration/state.json`'s `_comment_tiers`.
 
 ---
 

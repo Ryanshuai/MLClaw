@@ -37,7 +37,7 @@ Step 1: Resolve Assets                        depends on: init (items defined),
 Step 2: Create Run                            depends on: assets resolved
      │  - create run dir + run.json
      │  - code snapshot — see "Code snapshot (Step 2 detail)" below
-     │  - env snapshot (packages from lifecycle/run.json template)
+     │  - env snapshot (packages from template/run.json template)
      │  - dependency check (required vs installed)
      │  - snapshot resolved assets → sources.json
      │  - if fork_of is set: compute lineage.variation_summary

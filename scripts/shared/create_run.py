@@ -49,7 +49,7 @@ def main():
         sys.stderr.write(
             "Usage: python create_run.py <stage_dir> <run_template>\n"
             "  stage_dir:    path to stages/{stage}/\n"
-            "  run_template: path to lifecycle/run.json template\n"
+            "  run_template: path to template/run.json template\n"
         )
         sys.exit(2)
 

@@ -395,6 +395,19 @@ def resolve_out(project, aid=None, out=None, *, create=False, session=None):
     return os.path.join(base, ids[-1])
 
 
+def _record_template():
+    """The `ara.json` shape, from `template/ara/ara.json`.
+
+    Per CLAUDE.md's fallback rule an unreadable template must not stop a build:
+    the keys below are written by `cmd_build` regardless, so the only thing lost
+    is the `_comment` documentation travelling into the record -- the same way
+    `create_run.py` carries `run.json`'s into every run.
+    """
+    return read_json(os.path.join(os.path.dirname(_HERE), os.pardir,
+                                  "template", "ara", "ara.json"),
+                     required=False) or {}
+
+
 def cmd_build(a):
     project = os.path.expanduser(a.project)
     root = os.path.expanduser(a.root) if a.root else project
@@ -461,14 +474,20 @@ def cmd_build(a):
     with open(md, "w", encoding="utf-8") as fh:
         fh.write("\n".join(lines) + "\n")
 
-    rec = {"built_at": now_utc(), "project": os.path.basename(os.path.abspath(project)),
-           # ‼️ Which round this is, not merely when it was built. Without it the
-           # only association between an artifact and the cards it covers is
-           # `built_at` vs a settlement timestamp -- a comparison that answers
-           # "is there a NEWER artifact", never "is there one for THIS topic".
-           "session": a.session, "root": root, "layers": counts, "bytes": byte_totals,
-           "reproducible": repro, "conclusions": _snapshot_of(concs),
-           "copied": copied}
+    # ‼️ FILLED FROM THE TEMPLATE, not assembled here. `template/ara/ara.json`
+    # carries the key set and the reasoning for each field -- including why
+    # `session` exists at all: without it the only association between an
+    # artifact and the cards it covers is `built_at` vs a settlement timestamp,
+    # a comparison that answers "is there a NEWER artifact" and never "is there
+    # one for THIS topic". This was the one record type in MLClaw built as an
+    # inline dict, so its fields had nowhere to be documented and nothing could
+    # assert its shape.
+    rec = _record_template()
+    rec.update({
+        "built_at": now_utc(), "project": os.path.basename(os.path.abspath(project)),
+        "session": a.session, "root": root, "layers": counts, "bytes": byte_totals,
+        "reproducible": repro, "conclusions": _snapshot_of(concs),
+        "copied": copied})
     atomic_write_json(os.path.join(out, "ara.json"), rec)
 
     payload = {"ok": True, "artifact": md, "out": out,

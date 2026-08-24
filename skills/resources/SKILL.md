@@ -13,7 +13,7 @@ Follow `<mlclaw_root>/references/skill-graph.md` -> "Workflow State Protocol": p
 
 ## Prerequisites
 
-Ensure `{WORKSPACE}/resources.json` exists (workspace root, shared across projects). If not, copy from `lifecycle/resources.json`. Resolve `{WORKSPACE}` from `project.json -> workspace` or parent directory of project root.
+Ensure `{WORKSPACE}/resources.json` exists (workspace root, shared across projects). If not, copy from `template/resources.json`. Resolve `{WORKSPACE}` from `project.json -> workspace` or parent directory of project root.
 
 ## What to search
 

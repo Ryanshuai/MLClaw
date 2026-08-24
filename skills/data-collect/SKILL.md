@@ -95,7 +95,7 @@ When the source *is* a capture rig it is worth it, for one asymmetry:
 
 The fact/tripwire vocabulary, and why a tripwire must never be the source of truth (watch a cheap
 proxy like a serial; read the expensive anchor live via `runtime_only`), live in the template
-`lifecycle/data/rig.json` and in `rig.py show | check | stamp` beside `collect.py`. A stamp failure
+`template/data/rig.json` and in `rig.py show | check | stamp` beside `collect.py`. A stamp failure
 never fails a pull — the bytes are already in.
 
 ## Records

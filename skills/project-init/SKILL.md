@@ -38,7 +38,7 @@ Follow `<mlclaw_root>/references/skill-graph.md` -> "Workflow State Protocol": p
 
 ## Write project.json
 
-Fixed keys, agent only modifies values. Template: `lifecycle/project.json`.
+Fixed keys, agent only modifies values. Template: `template/project.json`.
 
 Each stage has: `enabled`, `code_path` (`stages/{stage}/code`), `code_source` (`source`, `path`, `branch`, `commit`, `credentials`). Paths section: `stages`, `runs_pattern`, `artifacts_pattern`, `data_pattern`.
 
@@ -51,7 +51,7 @@ python "$MLCLAW_ROOT/scripts/project-init/init_project.py" '<project_json_string
 
 Creates directories, copies templates, writes `.gitignore`, runs git init + initial commit. `$HOME`-relative paths (project root, workspace, each stage's `code_source.path`) are rewritten to `~/`-prefixed form in `project.json` so the file survives rsync across machines.
 
-**Fallback**: if script fails, manually create directories (`stages/{stage}/code`, `runs`, `artifacts`, `data` for each enabled stage), copy JSON templates from `lifecycle/`, write .gitignore, git init + commit.
+**Fallback**: if script fails, manually create directories (`stages/{stage}/code`, `runs`, `artifacts`, `data` for each enabled stage), copy JSON templates from `template/`, write .gitignore, git init + commit.
 
 ## Clone / Link code
 

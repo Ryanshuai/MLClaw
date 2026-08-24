@@ -230,7 +230,7 @@ Ask user: "Training module tests passed. Run full training? This will take <esti
 ### Execution details
 
 If running, follow `/eval-run` Steps 1-3 (resolve sources, create run, build & execute), adapted for the refactor stage:
-- Run template: `lifecycle/refactor/refactor_run.json` (set `round` to current round number)
+- Run template: `template/refactor/refactor_run.json` (set `round` to current round number)
 - Run directory: `{PROJECT}/stages/refactor/runs/run_{YYYYMMDD}_{HHmmss}/`
 - Sources: reuse from previous round if unchanged
 - First benchmark: debug mode. Subsequent: ask user.
