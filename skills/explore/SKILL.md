@@ -8,7 +8,7 @@ description: >
   at a time, and ablates. Trigger for: what is worth borrowing, what technique are we
   missing, should we adopt X, which backbone should we use, is this improvement real, did we
   port it correctly — "什么值得借鉴", "缺什么技巧", "要不要上 X", "架构是不是太原始",
-  "换个网络试试", "选哪个模型", "把某篇论文的做法移植进来", "这版比上版好吗",
+  "换个网络试试", "选哪个模型", "网络选型", "结构还没定", "把某篇论文的做法移植进来", "这版比上版好吗",
   "这个提升是真的吗", "搬对了没有", "你看这个对吗". A parameter sweep belongs here when the parameter IS
   the hypothesis — "是不是容量不够", "这个模块没用是不是 lr 太保守", a width / depth /
   layer-count sweep — because those decide what the model is, not how to configure a

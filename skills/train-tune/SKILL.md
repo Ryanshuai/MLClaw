@@ -1,19 +1,15 @@
 ---
 name: train-tune
 description: >
-  Use this skill to run adaptive hyperparameter optimization on a model that is ALREADY
-  SETTLED — the architecture, the code, the dataset and the split are no longer in
-  question, and what is wanted is that model's best operating point. Triggers when user
-  wants to find best hyperparameters via an agent-driven search loop: the agent reads
-  prior runs, identifies coverage gaps, hypothesizes the next config, launches trials,
-  observes outcomes, and iterates until budget exhausted or coverage sufficient. Trigger
-  for: "tune lr / hyperparams", "find best config", "search hyperparams", "调超参",
-  "tune 一下", "搜个 lr", "模型定了，调一下参", "在这个模型上调到最好". This is the HPO
-  loop skill, and its unit is one point in runtime_params. NOT for deciding what the model
-  should BE — architecture, components, network selection, or a parameter change that is
-  itself the hypothesis ("是不是容量不够", "这个模块没用是不是 lr 太保守") — all of that is
-  /explore, and it comes first. Not for single-trial training (that's /train-run).
-  Auto-invokes /train-tune-report at session close.
+  ADAPTIVE HPO on a model that is ALREADY SETTLED: the structure, the code, the dataset and
+  the split are no longer in question, and what is wanted is that model's best operating
+  point. The agent reads the prior runs, finds where coverage is thin, hypothesises the next
+  config, launches trials, watches them, and iterates until the budget is spent or coverage
+  is enough. Its unit is one point in `runtime_params`. Trigger for: tune the lr, find the
+  best config, search the hyperparameter space, sweep a schedule / batch size / weight decay
+  on a fixed network, get the most out of the model we already have — "调超参", "tune 一下",
+  "搜个 lr", "模型定了，调一下参", "模型稳定了，大概调一下", "在这个模型上调到最好",
+  "跑个网格找最优配置". Auto-invokes /train-tune-report at session close.
 ---
 
 # /train-tune — Adaptive HPO Loop
@@ -40,6 +36,19 @@ model at all. Same layer, different unit and different precondition: `/explore`'
 **proposal** (a hypothesis, a pre-registered criterion, a guardrail, a kill condition), and
 it runs while the architecture is still in question, which is exactly when this skill must
 not.
+
+> Not for deciding what the model should BE — that is `/explore`, and it comes first. Not
+> for a single training run (`/train-run`). ‼️ **A parameter change that is itself the
+> hypothesis belongs to `/explore`, not here**: "是不是容量不够", "这个模块没用是不是 lr
+> 太保守", a width / depth / layer-count sweep. Those phrases used to live in this skill's
+> `description` as an exclusion, which put `/explore`'s own trigger words inside this
+> skill's trigger surface — the matcher then saw one string in two places and could not
+> tell the two skills apart. Measured 2026-08-20: those two phrases appeared **verbatim in
+> both descriptions**. This was `/explore`'s single nearest neighbour in the whole
+> catalogue (cosine 0.59 against a 0.43 runner-up) — not the catalogue maximum, which is
+> `/data` ↔ `/data-check` at 0.62 and is a different problem. Removing the exclusion took
+> the pair to 0.51 and moved three of `/explore`'s six real episodes up a rank, with none
+> down. An exclusion belongs where it is read *after* routing, which is here.
 
 ‼️ **The test is not "parameters vs code."** Ask: *after this change, are the earlier runs
 still answers to the same question?* Yes → here. No → `/explore`, because the question
