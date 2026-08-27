@@ -184,6 +184,39 @@ the user being repetitive; it is the record having no person-facing face.
 change and on every question about progress**. It is one call and it cannot be wrong; a sentence
 composed from memory can be, and after a compaction usually is.
 
+### The board — the one format this answer is given in
+
+‼️ **One row per open OR claimed card, every time, in this order.** Copy the shape; it is a
+template, not an example:
+
+| 卡 | 臂 | 谁在做 | 改了什么 | 服务哪个问题 | 状态 | 开了多久 |
+|---|---|---|---|---|---|---|
+| `N07` | `sexc` | agent-2 · `explore/N07` | `--sku_ce`（只在 decoder 匹配分支） | `N04` SKU 怎么注入 | 🔵 running | 5h12m |
+| `N09` | — | agent-1 · `explore/N09` | `--sku_xattn`，宽度 256→512 | `N04` SKU 怎么注入 | 🟨 已认领，代码在写 | 22m |
+| `N11` | `sm1` | — | lr 3e-5 | ‼️ **无** | 🟪 filled，等判决 | 6h04m |
+
+Every column comes off `graph.py status -> arms` and nothing is composed from memory:
+`id` · `run_id` · `claimed_by` + `branch` · `varies` · `serves` · derived `state` · `since`.
+
+**Four rules, each paid for once:**
+
+1. ‼️ **Never drop a row and never abbreviate the list.** If the user named five arms, all five
+   appear. A table covering some of them is a wrong answer wearing a right answer's format.
+2. ‼️ **A missing field is written as `—`, and `serves: null` is written as ‼️ 无** — that one is
+   not a formatting gap, it is an arm running for no registered question, and it is the shape
+   drift takes. It must be visible in the row, not silently blank.
+3. ‼️ **When more than one agent appears in `谁在做`, group the rows by agent** and say plainly
+   which of them is you. The user cannot see into anybody's context window, including yours.
+4. **Render it again after every state change**, not only when asked.
+
+**Why a fixed format at all**: the recorded round had two agents and a third machine, and the
+user spent about a third of their turns re-assembling this table by hand — *"B 和 C 分别是什么"*
+(four times), *"C 是另一个 agent 在做吧，你和他是 decoupled 对吧"*, *"sm sl sm1 sl1 sb 都是什么
+配置"*, *"另外的机器也在起，为什么你要问呢，你俩不应该是并行正交的实验吗"*. **Every one of those
+answers was already on the cards** — `claim --by` had recorded the owner at the moment each arm
+was taken. What was missing was a reader, and then a shape everybody renders the same way, so the
+answer does not change wording between agents and the user has to re-learn it each time.
+
 ‼️ **No count anywhere on this page, deliberately.** The one that used to be here said *seven
 plus two* while `check` emitted more than twenty, and it had already been wrong for several
 rounds — a number with two authors, drifting exactly the way `/agent-refactor` calls a double
@@ -1325,7 +1358,9 @@ The first is still outstanding, and **without it Stage 6.5 is only a rule on pap
 
 The tables in this document are the templates; copy them directly: the **four-state audit table**
 (Stage 1), the **proposal table** (Stage 3), the **three axes + tiers + instrument matrix** (Stage 3.5),
-the **interface comparison table** (Stage 4.5), and the **default verdict table** (Adjudication).
+the **interface comparison table** (Stage 4.5), the **default verdict table** (Adjudication), and
+**the board** (the one shape a progress answer is given in — see "Where are we" above; it is the
+only template rendered *to the user* rather than written into a record).
 
 Two references:
 

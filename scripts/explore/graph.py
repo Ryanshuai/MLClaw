@@ -2346,6 +2346,16 @@ def cmd_status(a):
         # takes: in that round an lr sweep and a depth line opened while the
         # registered question was where SKU gets injected, and the user cut both
         # by hand.
+        # ‼️ `claimed_by` and the branch are on this row because more than one agent
+        # works one graph, and the person driving them cannot see into any of their
+        # context windows. The recorded round: two agents plus a third machine, and
+        # the user asking "B 和 C 分别是什么" four times, then "C 是另一个 agent 在做
+        # 吧，你和他是 decoupled 对吧" -- questions `claim --by` already had the answer
+        # to since the moment each arm was taken. A claim with no reader is a lock,
+        # not a record.
+        # A CLAIMED card is included even before it runs: the code is being written in
+        # its tree right now, which is exactly the work the other agent is doing and
+        # exactly what a duplicate would collide with.
         "arms": [{"id": n["id"],
                   "run_id": n.get("run_id"),
                   "varies": n.get("varies"),
@@ -2353,8 +2363,13 @@ def cmd_status(a):
                   "title": n.get("title"),
                   "state": derived[n["id"]],
                   "tier": n.get("tier"),
+                  "claimed_by": (n.get("tree") or {}).get("claimed_by"),
+                  "branch": (n.get("tree") or {}).get("branch"),
                   "since": _opened_at(n)}
-                 for n in nodes if derived[n["id"]] in ("running", "filled")],
+                 for n in nodes
+                 if derived[n["id"]] in ("running", "filled")
+                 or ((n.get("tree") or {}).get("claimed_by")
+                     and derived[n["id"]] not in SETTLED)],
         "updated_at": graph.get("updated_at"),
     })
 

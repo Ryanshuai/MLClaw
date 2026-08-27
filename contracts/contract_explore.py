@@ -2157,5 +2157,50 @@ class AnArmsNameHasAnExpansionOnTheRecord(GraphCase):
         self.assertIsNone(arm["serves"])
 
 
+class TheBoardShowsWhoIsDoingWhat(GraphCase):
+    """SKILL.md -> "Where are we" / the board, and references/experiment-graph.md §1.5.
+
+    More than one agent works one graph and the person driving them cannot see into
+    any of their context windows. `claim --by` has recorded the owner since the moment
+    each arm was taken -- what was missing was a reader. The recorded round: two agents
+    plus a third machine, and "B 和 C 分别是什么" asked four times.
+    """
+
+    def _claimed(self, nid, by):
+        self.g("claim", "--id", nid, "--by", by)
+
+    def test_status_names_the_agent_holding_each_arm(self):
+        nid = self.add_complete()
+        self._claimed(nid, "agent-2")
+        self.run_it(nid, run_id="sexc")
+        self.g("set", "--id", nid, "--set", "varies=--sku_ce")
+        rc, out, _ = self.g("status")
+        row = [a for a in out["arms"] if a["id"] == nid][0]
+        self.assertEqual(row["claimed_by"], "agent-2",
+                         "a claim nobody can read is a lock, not a record")
+        self.assertTrue(row["branch"], "the tree is half of 'who is doing what'")
+
+    def test_a_claimed_card_appears_before_it_runs(self):
+        """The other agent is writing code in that tree right now -- that IS the work
+        in progress, and it is what a duplicate would collide with."""
+        nid = self.add_complete()
+        self._claimed(nid, "agent-1")
+        rc, out, _ = self.g("status")
+        ids = [a["id"] for a in out["arms"]]
+        self.assertIn(nid, ids)
+        row = [a for a in out["arms"] if a["id"] == nid][0]
+        self.assertIsNone(row["run_id"], "claimed but not yet launched")
+
+    def test_a_settled_card_drops_off_the_board(self):
+        nid = self.add_complete()
+        self._claimed(nid, "agent-1")
+        self.run_it(nid)
+        self.fill(nid)
+        self.g("close", "--id", nid, "--verdict", "won")
+        rc, out, _ = self.g("status")
+        self.assertNotIn(nid, [a["id"] for a in out["arms"]],
+                         "the board is what is OPEN; settled work is the record's job")
+
+
 if __name__ == "__main__":
     unittest.main()
