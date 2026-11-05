@@ -198,7 +198,7 @@ def _service_account_tenant(cfg, whoami):
         return [parent]
     if not parent.startswith("project-"):
         return []
-    proj, err = neb(cfg, "iam", "project", "get", "--id", parent)
+    proj, err = neb(cfg, "iam", "v2", "project", "get", "--id", parent)
     if err:
         die(classify(err), f"service account parent project get failed: {err}")
     tenant = ((proj or {}).get("metadata") or {}).get("parent_id") or ""
@@ -214,7 +214,7 @@ def projects(cfg, allow_regions=None):
     """
     out, unreached = [], []
     for tenant in tenants(cfg):
-        items, err = paged(cfg, "iam", "project", "list", "--parent-id", tenant)
+        items, err = paged(cfg, "iam", "v2", "project", "list", "--parent-id", tenant)
         if err:
             unreached.append({"scope": tenant, "why": f"project list: {err[:160]}"})
             continue
@@ -227,6 +227,19 @@ def projects(cfg, allow_regions=None):
                 continue
             out.append((meta["id"], meta.get("name") or "?", region, tenant))
     return out, unreached
+
+
+def tenant_regions(cfg, tenant):
+    """Regions the tenant has projects in. `audit-event list` became region-scoped
+    (2026-11-05: "Bad ListAuditEventRequest.region: value is required"), so a tenant's
+    log is read once per region — and a region left out is a silent hole, hence the
+    list comes from the projects, not from a constant."""
+    items, err = paged(cfg, "iam", "v2", "project", "list", "--parent-id", tenant)
+    if err:
+        return [], err
+    regions = {((i.get("spec") or {}).get("region") or (i.get("status") or {}).get("region"))
+               for i in items}
+    return sorted(r for r in regions if r), None
 
 
 # --- capacity -----------------------------------------------------------------
@@ -771,14 +784,25 @@ def creators(cfg, window_s):
     end = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now))
     by_id, checked, unreached = {}, [], []
     for tenant in tenants(cfg):
-        items, err = paged(cfg, "audit", "v2", "audit-event", "list",
-                           "--parent-id", tenant, "--start", start, "--end", end,
-                           "--event-type", "control_plane",
-                           "--filter", "action = 'CREATE'", "--page-size", "500")
-        if err:
-            unreached.append({"scope": tenant, "why": f"audit CREATE: {err[:160]}"})
+        regions, rerr = tenant_regions(cfg, tenant)
+        if rerr:
+            unreached.append({"scope": tenant, "why": f"project list: {rerr[:160]}"})
             continue
-        checked.append(tenant)
+        items, ok_any = [], False
+        for region in regions:
+            got, err = paged(cfg, "audit", "v2", "audit-event", "list",
+                             "--parent-id", tenant, "--region", region,
+                             "--start", start, "--end", end,
+                             "--event-type", "control_plane",
+                             "--filter", "action = 'CREATE'", "--page-size", "500")
+            if err:
+                unreached.append({"scope": f"{tenant}@{region}",
+                                  "why": f"audit CREATE: {err[:160]}"})
+                continue
+            ok_any = True
+            items += got
+        if ok_any:
+            checked.append(tenant)
         for ev in items:
             row = _audit_row(ev)
             # Only completed events. A CREATE that ended in ERROR left nothing behind —
@@ -932,16 +956,22 @@ def v_history(args):
 
     for tenant in tenants(cfg):
         ok_any = False
-        for action in AUDIT_ACTIONS:
+        regions, rerr = tenant_regions(cfg, tenant)
+        if rerr:
+            unreached.append({"scope": tenant, "why": f"project list: {rerr[:160]}"})
+            continue
+        for region in regions:
+          for action in AUDIT_ACTIONS:
             # `--page-size` above 500 is rejected outright, and the whole call is
-            # tenant-scoped: a project id fails with InvalidNid, the exact inverse of
-            # every resource list in this file.
+            # tenant-scoped (a project id fails with InvalidNid) AND region-scoped
+            # (no --region fails "region: value is required", 2026-11-05).
             items, err = paged(cfg, "audit", "v2", "audit-event", "list",
-                               "--parent-id", tenant, "--start", start, "--end", end,
+                               "--parent-id", tenant, "--region", region,
+                               "--start", start, "--end", end,
                                "--event-type", "control_plane",
                                "--filter", f"action = '{action}'", "--page-size", "500")
             if err:
-                unreached.append({"scope": f"{tenant}/{action}", "why": err[:160]})
+                unreached.append({"scope": f"{tenant}@{region}/{action}", "why": err[:160]})
                 continue
             ok_any = True
             events += [r for r in (_audit_row(ev) for ev in items) if r]
