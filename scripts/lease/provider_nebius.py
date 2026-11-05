@@ -179,8 +179,30 @@ def tenants(cfg):
     profile = data.get("user_profile") or data
     ids = [t["tenant_id"] for t in (profile.get("tenants") or []) if t.get("tenant_id")]
     if not ids:
+        ids = _service_account_tenant(cfg, data)
+    if not ids:
         die("permission", "whoami returned no tenants")
     return ids
+
+
+def _service_account_tenant(cfg, whoami):
+    """A service account's `whoami` lists no tenants — only the SA itself, whose
+    parent is a PROJECT. Its scope is that project's tenant, so resolve it one hop up.
+    Without this every unattended sweep (which must use a service account: federated
+    tokens cannot refresh headlessly) dies with "whoami returned no tenants".
+    Measured 2026-11-05 on anyware-laptop, profile `ci`."""
+    meta = (((whoami.get("service_account_profile") or {}).get("info") or {})
+            .get("metadata") or {})
+    parent = meta.get("parent_id") or ""
+    if parent.startswith("tenant-"):
+        return [parent]
+    if not parent.startswith("project-"):
+        return []
+    proj, err = neb(cfg, "iam", "project", "get", "--id", parent)
+    if err:
+        die(classify(err), f"service account parent project get failed: {err}")
+    tenant = ((proj or {}).get("metadata") or {}).get("parent_id") or ""
+    return [tenant] if tenant.startswith("tenant-") else []
 
 
 def projects(cfg, allow_regions=None):
